@@ -333,15 +333,16 @@ pub fn pair_up(xs: &[String], ys: &[String], floor: f64) -> HashMap<usize, usize
 /// plus the extra words whisper heard after each word.
 pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>) {
     let sw: Vec<&str> = text.split_whitespace().collect();
-    // which word owns each token: numbers spelled over several words become one token ("nineteen fifty-nine")
+    // which word owns each token: numbers spelled over several words become one token ("nineteen fifty-nine");
+    // a longer prefix can have fewer tokens ("two hundred and" is [#200, and], "two hundred and fifty" is [#250]),
+    // so the tokens a later word merges away are given back
     let mut owner: Vec<usize> = vec![];
-    let mut token_count = 0;
     for word_index in 0..sw.len() {
         let tokens_so_far = toks(&sw[..=word_index].join(" ")).len();
-        for _ in token_count..tokens_so_far.max(token_count) {
+        owner.truncate(tokens_so_far);
+        while owner.len() < tokens_so_far {
             owner.push(word_index);
         }
-        token_count = token_count.max(tokens_so_far);
     }
     let (text_tokens, heard_tokens) = (toks(text), toks(heard));
     let mut wrong: Vec<Option<String>> = vec![None; sw.len()];
@@ -516,6 +517,16 @@ mod tests {
         assert_eq!(got[0], ("suite".into(), "suit".into()));
         assert!(got[1..].iter().all(|(_, heard_as)| heard_as.is_empty()), "{got:?}");
         assert!(got.iter().any(|(word, _)| word == "hundred"));
+    }
+
+    #[test]
+    fn a_misheard_word_after_a_number_is_the_only_one_wrong() {
+        // "two hundred and" has one token more than "two hundred and fifty": the word after must still own its token
+        assert_eq!(
+            heard("about two hundred and fifty tests passed", "about two hundred and fifty tasks passed"),
+            vec![("tests".into(), "tasks".into())]
+        );
+        assert_eq!(heard("I have one point three apples today", "I have one point three apple today"), vec![("apples".into(), "apple".into())]);
     }
 
     #[test]
