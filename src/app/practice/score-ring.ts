@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ringDash } from '../shared/ring';
 import { band } from '../shared/score';
 
 /** The score of a try as a ring: the share of words that came out clear. */
@@ -73,8 +74,5 @@ import { band } from '../shared/score';
 export class ScoreRing {
   readonly score = input.required<number>();
   protected readonly tone = computed(() => band(this.score()));
-  protected readonly dash = computed(() => {
-    const circumference = 2 * Math.PI * 27;
-    return `${(circumference * this.score()) / 100} ${circumference}`;
-  });
+  protected readonly dash = computed(() => ringDash(this.score(), 100));
 }

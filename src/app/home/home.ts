@@ -6,6 +6,7 @@ import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
 import { Logo } from '../shared/logo';
+import { ringDash } from '../shared/ring';
 import { band } from '../shared/score';
 
 interface Card {
@@ -97,8 +98,7 @@ export class Home {
   protected ring(card: Card) {
     const total = card.parts.length || 1;
     const done = card.parts.filter((part) => card.t.scores[part.key]).length;
-    const len = 2 * Math.PI * 27;
-    return { done, total, dash: `${(len * done) / total} ${len}` };
+    return { done, total, dash: ringDash(done, total) };
   }
 
   protected start() {
