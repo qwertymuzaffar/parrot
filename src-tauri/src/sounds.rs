@@ -15,10 +15,10 @@ static DICT: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
     for line in raw.lines() {
         let line = line.split('#').next().unwrap_or("");
         let mut parts = line.split_whitespace();
-        if let Some(word) = parts.next() {
-            if !word.contains('(') {
-                out.insert(word.to_string(), parts.map(String::from).collect());
-            }
+        if let Some(word) = parts.next()
+            && !word.contains('(')
+        {
+            out.insert(word.to_string(), parts.map(String::from).collect());
         }
     }
     out

@@ -207,7 +207,7 @@ fn compose(run: &[String]) -> String {
 
 /// Lower-case word tokens; runs of number words or digits become one "#digits" token.
 pub fn toks(text: &str) -> Vec<String> {
-    let lowered = text.to_lowercase().replace('\u{2019}', "'").replace('-', " ").replace(':', " ");
+    let lowered = text.to_lowercase().replace('\u{2019}', "'").replace(['-', ':'], " ");
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
@@ -370,9 +370,8 @@ pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>
                 // each word paired with the heard word most like it: "suite of about two hundred" heard as "suit"
                 // gives "suite" -> "suit", and the rest were not heard
                 let pairs = pair_up(&text_tokens[i1..i2], &heard_tokens[j1..j2], 0.4);
-                for token_index in i1..i2 {
-                    let word_index = owner[token_index];
-                    let heard_as = pairs.get(&(token_index - i1)).map(|heard_offset| clean(&heard_tokens[j1 + heard_offset])).unwrap_or_default();
+                for (text_offset, &word_index) in owner[i1..i2].iter().enumerate() {
+                    let heard_as = pairs.get(&text_offset).map(|heard_offset| clean(&heard_tokens[j1 + heard_offset])).unwrap_or_default();
                     wrong[word_index] = Some(match &wrong[word_index] {
                         Some(so_far) if !so_far.is_empty() && !heard_as.is_empty() => format!("{so_far} {heard_as}"),
                         Some(so_far) if !so_far.is_empty() => so_far.clone(),

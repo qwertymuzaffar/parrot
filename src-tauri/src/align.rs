@@ -187,7 +187,7 @@ impl Aligner {
 fn viterbi(em: &[[f32; TOKENS]], targets: &[usize]) -> Option<Vec<Option<usize>>> {
     let frames = em.len();
     let states = 2 * targets.len() + 1; // blank, t0, blank, t1, ... blank
-    let label = |state: usize| if state % 2 == 0 { BLANK } else { targets[state / 2] };
+    let label = |state: usize| if state.is_multiple_of(2) { BLANK } else { targets[state / 2] };
     let needed = targets.len() + targets.windows(2).filter(|pair| pair[0] == pair[1]).count();
     if frames < needed {
         return None;
