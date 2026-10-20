@@ -543,6 +543,30 @@ describe('the practice state', () => {
       expect(app.error()).toBe('No microphone: Permission denied. Allow Parrot to use the microphone.');
     });
 
+    it('scores a take against the part it was started on: moving on is refused meanwhile', async () => {
+      engine.nextCheck = attempt('t1', 'How are you?', 80);
+      await app.toggleRecord();
+      app.next();
+      await settle();
+      await app.setMode('whole');
+      expect([app.index(), app.text()?.mode, recorder.recording()]).toEqual([1, 'sentences', true]);
+      await app.toggleRecord();
+      await settle();
+      expect(engine.calls).toContain('check How are you?');
+      expect([app.index(), app.result()?.id]).toEqual([1, 't1']);
+    });
+
+    it('drops a take, unscored, on going home or opening a text', async () => {
+      await app.toggleRecord();
+      app.home();
+      await settle();
+      expect([app.view(), recorder.recording(), recorder.owner()]).toEqual(['home', false, null]);
+      await app.open(ID, 2);
+      await app.toggleRecord();
+      await app.open(ID, 0);
+      expect([app.index(), recorder.recording(), engine.calls.some((call) => call.startsWith('check'))]).toEqual([0, false, false]);
+    });
+
     it("doesn't show a take's score on a part left while it was scored", async () => {
       engine.nextCheck = attempt('t1', 'How are you?', 80);
       await app.toggleRecord();

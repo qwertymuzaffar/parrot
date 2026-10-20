@@ -2,7 +2,7 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { Clips } from './clips';
 import { Engine } from './engine';
 import { errorMessage, Library } from './library';
-import { Attempt, AttemptSummary, Mode, Part, PartScore } from './models';
+import { Attempt, AttemptSummary, Mode, Part, PartScore, TextItem } from './models';
 import { Playback } from './playback';
 import { micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
@@ -37,6 +37,8 @@ export class Session {
   readonly bars = 92;
 
   private failure = signal<string | null>(null);
+  /** the text and part a take is of, from its start: it is scored against them, wherever the user has gone since */
+  private taking: { text: TextItem; part: Part } | null = null;
   /** what went wrong last: with this text, else with the library */
   readonly error = computed(() => this.failure() ?? this.library.error());
 
@@ -67,6 +69,7 @@ export class Session {
     const text = this.library.texts().find((item) => item.id === id);
     if (!text) return;
     this.playback.stop();
+    await this.dropTake();
     this.recorder.warm();
     this.failure.set(null);
     this.openId.set(id);
@@ -84,6 +87,7 @@ export class Session {
 
   home() {
     this.playback.stop();
+    void this.dropTake();
     this.failure.set(null);
     this.view.set('home');
     this.library.loadTexts();
@@ -92,7 +96,7 @@ export class Session {
 
   async setMode(mode: Mode) {
     const text = this.text();
-    if (!text || text.mode === mode) return;
+    if (!text || text.mode === mode || this.takeUnderWay()) return;
     const w0 = this.part()?.w0 ?? 0;
     this.playback.stop();
     await this.library.setMode(text.id, mode);
@@ -113,7 +117,8 @@ export class Session {
   async select(partIndex: number) {
     const text = this.text();
     const parts = this.parts();
-    if (!text || partIndex < 0 || partIndex >= parts.length) return;
+    // a take of the part under way stays on its part: moving on would record one part as another
+    if (!text || partIndex < 0 || partIndex >= parts.length || this.takeUnderWay()) return;
     this.playback.stop();
     this.index.set(partIndex);
     this.result.set(null);
@@ -160,11 +165,25 @@ export class Session {
 
   // ---- recording
 
+  /** A take of the part is under way: being recorded, or the microphone readied for it. */
+  private takeUnderWay() {
+    return this.recorder.owner() === 'part';
+  }
+
+  /** A take of the part that can't be kept (the user went elsewhere): dropped, not scored. */
+  private async dropTake() {
+    if (this.takeUnderWay()) await this.recorder.stop();
+    this.taking = null;
+  }
+
   async toggleRecord() {
     // the microphone may be busy with a word said alone (WordPractice): that take is not this one to finish
-    if (this.recorder.owner() === 'part' && this.recorder.recording()) return this.finishRecording();
-    if (this.recorder.owner() || this.checking() || !this.part()) return;
+    if (this.takeUnderWay() && this.recorder.recording()) return this.finishRecording();
+    const text = this.text();
+    const part = this.part();
+    if (this.recorder.owner() || this.checking() || !text || !part) return;
     this.playback.stop();
+    this.taking = { text, part };
     try {
       await this.recorder.start('part');
       this.failure.set(null);
@@ -174,8 +193,8 @@ export class Session {
   }
 
   private async finishRecording() {
-    const text = this.text()!;
-    const part = this.part()!;
+    const { text, part } = this.taking!;
+    this.taking = null;
     // scoring from the click on, while the take's last moment is still being recorded
     this.checking.set(true);
     const blob = await this.recorder.stop();
