@@ -284,7 +284,8 @@
 })();
 
 // The download buttons follow the visitor's system. Each links to a fixed file name in the latest release (the release
-// workflow uploads them), so downloads work without asking the GitHub API first.
+// workflow uploads them), so downloads work without asking the GitHub API first. A Mac's chip (Apple or Intel) cannot be
+// told from the browser, so on macOS the main button leads to both files; phones and tablets get no system of their own.
 (function () {
   var icons = {
     mac: '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.8c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.8 1.2 1.8 2.6 3.1 2.5 1.3-.1 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8 0 0-2.6-1-2.6-4.2zM13.9 5.2c.7-.8 1.2-2 1-3.2-1 .1-2.2.7-2.9 1.5-.6.7-1.2 1.9-1.1 3 1.2.1 2.3-.5 3-1.3z"/></svg>',
@@ -292,25 +293,33 @@
     linux: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m7 9 3 2-3 2M12 14h4M8 22h8"/></svg>'
   };
   var names = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
+  var RELEASES = 'https://github.com/qwertymuzaffar/parrot/releases';
   document.querySelectorAll('[data-icon]').forEach(function (el) { el.innerHTML = icons[el.dataset.icon]; });
   var ua = navigator.userAgent;
-  var os = /Win/i.test(ua) ? 'windows' : /Linux|X11/i.test(ua) && !/Android/i.test(ua) ? 'linux' : 'mac';
+  // iPadOS reports itself as a Mac, but a Mac has no touch screen
+  var mobile = /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  var os = mobile ? null : /Win/i.test(ua) ? 'windows' : /Linux|X11/i.test(ua) ? 'linux' : /Mac/i.test(ua) ? 'mac' : null;
   document.querySelectorAll('.os-row').forEach(function (r) { r.classList.toggle('me', r.dataset.os === os); });
-  document.getElementById('main-icon').innerHTML = icons[os];
-  document.getElementById('main-label').textContent = 'Download for ' + names[os];
+  if (os) {
+    document.getElementById('main-icon').innerHTML = icons[os];
+    document.getElementById('main-label').textContent = 'Download for ' + names[os];
+  }
 
-  var mine = document.querySelector('.os-row[data-os="' + os + '"] a[data-asset][href]');
+  var mine = os && os !== 'mac' && document.querySelector('.os-row[data-os="' + os + '"] a[data-asset][href]');
   if (mine) { document.getElementById('main-download').href = mine.href; document.getElementById('main-download').setAttribute('download', ''); }
 
+  var note = document.getElementById('release-note');
+  function link(href, text) { var a = document.createElement('a'); a.href = href; a.textContent = text; return a; }
   fetch('https://api.github.com/repos/qwertymuzaffar/parrot/releases/latest')
     .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(function (rel) {
-      document.getElementById('release-note').innerHTML = 'Version ' + rel.tag_name.replace(/^v/, '') + ', released ' +
-        new Date(rel.published_at).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) +
-        ' · <a href="' + rel.html_url + '">Release notes</a> · <a href="https://github.com/qwertymuzaffar/parrot/releases">All releases</a>';
+      var notes = /^https:\/\/github\.com\/qwertymuzaffar\/parrot\/releases\//.test(rel.html_url) ? rel.html_url : RELEASES;
+      note.replaceChildren('Version ' + String(rel.tag_name).replace(/^v/, '') + ', released ' +
+        new Date(rel.published_at).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ',
+        link(notes, 'Release notes'), ' · ', link(RELEASES, 'All releases'));
     })
     .catch(function () {
-      document.getElementById('release-note').innerHTML = '<a href="https://github.com/qwertymuzaffar/parrot/releases">All releases and release notes</a>';
+      note.replaceChildren(link(RELEASES, 'All releases and release notes'));
     });
 })();
 </script>
