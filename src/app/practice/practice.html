@@ -110,6 +110,11 @@
           <span class="txt" [title]="take.heard">{{ take.heard || '(nothing)' }}</span>
         </div>
       }
+      @if (playback.voiceMissing()) {
+        <p class="no-voice" role="alert">
+          No system voice found, so Parrot can't read aloud. Add an English voice in your system's settings.
+        </p>
+      }
     </section>
   }
 

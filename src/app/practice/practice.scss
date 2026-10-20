@@ -337,6 +337,13 @@ header {
   }
 }
 
+.no-voice {
+  margin: 0;
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--wrong-ink);
+}
+
 .heard-line {
   display: flex;
   align-items: baseline;

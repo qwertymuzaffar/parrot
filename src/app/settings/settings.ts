@@ -30,6 +30,9 @@ import { Icon } from '../shared/icon';
               <app-icon name="play" [size]="14" /> Try
             </button>
           </div>
+          @if (!sound.canSpeak()) {
+            <p class="bad">No system voice found. Add an English voice in your system's settings.</p>
+          }
         </section>
 
         <section>

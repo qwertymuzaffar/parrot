@@ -137,6 +137,7 @@ class FakeEngine extends Engine {
 class FakeSound {
   readonly playing = signal<Track | null>(null);
   readonly paused = signal(false);
+  readonly voiceMissing = signal(false);
   log: string[] = [];
   onWord?: (charIndex: number) => void;
   onTime?: (seconds: number) => void;

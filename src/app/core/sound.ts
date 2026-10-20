@@ -15,6 +15,13 @@ export class Sound {
   /** which sentence-length track is playing, if any (single words don't count) */
   readonly playing = signal<Track | null>(null);
   readonly paused = signal(false);
+  /** whether the system has a voice to read with (some list theirs a moment after start) */
+  readonly canSpeak = signal(false);
+  /** the reference voice was asked for when there was none: the interface says so, rather than staying silent */
+  readonly voiceMissing = signal(false);
+
+  /** the system's speech synthesis: some webviews have none (WebKitGTK built without it) */
+  private synthesis = typeof speechSynthesis === 'undefined' ? null : speechSynthesis;
 
   private player = new window.Audio();
   private clip = new window.Audio();
@@ -32,11 +39,14 @@ export class Sound {
         const prefIndex = pref.findIndex((name) => voice.name.includes(name));
         return (prefIndex < 0 ? 50 : prefIndex) + (voice.localService ? 0 : 100);
       };
-      const list = speechSynthesis.getVoices().filter((voice) => voice.lang.startsWith('en'));
+      const all = this.synthesis?.getVoices() ?? [];
+      this.canSpeak.set(all.length > 0);
+      if (all.length) this.voiceMissing.set(false);
+      const list = all.filter((voice) => voice.lang.startsWith('en'));
       this.voices.set(list.sort((left, right) => rank(left) - rank(right)));
       if (!list.some((voice) => voice.name === this.voiceName()) && list.length) this.voiceName.set(list[0].name);
     };
-    speechSynthesis.onvoiceschanged = load;
+    if (this.synthesis) this.synthesis.onvoiceschanged = load;
     load();
     this.player.onended = () => this.ended();
   }
@@ -49,6 +59,11 @@ export class Sound {
   /** The reference reading of a text by the system voice; onWord gets the character index of each word. */
   speak(text: string, rate = 1, track: Track | null = 'ref', onWord?: (charIndex: number) => void): Promise<void> {
     this.stop();
+    // without a voice nothing is read (some systems never even end the reading): the interface says why instead
+    if (!this.canSpeak()) {
+      this.voiceMissing.set(true);
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
       this.synth = { text, rate, onWord, from: 0, at: 0 };
       this.onEnd = resolve;
@@ -77,7 +92,7 @@ export class Sound {
       if (this.utterance === utterance) this.ended();
     };
     this.utterance = utterance;
-    speechSynthesis.speak(utterance);
+    this.synthesis!.speak(utterance);
   }
 
   /** A whole recording (or a clip URL) with a time callback for the highlight. */
@@ -113,7 +128,7 @@ export class Sound {
         this.utter(this.synth!.at);
       } else {
         this.utterance = null;
-        speechSynthesis.cancel();
+        this.synthesis!.cancel();
         this.paused.set(true);
       }
     } else if (this.player.paused) {
@@ -126,7 +141,7 @@ export class Sound {
   }
 
   stop() {
-    speechSynthesis.cancel();
+    this.synthesis?.cancel();
     this.player.pause();
     this.clip.pause();
     const end = this.onEnd;

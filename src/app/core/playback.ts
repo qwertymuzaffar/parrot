@@ -16,6 +16,8 @@ export class Playback {
   /** which sentence-length track is playing, if any, and whether it is paused */
   readonly playing = this.sound.playing.asReadonly();
   readonly paused = this.sound.paused.asReadonly();
+  /** the reference was asked for, and the system has no voice to read it */
+  readonly voiceMissing = this.sound.voiceMissing.asReadonly();
   /** the word being spoken: in the reference line and in your own */
   readonly nowRef = signal<number | null>(null);
   readonly nowMine = signal<number | null>(null);
