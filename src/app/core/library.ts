@@ -38,6 +38,7 @@ export class Library {
     try {
       const added = await this.engine.addText(text, title, mode);
       this.texts.update((list) => [added, ...list.filter((item) => item.id !== added.id)]);
+      this.error.set(null);
       return added;
     } catch (error) {
       this.error.set(errorMessage(error));

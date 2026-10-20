@@ -317,6 +317,12 @@ describe('the practice state', () => {
       expect(app.view()).toBe('home');
     });
 
+    it('forgets why a text was refused once one is added', async () => {
+      await app.add('  ', 'Empty', 'whole');
+      await app.add('One more text.', 'New', 'whole');
+      expect(app.error()).toBeNull();
+    });
+
     it('renames a text, the open one too', async () => {
       await app.open(ID);
       await app.rename(ID, 'Hi');

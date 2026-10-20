@@ -54,6 +54,9 @@
           }
         </div>
       </div>
+      @if (library.error() && library.engineState() !== 'down') {
+        <p class="error" role="alert">{{ library.error() }}</p>
+      }
       <div class="go">
         <span class="hint">
           @if (words()) {
@@ -63,7 +66,7 @@
             Parrot reads it to you, then listens to you.
           }
         </span>
-        <button class="btn primary" [disabled]="!words()" (click)="start()">Start practising</button>
+        <button class="btn primary" [disabled]="!words() || adding()" (click)="start()">Start practising</button>
       </div>
     </section>
 

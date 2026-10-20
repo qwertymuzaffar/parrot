@@ -79,10 +79,11 @@ export class Session {
     await this.build(text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
   }
 
-  /** Add a text and open it. */
+  /** Add a text and open it; null if the engine would not add it (library.error() says why). */
   async add(text: string, title: string, mode: Mode) {
     const added = await this.library.add(text, title, mode);
     if (added) await this.open(added.id);
+    return added;
   }
 
   home() {

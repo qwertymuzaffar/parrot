@@ -36,6 +36,8 @@ export class Home {
   protected draft = signal('');
   protected draftTitle = signal('');
   protected draftMode = signal<Mode>('sentences');
+  /** the draft is with the engine, being added */
+  protected adding = signal(false);
   protected renaming = signal<string | null>(null);
   protected confirming = signal<string | null>(null);
 
@@ -101,10 +103,16 @@ export class Home {
     return { done, total, dash: ringDash(done, total) };
   }
 
-  protected start() {
+  protected async start() {
     const text = this.draft().trim();
-    if (!text) return;
-    this.session.add(text, this.draftTitle(), this.draftMode());
+    if (!text || this.adding()) return;
+    this.adding.set(true);
+    try {
+      // the draft stays until the text is added: if the engine won't add it, it can be tried again
+      if (!(await this.session.add(text, this.draftTitle(), this.draftMode()))) return;
+    } finally {
+      this.adding.set(false);
+    }
     this.draft.set('');
     this.draftTitle.set('');
   }
