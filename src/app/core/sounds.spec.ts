@@ -1,4 +1,4 @@
-import { soundUnits } from './sounds';
+import { leastSure, soundUnits } from './sounds';
 
 const texts = (word: string) =>
   soundUnits(
@@ -30,5 +30,19 @@ describe('soundUnits', () => {
 
   it('has no level without scores', () => {
     expect(soundUnits('it', []).map((unit) => unit.level)).toEqual(['none', 'none']);
+  });
+});
+
+describe('leastSure', () => {
+  it('finds the sound heard least surely', () => {
+    // "out" from a real take, 97% for the word: ou 99%, t 95%
+    const least = leastSure(soundUnits('out', [0.988, 0.973, 0.948]));
+    expect(least?.text).toBe('t');
+    expect(least?.score).toBeCloseTo(0.948);
+  });
+
+  it('skips sounds without a score, and finds none when nothing was scored', () => {
+    expect(leastSure(soundUnits('it', [null, 0.6]))?.text).toBe('t');
+    expect(leastSure(soundUnits('it', []))).toBeNull();
   });
 });

@@ -14,6 +14,8 @@ const VOWEL = /[aeiou]/;
  * 0.9 or more and a sound said as another one under 0.1. */
 export const WARN_BELOW = 0.5;
 export const BAD_BELOW = 0.2;
+/** from here on a sound was said clearly: what is left up to 100% is the aligner's own doubt, not a mistake */
+export const CLEAR_FROM = 0.9;
 
 export function level(score: number | null): SoundUnit['level'] {
   if (score == null) return 'none';
@@ -61,4 +63,11 @@ export function soundUnits(word: string, letters: (number | null)[]): SoundUnit[
     const score = known.length ? Math.max(...known) : null;
     return { text: unit.text, score, level: level(score) };
   });
+}
+
+/** The sound heard least surely, of those that were scored. */
+export function leastSure(units: SoundUnit[]): SoundUnit | null {
+  return units
+    .filter((unit) => unit.score != null)
+    .reduce<SoundUnit | null>((least, unit) => (!least || unit.score! < least.score! ? unit : least), null);
 }

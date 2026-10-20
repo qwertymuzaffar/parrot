@@ -3,7 +3,7 @@ import { Engine } from '../core/engine';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
-import { soundUnits } from '../core/sounds';
+import { CLEAR_FROM, leastSure, soundUnits } from '../core/sounds';
 import { bare } from '../core/split';
 import { escapeHtml } from '../shared/html';
 import { Icon } from '../shared/icon';
@@ -248,11 +248,21 @@ export class WordCard {
       .filter((unit) => unit.level === 'bad' || unit.level === 'warn')
       .sort((first, second) => first.score! - second.score!)
       .slice(0, 2);
-    if (!off.length) return '';
+    // a misheard or unclear word is explained below instead
+    if (!off.length) return this.mine()?.status === 'good' ? this.closest() : '';
     const said = (unit: (typeof off)[0]) =>
       `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
     return 'The ' + off.map(said).join(', and the ') + '.';
   });
+  /** with no sound off: the one heard least surely, so a score short of 100% is never left unexplained */
+  private closest() {
+    const least = leastSure(this.units());
+    if (!least) return '';
+    const sound = `<b>${escapeHtml(least.text)}</b>`;
+    return least.score! >= CLEAR_FROM
+      ? `Every sound came through clearly: the least sure was the ${sound} (${this.pct(least.score)}%), and ${this.pct(CLEAR_FROM)}% and up is a clear sound.`
+      : `The ${sound} was the least sure (${this.pct(least.score)}%): use Compare to hear how yours differs.`;
+  }
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */
   protected readonly why = computed(() => {
     const mine = this.mine();
