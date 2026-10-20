@@ -42,6 +42,7 @@ export class WordPractice {
   readonly error = signal<string | null>(null);
   /** a take of the word is being recorded (not one of the part) */
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'word');
+  readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'word');
   /** the word the take being recorded is of */
   private taking: PractisedWord | null = null;
 

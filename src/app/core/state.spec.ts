@@ -188,7 +188,9 @@ class FakeRecorder {
   readonly recording = signal(false);
   readonly owner = signal<TakeFor | null>(null);
   readonly elapsed = signal(0);
+  readonly preparing = signal(false);
   micAllowed = true;
+  warm() {}
   async start(owner: TakeFor) {
     if (!this.micAllowed) throw new Error('Permission denied');
     this.owner.set(owner);

@@ -18,7 +18,7 @@ import { WordCard } from './word-card';
   templateUrl: './practice.html',
   styleUrl: './practice.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown)': 'key($event)', '(window:resize)': 'fit()' },
+  host: { '(document:keydown)': 'key($event)', '(document:pointerdown)': 'recorder.warm()', '(window:resize)': 'fit()' },
 })
 export class Practice {
   protected session = inject(Session);
@@ -156,6 +156,7 @@ export class Practice {
   };
 
   protected key(event: KeyboardEvent) {
+    this.recorder.warm();
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
     if (document.querySelector('dialog[open]')) return;

@@ -30,6 +30,7 @@ export class Session {
   readonly checking = signal(false);
   /** a take of the part is being recorded (not one of a word said alone) */
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'part');
+  readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'part');
   readonly selected = signal<number | null>(null);
   /** the loudness of the shown try, for the waveform (null while loading) */
   readonly peaks = signal<number[] | null>(null);
@@ -66,6 +67,7 @@ export class Session {
     const text = this.library.texts().find((item) => item.id === id);
     if (!text) return;
     this.playback.stop();
+    this.recorder.warm();
     this.failure.set(null);
     this.openId.set(id);
     this.view.set('practice');

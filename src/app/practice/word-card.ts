@@ -133,6 +133,8 @@ import { SoundUnits } from './sound-units';
       >
         @if (practice.recording()) {
           <app-icon name="stop" [size]="14" /> Stop <span class="time">{{ recorder.elapsed().toFixed(1) }} s</span>
+        } @else if (practice.preparing()) {
+          <span class="spinner"></span> Getting the microphone ready…
         } @else if (practice.checking()) {
           <span class="spinner"></span> Scoring…
         } @else {

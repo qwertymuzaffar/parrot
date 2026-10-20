@@ -1,5 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { wav } from './clips';
+import { readSetting, writeSetting } from './settings';
+import { Settling, SETTLE_MAX_MS } from './settling';
 
 /** Collects the microphone's samples on the audio thread and posts them in blocks. */
 const CAPTURE = `
@@ -21,6 +23,8 @@ export const micError = (error: unknown) => `No microphone: ${(error as Error).m
 
 /** how long a take goes on after Stop is clicked */
 const AFTER_STOP_MS = 250;
+/** how long the microphone stays open with nothing recorded and no one about, before it is let go */
+const IDLE_MS = 120_000;
 
 /**
  * The microphone: one take at a time, with its length and a level for the meter. A take is plain PCM made into a
@@ -29,6 +33,8 @@ const AFTER_STOP_MS = 250;
 @Injectable({ providedIn: 'root' })
 export class Recorder {
   readonly recording = signal(false);
+  /** a take is waiting for the microphone to settle (see Settling) */
+  readonly preparing = signal(false);
   /** who the take is for, from the click that starts it until it stops: only they stop it */
   readonly owner = signal<TakeFor | null>(null);
   readonly elapsed = signal(0);
@@ -40,6 +46,9 @@ export class Recorder {
   readonly device = signal('');
 
   private stream: MediaStream | null = null;
+  private opening: Promise<void> | null = null;
+  private settling: Settling | null = null;
+  private lastWarm = 0;
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -53,30 +62,38 @@ export class Recorder {
 
   /** Open the microphone and the capture (the slow part, a second or more the first time); it then stays open for
    * two minutes after a take, so the next take starts at once. */
-  private async open(): Promise<void> {
-    if (this.ctx) return;
+  private open(): Promise<void> {
+    if (this.ctx) return Promise.resolve();
+    this.opening ??= this.openNow().finally(() => (this.opening = null));
+    return this.opening;
+  }
+
+  private async openNow(): Promise<void> {
     // made and resumed while the click still counts: after waiting for the microphone (a second or more, longer with
     // the permission prompt) WebKit keeps a new audio context suspended, and nothing would be recorded
     const ctx = new AudioContext();
     // not awaited: a resume that isn't allowed may never settle, and start() gives up when no sound arrives
     ctx.resume().catch(() => {});
     try {
-      // the microphone as it is: the engine evens out a take's level and filters its rumble itself, while the
-      // browser's gain control and noise suppression adapt as they go, so a take right after the microphone opens
-      // came out 25 dB quieter for its first seconds, then cut out and jumped to full level
+      // with the browser's gain control and noise suppression, which the engine's thresholds were set with; without
+      // them the noise floor came out 8 dB higher, and the quiet start of a take is the capture coming up (Settling),
+      // not them
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
     } catch (error) {
       ctx.close();
       throw error;
     }
+    writeSetting('mic', 'granted');
     const url = URL.createObjectURL(new Blob([CAPTURE], { type: 'text/javascript' }));
     await ctx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
     const source = ctx.createMediaStreamSource(this.stream);
     const node = new AudioWorkletNode(ctx, 'parrot-capture', { numberOfInputs: 1, numberOfOutputs: 0 });
+    const settling = new Settling();
     node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      settling.block(event.data, performance.now());
       if (this.capturing) {
         this.blocks.push(event.data);
         this.flowing?.();
@@ -93,7 +110,22 @@ export class Recorder {
     source.connect(this.analyser);
     this.ctx = ctx;
     this.node = node;
+    this.settling = settling;
     this.device.set(this.stream.getAudioTracks()[0]?.label ?? '');
+  }
+
+  /** Open the microphone ahead of a take, so it has settled by the time one starts: on opening a text, and whenever
+   * the user does something while practising. Only once the microphone has been allowed, so the permission prompt
+   * comes with the first take, not with opening a text. */
+  warm() {
+    if (this.capturing) return;
+    const now = performance.now();
+    if (this.ctx && now - this.lastWarm < 10_000) return;
+    if (readSetting<'granted' | ''>('mic', '') !== 'granted') return;
+    this.lastWarm = now;
+    clearTimeout(this.idle);
+    this.idle = window.setTimeout(() => this.close(), IDLE_MS);
+    this.open().catch(() => {});
   }
 
   /** Let the microphone go (the system's microphone light turns off). */
@@ -101,7 +133,7 @@ export class Recorder {
     this.node?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     this.ctx?.close();
-    this.ctx = this.node = this.analyser = this.stream = null;
+    this.ctx = this.node = this.analyser = this.stream = this.settling = null;
     this.preroll = [];
   }
 
@@ -112,10 +144,17 @@ export class Recorder {
     this.owner.set(owner);
     try {
       await this.open();
+      // the capture comes up quiet and switches to its real level a few seconds in: a take must not start before
+      if (!this.settling!.settled) {
+        this.preparing.set(true);
+        await Promise.race([this.settling!.done(), new Promise((resolve) => setTimeout(resolve, SETTLE_MAX_MS + 1000))]);
+      }
     } catch (error) {
       this.capturing = false;
       this.owner.set(null);
       throw error;
+    } finally {
+      this.preparing.set(false);
     }
     const ctx = this.ctx!;
     if (ctx.state !== 'running') await ctx.resume();
@@ -167,7 +206,7 @@ export class Recorder {
     this.capturing = false;
     const rate = this.ctx.sampleRate;
     this.owner.set(null);
-    this.idle = window.setTimeout(() => this.close(), 120_000);
+    this.idle = window.setTimeout(() => this.close(), IDLE_MS);
     const total = this.blocks.reduce((sum, block) => sum + block.length, 0);
     const pcm = new Int16Array(total);
     let at = 0;

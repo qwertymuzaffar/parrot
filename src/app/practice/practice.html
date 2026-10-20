@@ -70,7 +70,10 @@
 
         <div class="take">
           <div class="caption">
-            @if (recording()) {
+            @if (session.preparing()) {
+              <span class="spinner"></span>
+              <span>Getting the microphone ready…</span>
+            } @else if (recording()) {
               <span class="rec-dot"></span>
               <b class="rec">Recording</b>
               <span class="time">{{ recorder.elapsed().toFixed(1) }} s</span>
