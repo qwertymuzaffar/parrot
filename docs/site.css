@@ -190,6 +190,12 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.0
 .os-row.me { background: linear-gradient(90deg, var(--green-soft), transparent 70%); margin: 0 -16px; padding-left: 16px; padding-right: 16px; border-radius: 0; }
 .os-row.me .you { display: inline-block; }
 .you { display: none; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--green); margin-left: 4px; }
+.first-open { margin-top: 22px; padding: 18px 20px; background: var(--cream); border: 1px solid var(--line); border-radius: 16px; font-size: 14.5px; color: var(--ink-2); }
+.first-open h3 { font-family: var(--font); font-size: 15.5px; letter-spacing: -0.01em; color: var(--ink); }
+.first-open p { margin: 6px 0 0; }
+.first-open ul { margin: 8px 0 0; padding-left: 20px; }
+.first-open li + li { margin-top: 4px; }
+.first-open b { color: var(--ink); font-weight: 600; }
 .release-note { margin-top: 18px; font-size: 14px; color: var(--muted); }
 .release-note a { color: var(--ink-2); }
 
