@@ -5,6 +5,7 @@ import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { soundUnits } from '../core/sounds';
 import { bare } from '../core/split';
+import { escapeHtml } from '../shared/html';
 import { Icon } from '../shared/icon';
 
 /** One word up close: how it should sound, what went wrong, and buttons to hear it both ways. */
@@ -239,30 +240,28 @@ export class WordCard {
   });
   /** the weakest one or two sounds, in words */
   protected readonly weak = computed(() => {
-    const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
     const off = this.units()
       .filter((unit) => unit.level === 'bad' || unit.level === 'warn')
       .sort((first, second) => first.score! - second.score!)
       .slice(0, 2);
     if (!off.length) return '';
-    const said = (unit: (typeof off)[0]) => `<b>${esc(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
+    const said = (unit: (typeof off)[0]) => `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
     return 'The ' + off.map(said).join(', and the ') + '.';
   });
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */
   protected readonly why = computed(() => {
     const mine = this.mine();
-    const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!);
     if (!mine) return this.session.result() ? '' : 'Record this part to see how you said it.';
     const out: string[] = [];
     if (mine.status === 'wrong') {
-      out.push(mine.heard ? `Heard as <b>“${esc(mine.heard)}”</b>.` : 'Speech recognition did not hear this word.');
+      out.push(mine.heard ? `Heard as <b>“${escapeHtml(mine.heard)}”</b>.` : 'Speech recognition did not hear this word.');
       // a capitalised word inside the sentence is usually a name
       const wordIndex = this.index() ?? 0;
       if (wordIndex > 0 && /^[A-Z]/.test(this.word()))
         out.push('Names are often heard as a common word: if you say it the way its owners do, you can ignore the red here.');
     }
     if (mine.status !== 'good' && mine.ref != null) out.push(`The reference voice scored ${this.pct(mine.ref)}% here.`);
-    if (mine.extra) out.push(`Extra words heard after it: “${esc(mine.extra)}”.`);
+    if (mine.extra) out.push(`Extra words heard after it: “${escapeHtml(mine.extra)}”.`);
     return out.join(' ');
   });
 
