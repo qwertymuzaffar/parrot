@@ -71,11 +71,16 @@ pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
     let frame = (rate / 100).max(1); // 10 ms
     let levels: Vec<f32> =
         pcm.samples.chunks(frame).map(|chunk| db((chunk.iter().map(|sample| sample * sample).sum::<f32>() / chunk.len() as f32).sqrt())).collect();
-    let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
+    // a frame as loud as it stays over 30 ms: a click (the microphone starting, a key) is shorter than any sound of
+    // speech, and must not set the level the voice is measured against
+    let sustained: Vec<f32> = (0..levels.len())
+        .map(|frame_index| levels[frame_index.saturating_sub(1)..(frame_index + 2).min(levels.len())].iter().cloned().fold(f32::MAX, f32::min))
+        .collect();
+    let loudest = sustained.iter().cloned().fold(f32::MIN, f32::max);
     // voice: frames within 35 dB of the loudest, and above the noise floor of a quiet room
     let threshold = (loudest - 35.0).max(-55.0);
-    let first = levels.iter().position(|&level| level > threshold)?;
-    let last = levels.iter().rposition(|&level| level > threshold)?;
+    let first = sustained.iter().position(|&level| level > threshold)?;
+    let last = sustained.iter().rposition(|&level| level > threshold)?;
     if loudest < -50.0 {
         return None;
     }
@@ -152,6 +157,21 @@ mod tests {
         assert!((out.seconds() - 1.4).abs() < 0.1, "{}", out.seconds());
         let peak = out.samples.iter().fold(0f32, |running_peak, sample| running_peak.max(sample.abs()));
         assert!(peak > 0.1 && peak <= 0.95, "{peak}");
+    }
+
+    #[test]
+    fn a_click_as_the_microphone_starts_does_not_hide_the_voice() {
+        // the first take after the microphone opens can begin with a loud click: it must not set the level that
+        // decides what is voice, or a normal voice falls under it and the take is thrown away as silence
+        let rate = 48000;
+        let mut samples = vec![0.0001f32; rate as usize / 20];
+        // a 5 ms click at nearly full scale (broadband: the high-pass filter doesn't take it out)
+        samples.extend((0..rate as usize / 200).map(|sample_index| if sample_index % 2 == 0 { 0.9f32 } else { -0.9 }));
+        samples.extend(vec![0.0001f32; rate as usize / 4]);
+        samples.extend(tone(rate, 1.0, 0.01)); // a quiet voice, 40 dB under the click
+        samples.extend(vec![0.0001f32; rate as usize / 2]);
+        let out = clean(Pcm { samples, rate }).expect("the voice is kept");
+        assert!(out.seconds() > 1.0, "{}", out.seconds());
     }
 
     #[test]
