@@ -40,7 +40,10 @@ export class Practice {
   protected readonly result = computed(() => (this.recording() ? null : this.session.result()));
   protected readonly counts = computed(() => {
     const words = this.result()?.words ?? [];
-    return { wrong: words.filter((word) => word.status === 'wrong').length, unclear: words.filter((word) => word.status === 'unclear').length };
+    return {
+      wrong: words.filter((word) => word.status === 'wrong').length,
+      unclear: words.filter((word) => word.status === 'unclear').length,
+    };
   });
   protected readonly delta = computed(() => {
     const result = this.result();
@@ -117,7 +120,13 @@ export class Practice {
   }
 
   protected pace(wpm: number) {
-    return wpm < 120 ? 'slow · aim 140–165' : wpm < 140 ? 'a little slow · aim 140–165' : wpm > 175 ? 'fast · aim 140–165' : 'a natural pace';
+    return wpm < 120
+      ? 'slow · aim 140–165'
+      : wpm < 140
+        ? 'a little slow · aim 140–165'
+        : wpm > 175
+          ? 'fast · aim 140–165'
+          : 'a natural pace';
   }
 
   /** the keyboard shortcuts while practising */

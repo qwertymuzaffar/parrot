@@ -14,13 +14,14 @@ describe('sentences', () => {
 });
 
 describe('shortRanges', () => {
-  const cut = (sentence: string) =>
-    shortRanges(sentence.split(' ')).map(([start, end]) =>
-      sentence.split(' ').slice(start, end).join(' '),
-    );
+  const cut = (sentence: string) => shortRanges(sentence.split(' ')).map(([start, end]) => sentence.split(' ').slice(start, end).join(' '));
 
   it('cuts a long sentence at commas', () => {
-    expect(cut('I have about eleven years of professional experience in software development, since 2015, and almost all of it is front-end work.')).toEqual([
+    expect(
+      cut(
+        'I have about eleven years of professional experience in software development, since 2015, and almost all of it is front-end work.',
+      ),
+    ).toEqual([
       'I have about eleven years of professional experience in software development,',
       'since 2015, and almost all of it is front-end work.',
     ]);

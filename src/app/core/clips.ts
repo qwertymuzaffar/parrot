@@ -52,12 +52,7 @@ export class Clips {
     const fade = Math.min(Math.floor(rate * 0.012), Math.floor(src.length / 4));
     const pcm = new Int16Array(src.length + Math.floor(rate * 0.05)); // a little silence after, so the end isn't clipped
     for (let sampleIndex = 0; sampleIndex < src.length; sampleIndex++) {
-      const gain =
-        sampleIndex < fade
-          ? sampleIndex / fade
-          : sampleIndex > src.length - fade
-            ? (src.length - sampleIndex) / fade
-            : 1;
+      const gain = sampleIndex < fade ? sampleIndex / fade : sampleIndex > src.length - fade ? (src.length - sampleIndex) / fade : 1;
       pcm[sampleIndex] = Math.max(-1, Math.min(1, src[sampleIndex] * gain)) * 32767;
     }
     return URL.createObjectURL(wav(pcm, rate));

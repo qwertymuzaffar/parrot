@@ -23,8 +23,7 @@ export class Sound {
   private onEnd: (() => void) | null = null;
   private synthMode = false;
   private utterance: SpeechSynthesisUtterance | null = null;
-  private synth: { text: string; rate: number; onWord?: (charIndex: number) => void; from: number; at: number } | null =
-    null;
+  private synth: { text: string; rate: number; onWord?: (charIndex: number) => void; from: number; at: number } | null = null;
 
   constructor() {
     const load = () => {
@@ -35,8 +34,7 @@ export class Sound {
       };
       const list = speechSynthesis.getVoices().filter((voice) => voice.lang.startsWith('en'));
       this.voices.set(list.sort((left, right) => rank(left) - rank(right)));
-      if (!list.some((voice) => voice.name === this.voiceName()) && list.length)
-        this.voiceName.set(list[0].name);
+      if (!list.some((voice) => voice.name === this.voiceName()) && list.length) this.voiceName.set(list[0].name);
     };
     speechSynthesis.onvoiceschanged = load;
     load();
@@ -90,7 +88,10 @@ export class Sound {
       this.onTime = onTime ?? null;
       this.onEnd = resolve;
       this.playing.set(track);
-      this.player.play().then(() => this.tick()).catch(() => this.ended());
+      this.player
+        .play()
+        .then(() => this.tick())
+        .catch(() => this.ended());
     });
   }
 

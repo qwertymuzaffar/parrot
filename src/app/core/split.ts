@@ -31,8 +31,7 @@ export function shortRanges(words: string[]): [number, number][] {
     }
     // not before "and TypeScript," when a comma follows a word or two later: that cut comes a moment later
     let toPunct = 0;
-    while (wordIndex + 1 + toPunct < words.length && !isPunct(words[wordIndex + 1 + toPunct]))
-      toPunct++;
+    while (wordIndex + 1 + toPunct < words.length && !isPunct(words[wordIndex + 1 + toPunct])) toPunct++;
     const cut =
       (isPunct(words[wordIndex]) && len >= 4 && left >= 3) ||
       (len >= 10 && CONJUNCTION.test(words[wordIndex + 1]) && left >= 4 && toPunct > 2) ||
@@ -63,8 +62,7 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
     const ranges = mode === 'short' ? shortRanges(words) : [[0, words.length] as [number, number]];
     ranges.forEach(([start, end], rangeIndex) => {
       out.push({
-        label:
-          ranges.length > 1 ? `${sentenceIndex + 1}.${rangeIndex + 1}` : `${sentenceIndex + 1}`,
+        label: ranges.length > 1 ? `${sentenceIndex + 1}.${rangeIndex + 1}` : `${sentenceIndex + 1}`,
         text: words.slice(start, end).join(' '),
         sub: rangeIndex > 0,
         w0: w0 + start,

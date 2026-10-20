@@ -79,7 +79,8 @@ export class Waveform {
       const end = ((barIndex + 1) / peaks.length) * duration;
       const wordIndex = words.findIndex((word) => word.t && word.t[0] < end && word.t[1] > start);
       const word = words[wordIndex];
-      const tone: Tone = wordIndex >= 0 && wordIndex === now ? 'now' : word?.status === 'wrong' ? 'wrong' : word?.status === 'unclear' ? 'unclear' : 'plain';
+      const tone: Tone =
+        wordIndex >= 0 && wordIndex === now ? 'now' : word?.status === 'wrong' ? 'wrong' : word?.status === 'unclear' ? 'unclear' : 'plain';
       return { h: height(peak), tone };
     });
   });

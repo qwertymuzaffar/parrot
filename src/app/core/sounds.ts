@@ -31,16 +31,13 @@ export function soundUnits(word: string, letters: (number | null)[]): SoundUnit[
     .filter((entry) => /\p{L}|'/u.test(entry.char) && entry.char !== "'");
   const units: { text: string; scores: (number | null)[] }[] = [];
   const low = (charIndex: number) => chars[charIndex]?.char.toLowerCase() ?? '';
-  for (let start = 0; start < chars.length; ) {
+  for (let start = 0; start < chars.length;) {
     let size = 1;
     if (VOWEL.test(low(start))) {
       while (VOWEL.test(low(start + size))) size++;
       if (low(start + size) === 'g' && low(start + size + 1) === 'h') size += 2;
       else if (/[yw]/.test(low(start + size)) && !VOWEL.test(low(start + size + 1))) size++;
-    } else if (
-      PAIRS.has(low(start) + low(start + 1)) ||
-      (low(start) === low(start + 1) && low(start) !== '')
-    ) {
+    } else if (PAIRS.has(low(start) + low(start + 1)) || (low(start) === low(start + 1) && low(start) !== '')) {
       size = 2;
     }
     // a final e after a consonant is silent: it goes with the sound before it ("paste": p, a, s, te)

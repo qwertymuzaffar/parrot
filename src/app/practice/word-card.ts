@@ -54,7 +54,9 @@ import { Icon } from '../shared/icon';
       <div class="take">
         <div class="take-head">
           <span class="eyebrow">Your take</span>
-          <span class="pct" [class]="mine()!.status"><b>{{ pct(mine()!.score) }}%</b> sound match</span>
+          <span class="pct" [class]="mine()!.status"
+            ><b>{{ pct(mine()!.score) }}%</b> sound match</span
+          >
         </div>
         @if (units().length) {
           <div class="units">
@@ -236,7 +238,9 @@ export class WordCard {
     const mine = this.mine();
     if (!mine?.letters) return [];
     const units = soundUnits(mine.w, mine.letters);
-    return mine.status === 'good' ? units.map((unit) => ({ ...unit, level: unit.level === 'none' ? unit.level : ('good' as const) })) : units;
+    return mine.status === 'good'
+      ? units.map((unit) => ({ ...unit, level: unit.level === 'none' ? unit.level : ('good' as const) }))
+      : units;
   });
   /** the weakest one or two sounds, in words */
   protected readonly weak = computed(() => {
@@ -245,7 +249,8 @@ export class WordCard {
       .sort((first, second) => first.score! - second.score!)
       .slice(0, 2);
     if (!off.length) return '';
-    const said = (unit: (typeof off)[0]) => `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
+    const said = (unit: (typeof off)[0]) =>
+      `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
     return 'The ' + off.map(said).join(', and the ') + '.';
   });
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */

@@ -30,7 +30,11 @@ import { matchesSearch } from '../shared/search';
     <span class="eyebrow">Your texts</span>
     <nav aria-label="Your texts">
       @for (text of shown(); track text.id) {
-        <button [class.on]="text.id === session.text()?.id" [attr.aria-current]="text.id === session.text()?.id ? 'page' : null" (click)="session.open(text.id)">
+        <button
+          [class.on]="text.id === session.text()?.id"
+          [attr.aria-current]="text.id === session.text()?.id ? 'page' : null"
+          (click)="session.open(text.id)"
+        >
           <span class="what">
             <span class="t">{{ text.title }}</span>
             <span class="m">{{ text.words }} words · {{ text.practised ? text.practised + ' practised' : 'new' }}</span>

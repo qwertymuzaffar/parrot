@@ -274,7 +274,11 @@ h3 {
 }
 
 kbd {
-  font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    600 11px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   color: var(--ink-2);
 }
 

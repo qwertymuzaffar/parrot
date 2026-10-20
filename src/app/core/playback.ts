@@ -38,20 +38,14 @@ export class Playback {
       offset += word.length + 1;
     }
     return this.sound
-      .speak(text, this.rate(), 'ref', (charIndex) =>
-        this.nowRef.set(starts.findLastIndex((start) => start <= charIndex)),
-      )
+      .speak(text, this.rate(), 'ref', (charIndex) => this.nowRef.set(starts.findLastIndex((start) => start <= charIndex)))
       .then(() => this.nowRef.set(null));
   }
 
   playMine(attempt: Attempt) {
     return this.sound
       .play(this.engine.audioUrl(attempt.audio), 'mine', (seconds) =>
-        this.nowMine.set(
-          attempt.words.findIndex(
-            (word) => word.t && seconds >= word.t[0] - 0.02 && seconds <= word.t[1] + 0.06,
-          ),
-        ),
+        this.nowMine.set(attempt.words.findIndex((word) => word.t && seconds >= word.t[0] - 0.02 && seconds <= word.t[1] + 0.06)),
       )
       .then(() => this.nowMine.set(null));
   }
@@ -68,7 +62,11 @@ export class Playback {
 
   /** My take, then the reference reading. */
   compare(attempt: Attempt, text: string) {
-    return this.chain(() => this.playMine(attempt), 400, () => this.playReference(text));
+    return this.chain(
+      () => this.playMine(attempt),
+      400,
+      () => this.playReference(text),
+    );
   }
 
   stop() {
@@ -94,7 +92,11 @@ export class Playback {
   /** A word as I said it, then as it should sound. */
   compareWord(attempt: Attempt, wordIndex: number, word: string) {
     // my word is the chain's first step: it must not start a chain of its own, or the chain stops after it
-    return this.chain(() => this.cutMyWord(attempt, wordIndex), 350, () => this.sayWord(word));
+    return this.chain(
+      () => this.cutMyWord(attempt, wordIndex),
+      350,
+      () => this.sayWord(word),
+    );
   }
 
   private cutMyWord(attempt: Attempt, wordIndex: number) {

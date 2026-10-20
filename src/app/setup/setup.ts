@@ -14,15 +14,18 @@ const MB = 1_000_000;
       <app-logo [size]="64" />
       <h1>Getting Parrot ready</h1>
       <p class="lead">
-        Parrot listens with two speech models that run on your computer, so your voice never leaves it. They are
-        downloaded once, about {{ totalMb() }} MB, and then Parrot works offline.
+        Parrot listens with two speech models that run on your computer, so your voice never leaves it. They are downloaded once, about
+        {{ totalMb() }} MB, and then Parrot works offline.
       </p>
 
       <ul class="models">
         @for (model of models(); track model.key) {
           <li>
             <div class="row">
-              <span class="what"><b>{{ model.name }}</b><span>{{ model.role }}</span></span>
+              <span class="what"
+                ><b>{{ model.name }}</b
+                ><span>{{ model.role }}</span></span
+              >
               <span class="size">{{ model.ready ? 'Ready' : model.mb + ' MB' }}</span>
             </div>
             <div class="bar"><i [style.width.%]="model.ready ? 100 : model.pct"></i></div>
@@ -37,7 +40,10 @@ const MB = 1_000_000;
       <button class="btn primary" [disabled]="busy()" (click)="start()">
         {{ busy() ? 'Downloading…' : error() ? 'Try again' : 'Download and start' }}
       </button>
-      <p class="fine">The models come from Hugging Face (Whisper, MIT licence) and from Parrot's GitHub releases (wav2vec2 trained on Common Voice, Apache 2.0).</p>
+      <p class="fine">
+        The models come from Hugging Face (Whisper, MIT licence) and from Parrot's GitHub releases (wav2vec2 trained on Common Voice, Apache
+        2.0).
+      </p>
     </div>
   `,
   styles: `

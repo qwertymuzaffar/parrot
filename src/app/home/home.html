@@ -34,9 +34,22 @@
         <span class="lbl">Practise it as</span>
         <div class="modes" role="group" aria-label="Practise as">
           @for (mode of modes; track mode.id) {
-            <button type="button" [class.on]="draftMode() === mode.id" [attr.aria-pressed]="draftMode() === mode.id" (click)="draftMode.set(mode.id)">
+            <button
+              type="button"
+              [class.on]="draftMode() === mode.id"
+              [attr.aria-pressed]="draftMode() === mode.id"
+              (click)="draftMode.set(mode.id)"
+            >
               <b>{{ mode.label }}</b>
-              <span>{{ words() ? mode.unit(counts()[mode.id]) : mode.id === 'whole' ? 'in one go' : mode.id === 'sentences' ? 'one at a time' : 'cut at commas' }}</span>
+              <span>{{
+                words()
+                  ? mode.unit(counts()[mode.id])
+                  : mode.id === 'whole'
+                    ? 'in one go'
+                    : mode.id === 'sentences'
+                      ? 'one at a time'
+                      : 'cut at commas'
+              }}</span>
             </button>
           }
         </div>
@@ -44,7 +57,8 @@
       <div class="go">
         <span class="hint">
           @if (words()) {
-            {{ words() }} words · about {{ words() < 150 ? Math.max(5, Math.round((words() / 150) * 60)) + ' s' : Math.round(words() / 150) + ' min' }} to read
+            {{ words() }} words · about
+            {{ words() < 150 ? Math.max(5, Math.round((words() / 150) * 60)) + ' s' : Math.round(words() / 150) + ' min' }} to read
           } @else {
             Parrot reads it to you, then listens to you.
           }
@@ -57,7 +71,10 @@
       <div class="head">
         <span class="eyebrow">This week</span>
         @if (library.activity(); as activity) {
-          <span class="hint">{{ activity.tries }} {{ activity.tries === 1 ? 'try' : 'tries' }}{{ activity.average != null ? ' · avg ' + activity.average + '%' : '' }}</span>
+          <span class="hint"
+            >{{ activity.tries }} {{ activity.tries === 1 ? 'try' : 'tries'
+            }}{{ activity.average != null ? ' · avg ' + activity.average + '%' : '' }}</span
+          >
         }
       </div>
       <div class="bars">
@@ -76,7 +93,9 @@
     <div class="heading">
       <h1>Your texts</h1>
       @if (library.texts().length) {
-        <span class="hint">{{ library.texts().length }} {{ library.texts().length === 1 ? 'text' : 'texts' }} · {{ practisedParts() }} parts practised</span>
+        <span class="hint"
+          >{{ library.texts().length }} {{ library.texts().length === 1 ? 'text' : 'texts' }} · {{ practisedParts() }} parts practised</span
+        >
       }
     </div>
 
@@ -142,8 +161,12 @@
                 <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
                 <button class="btn danger small" (click)="remove(card.t)">Delete</button>
               } @else {
-                <button class="btn ghost small icon" (click)="renaming.set(card.t.id)" aria-label="Rename"><app-icon name="edit" [size]="15" /></button>
-                <button class="btn ghost small icon" (click)="confirming.set(card.t.id)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                <button class="btn ghost small icon" (click)="renaming.set(card.t.id)" aria-label="Rename">
+                  <app-icon name="edit" [size]="15" />
+                </button>
+                <button class="btn ghost small icon" (click)="confirming.set(card.t.id)" aria-label="Delete">
+                  <app-icon name="trash" [size]="15" />
+                </button>
               }
             </span>
           </div>

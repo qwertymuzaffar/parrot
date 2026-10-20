@@ -49,9 +49,7 @@ describe('TauriEngine', () => {
     mockConvertFileSrc('macos');
     const engine = new TauriEngine();
     await engine.info();
-    expect(engine.audioUrl('/files/texts/95e3ac5665/p-1/take.wav')).toBe(
-      engine.audioUrl('texts/95e3ac5665/p-1/take.wav'),
-    );
+    expect(engine.audioUrl('/files/texts/95e3ac5665/p-1/take.wav')).toBe(engine.audioUrl('texts/95e3ac5665/p-1/take.wav'));
     expect(decodeURIComponent(engine.audioUrl('texts/95e3ac5665/p-1/take.wav'))).toContain('/data/texts/95e3ac5665/p-1/take.wav');
   });
 });

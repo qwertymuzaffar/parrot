@@ -37,7 +37,19 @@ class FakeEngine extends Engine {
   calls: string[] = [];
 
   item(change: Partial<TextItem> = {}): TextItem {
-    return { id: ID, title: 'Greeting', text: TEXT, words: 8, created: '2026-10-20T10:00:00', opened: null, mode: 'sentences', practised: 0, average: null, scores: {}, ...change };
+    return {
+      id: ID,
+      title: 'Greeting',
+      text: TEXT,
+      words: 8,
+      created: '2026-10-20T10:00:00',
+      opened: null,
+      mode: 'sentences',
+      practised: 0,
+      average: null,
+      scores: {},
+      ...change,
+    };
   }
 
   async info(): Promise<never> {
@@ -491,7 +503,11 @@ describe('the practice state', () => {
     it('reports a take that could not be scored', async () => {
       await app.toggleRecord();
       await app.toggleRecord();
-      expect([app.error(), app.checking(), app.result()]).toEqual(['Nothing was heard in the recording. Is the microphone on?', false, null]);
+      expect([app.error(), app.checking(), app.result()]).toEqual([
+        'Nothing was heard in the recording. Is the microphone on?',
+        false,
+        null,
+      ]);
     });
 
     it('asks for the microphone when it is not allowed', async () => {

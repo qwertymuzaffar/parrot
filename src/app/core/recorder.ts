@@ -61,8 +61,7 @@ export class Recorder {
       } else {
         this.preroll.push(event.data);
         let buffered = this.preroll.reduce((sum, block) => sum + block.length, 0);
-        while (buffered - this.preroll[0].length > ctx.sampleRate / 2)
-          buffered -= this.preroll.shift()!.length;
+        while (buffered - this.preroll[0].length > ctx.sampleRate / 2) buffered -= this.preroll.shift()!.length;
       }
     };
     source.connect(node);

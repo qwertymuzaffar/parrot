@@ -43,9 +43,7 @@ export class Session {
     const parts = this.parts();
     const scores = this.scores();
     const done = parts.filter((part) => scores[part.key]);
-    const avg = done.length
-      ? Math.round(done.reduce((sum, part) => sum + scores[part.key].last, 0) / done.length)
-      : null;
+    const avg = done.length ? Math.round(done.reduce((sum, part) => sum + scores[part.key].last, 0) / done.length) : null;
     return { total: parts.length, done: done.length, avg };
   });
 
@@ -54,15 +52,11 @@ export class Session {
     const result = this.result();
     const history = this.history();
     const shownIndex = history.findIndex((attempt) => attempt.id === result?.id);
-    return shownIndex >= 0 && shownIndex + 1 < history.length
-      ? history[shownIndex + 1].score
-      : null;
+    return shownIndex >= 0 && shownIndex + 1 < history.length ? history[shownIndex + 1].score : null;
   });
   /** words of the shown try that came out wrong, for the reading tips */
   readonly troubleWords = computed(() =>
-    (this.result()?.words ?? [])
-      .filter((word) => word.status === 'wrong')
-      .map((word) => bare(word.w)),
+    (this.result()?.words ?? []).filter((word) => word.status === 'wrong').map((word) => bare(word.w)),
   );
 
   /** Open a text at a part: the given one, else where it was left. */
@@ -75,10 +69,7 @@ export class Session {
     this.view.set('practice');
     writeSetting('text', id);
     this.engine.updateText(id, { opened: true }).catch(() => {});
-    await this.build(
-      text.mode,
-      index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'),
-    );
+    await this.build(text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
   }
 
   /** Add a text and open it. */
@@ -110,8 +101,7 @@ export class Session {
     const parts = await splitText(text.text, mode);
     this.parts.set(parts);
     this.scores.set(await this.engine.scores(text.id).catch(() => ({})));
-    let partIndex =
-      w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
+    let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     await this.select(partIndex);
   }
@@ -174,9 +164,7 @@ export class Session {
       await this.recorder.start();
       this.failure.set(null);
     } catch (error) {
-      this.failure.set(
-        `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`,
-      );
+      this.failure.set(`No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`);
     }
   }
 
