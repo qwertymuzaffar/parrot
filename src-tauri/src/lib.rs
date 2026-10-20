@@ -44,6 +44,18 @@ impl Engine {
         work(guard.as_ref().unwrap())
     }
 
+    /// Let go of both models before the app quits. whisper.cpp frees its Metal device as the process exits and aborts
+    /// if the model's buffers are still alive then, so the recognizer must be gone first. A model busy with a take is
+    /// left as it is rather than holding up the quit.
+    fn unload(&self) {
+        if let Ok(mut recognizer) = self.recognizer.try_lock() {
+            recognizer.take();
+        }
+        if let Ok(mut aligner) = self.aligner.try_lock() {
+            aligner.take();
+        }
+    }
+
     /// Load both models ahead of the first take, so it isn't slow.
     fn warm(&self) {
         if models::ALL.iter().all(|model| models::ready(&self.models, model)) {
@@ -265,8 +277,13 @@ pub fn run() {
             check,
             download_models
         ])
-        .run(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Shared>().unload();
+            }
+        });
 }
 
 #[cfg(test)]
