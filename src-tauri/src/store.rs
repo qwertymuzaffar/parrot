@@ -309,10 +309,9 @@ impl Store {
                 for part in parts.filter(|part| part.file_name().to_string_lossy().starts_with("p-")) {
                     for file in fs::read_dir(part.path()).into_iter().flatten().flatten() {
                         let name = file.file_name().to_string_lossy().to_string();
-                        if !name.ends_with(".json") || name.len() < 8 {
-                            continue;
-                        }
-                        let Ok(day) = chrono::NaiveDate::parse_from_str(&name[..8], "%Y%m%d") else { continue };
+                        // a try's name starts with its day (20261020-...); any other file in the folder is skipped
+                        let stamp = name.get(..8).filter(|stamp| name.ends_with(".json") && stamp.bytes().all(|byte| byte.is_ascii_digit()));
+                        let Some(Ok(day)) = stamp.map(|stamp| chrono::NaiveDate::parse_from_str(stamp, "%Y%m%d")) else { continue };
                         if let Some(tries) = days.get_mut(&day) {
                             *tries += 1;
                             let attempt = fs::read_to_string(file.path()).ok().and_then(|contents| serde_json::from_str::<Attempt>(&contents).ok());
@@ -415,6 +414,20 @@ mod tests {
         let activity = store.activity();
         assert_eq!((activity.tries, activity.average, activity.days[6].tries), (1, Some(80), 1));
         assert_eq!(store.attempts(&id, "How are you?").unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_stray_file_name_does_not_break_the_activity() {
+        let dir = std::env::temp_dir().join(format!("parrot-stray-name-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", None, None).unwrap().id;
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        // a character of two bytes across the 8th byte
+        fs::write(part.join("aééééx.json"), "{}").unwrap();
+        let activity = store.activity();
+        assert_eq!((activity.tries, activity.days.iter().map(|day| day.tries).sum::<usize>()), (0, 0));
         let _ = fs::remove_dir_all(dir);
     }
 

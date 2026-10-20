@@ -13,7 +13,7 @@ mod text;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use store::{Activity, Attempt, AttemptSummary, PartScore, Store, TextItem};
 use tauri::{AppHandle, Manager, State};
 use text::WordStatus;
@@ -29,7 +29,7 @@ type Shared = Arc<Engine>;
 
 impl Engine {
     fn with_aligner<T>(&self, work: impl FnOnce(&mut align::Aligner) -> Result<T, String>) -> Result<T, String> {
-        let mut guard = self.aligner.lock().unwrap();
+        let mut guard = self.aligner.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.is_none() {
             // ONNX Runtime not starting is not the model file's fault: no download would mend it
             align::environment()?;
@@ -39,7 +39,7 @@ impl Engine {
     }
 
     fn with_recognizer<T>(&self, work: impl FnOnce(&asr::Recognizer) -> Result<T, String>) -> Result<T, String> {
-        let mut guard = self.recognizer.lock().unwrap();
+        let mut guard = self.recognizer.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.is_none() {
             *guard = Some(self.load(&models::WHISPER, asr::Recognizer::load)?);
         }
@@ -59,10 +59,10 @@ impl Engine {
     /// if the model's buffers are still alive then, so the recognizer must be gone first. A model busy with a take is
     /// left as it is rather than holding up the quit.
     fn unload(&self) {
-        if let Ok(mut recognizer) = self.recognizer.try_lock() {
+        if let Some(mut recognizer) = lock_unless_busy(&self.recognizer) {
             recognizer.take();
         }
-        if let Ok(mut aligner) = self.aligner.try_lock() {
+        if let Some(mut aligner) = lock_unless_busy(&self.aligner) {
             aligner.take();
         }
     }
@@ -115,6 +115,16 @@ impl Engine {
         };
         self.store.save_attempt(dir, &attempt)?;
         Ok(attempt)
+    }
+}
+
+/// A model's lock, unless a take holds it now. A take that panicked leaves the lock poisoned, not the model gone,
+/// so that counts as free: its model must still be let go of before quitting.
+fn lock_unless_busy<T>(mutex: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match mutex.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
     }
 }
 
@@ -255,10 +265,12 @@ fn percent_decode(encoded: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&encoded[index + 1..index + 3], 16)
-        {
+        // on bytes, not the string: the two after a % may be part of a character ("%aé")
+        let decoded = bytes
+            .get(index + 1..index + 3)
+            .filter(|hex| bytes[index] == b'%' && hex.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+        if let Some(byte) = decoded {
             out.push(byte);
             index += 3;
             continue;
@@ -496,5 +508,35 @@ mod tests {
     fn headers_decode() {
         assert_eq!(super::percent_decode("I%E2%80%99m%20here%2C%20ok"), "I’m here, ok");
         assert_eq!(super::percent_decode("plain"), "plain");
+        // a % before a character of more than one byte, or before something that is not two hex digits, stays as it is
+        assert_eq!(super::percent_decode("%aé"), "%aé");
+        assert_eq!(super::percent_decode("%é%+1%4"), "%é%+1%4");
+    }
+
+    #[test]
+    fn a_panic_in_a_model_does_not_stop_the_next_take() {
+        let models = std::env::temp_dir().join(format!("parrot-poisoned-{}", std::process::id()));
+        let engine = Engine { store: Store { data: models.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        // a panic while the model is in use poisons its lock
+        std::thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _guard = engine.recognizer.lock();
+                    panic!("transcribe panicked");
+                })
+                .join();
+        });
+        assert!(engine.recognizer.is_poisoned());
+        // the next take gets on with it (here: no model to load) instead of panicking
+        assert!(engine.with_recognizer(|_| Ok(())).is_err());
+        let poisoned = Mutex::new(Some(1));
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = poisoned.lock();
+            panic!("align panicked");
+        });
+        assert_eq!(lock_unless_busy(&poisoned).and_then(|mut slot| slot.take()), Some(1), "quitting still lets go of the model");
+        let busy = Mutex::new(Some(2));
+        let _held = busy.lock().unwrap();
+        assert!(lock_unless_busy(&busy).is_none());
     }
 }
