@@ -4,6 +4,7 @@ import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { CLEAR_FROM, leastSure, soundUnits } from '../core/sounds';
+import { soundTip } from '../core/tips';
 import { bare } from '../core/split';
 import { escapeHtml } from '../shared/html';
 import { Icon } from '../shared/icon';
@@ -67,6 +68,11 @@ import { Icon } from '../shared/icon';
         }
         @if (weak(); as weak) {
           <p class="weak" [innerHTML]="weak"></p>
+        }
+        @if (tip(); as tip) {
+          <p class="tip">
+            <b>How to say {{ tip.sound }}:</b> {{ tip.text }}
+          </p>
         }
       </div>
     }
@@ -196,6 +202,13 @@ import { Icon } from '../shared/icon';
       font-size: 13px;
       color: var(--ink-2);
     }
+    .tip {
+      margin: 0;
+      padding-left: 10px;
+      font-size: 13px;
+      color: var(--ink-2);
+      border-left: 2px solid var(--warn-line);
+    }
     .why {
       margin: 0;
       font-size: 13px;
@@ -242,6 +255,19 @@ export class WordCard {
       ? units.map((unit) => ({ ...unit, level: unit.level === 'none' ? unit.level : ('good' as const) }))
       : units;
   });
+  /** the sound to work on: the weakest that was off, else for a clear word the least sure one under a clear sound */
+  private readonly focus = computed(() => {
+    const units = this.units();
+    const off = units.filter((unit) => unit.level === 'bad' || unit.level === 'warn');
+    const least = off.length ? leastSure(off) : this.mine()?.status === 'good' ? leastSure(units) : null;
+    return least && (off.length || least.score! < CLEAR_FROM) ? least : null;
+  });
+  /** how to say that sound */
+  protected readonly tip = computed(() => {
+    const focus = this.focus();
+    const units = this.units();
+    return focus ? { sound: focus.text, text: soundTip(focus.text, units.indexOf(focus), units.length) } : null;
+  });
   /** the weakest one or two sounds, in words */
   protected readonly weak = computed(() => {
     const off = this.units()
@@ -254,14 +280,13 @@ export class WordCard {
       `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
     return 'The ' + off.map(said).join(', and the ') + '.';
   });
-  /** with no sound off: the one heard least surely, so a score short of 100% is never left unexplained */
+  /** with no sound off: the one heard least surely, or when all were clear, where the rest of the score is */
   private closest() {
-    const least = leastSure(this.units());
-    if (!least) return '';
-    const sound = `<b>${escapeHtml(least.text)}</b>`;
-    return least.score! >= CLEAR_FROM
-      ? `Every sound came through clearly: the least sure was the ${sound} (${this.pct(least.score)}%), and ${this.pct(CLEAR_FROM)}% and up is a clear sound.`
-      : `The ${sound} was the least sure (${this.pct(least.score)}%): use Compare to hear how yours differs.`;
+    const focus = this.focus();
+    if (focus) return `The <b>${escapeHtml(focus.text)}</b> was the least sure (${this.pct(focus.score)}%).`;
+    if (!leastSure(this.units())) return '';
+    const stress = (this.sounds.value()?.spell?.length ?? 0) > 1 ? ', with the stress on the syllable in capitals' : '';
+    return `Every sound came through clearly, so there is nothing specific to fix. To sound closer still, use Compare and match the rhythm${stress}.`;
   }
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */
   protected readonly why = computed(() => {
