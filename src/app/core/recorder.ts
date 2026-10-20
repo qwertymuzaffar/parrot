@@ -44,10 +44,19 @@ export class Recorder {
    * two minutes after a take, so the next take starts at once. */
   private async open(): Promise<void> {
     if (this.ctx) return;
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-    });
+    // made and resumed while the click still counts: after waiting for the microphone (a second or more, longer with
+    // the permission prompt) WebKit keeps a new audio context suspended, and nothing would be recorded
     const ctx = new AudioContext();
+    // not awaited: a resume that isn't allowed may never settle, and start() gives up when no sound arrives
+    ctx.resume().catch(() => {});
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+    } catch (error) {
+      ctx.close();
+      throw error;
+    }
     const url = URL.createObjectURL(new Blob([CAPTURE], { type: 'text/javascript' }));
     await ctx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
@@ -97,8 +106,14 @@ export class Recorder {
     // the take begins with the half second before the click, and shows as recording once sound arrives
     this.blocks = [...this.preroll];
     this.preroll = [];
-    const arrived = new Promise<void>((resolve) => (this.flowing = resolve));
-    await Promise.race([arrived, new Promise((resolve) => setTimeout(resolve, 3000))]);
+    const arrived = new Promise<boolean>((resolve) => (this.flowing = () => resolve(true)));
+    if (!(await Promise.race([arrived, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000))]))) {
+      // recording on would only make a silent take: say so now rather than after it
+      this.capturing = false;
+      this.flowing = null;
+      this.close();
+      throw new Error('no sound came through');
+    }
 
     const analyser = this.analyser!;
     const buf = new Uint8Array(analyser.fftSize);
