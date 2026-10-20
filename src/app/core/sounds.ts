@@ -3,7 +3,7 @@ export interface SoundUnit {
   text: string;
   /** 0-1, the best of its letters (the aligner credits a sound to one of the letters that spell it) */
   score: number | null;
-  level: 'good' | 'warn' | 'bad' | 'none';
+  level: 'good' | 'fair' | 'warn' | 'bad' | 'none';
 }
 
 /** consonant pairs spoken as one sound, or with one letter silent */
@@ -11,7 +11,7 @@ const PAIRS = new Set(['th', 'sh', 'ch', 'ph', 'wh', 'gh', 'ck', 'ng', 'qu', 'kn
 const VOWEL = /[aeiou]/;
 
 /** Below these a unit sounds off (amber) or wrong (red); set from real takes, where a clearly said sound scores
- * 0.9 or more and a sound said as another one under 0.1. */
+ * 0.9 or more and a sound said as another one under 0.1. Between off and clear, a unit is fair: right, not sure. */
 export const WARN_BELOW = 0.5;
 export const BAD_BELOW = 0.2;
 /** from here on a sound was said clearly: what is left up to 100% is the aligner's own doubt, not a mistake */
@@ -19,7 +19,7 @@ export const CLEAR_FROM = 0.9;
 
 export function level(score: number | null): SoundUnit['level'] {
   if (score == null) return 'none';
-  return score < BAD_BELOW ? 'bad' : score < WARN_BELOW ? 'warn' : 'good';
+  return score < BAD_BELOW ? 'bad' : score < WARN_BELOW ? 'warn' : score < CLEAR_FROM ? 'fair' : 'good';
 }
 
 /**

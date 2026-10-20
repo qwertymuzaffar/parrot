@@ -132,7 +132,7 @@ import { SoundUnits } from './sound-units';
         [title]="practice.recording() ? 'Stop and score the word' : 'Record the word on its own: it does not change the sentence’s score'"
       >
         @if (practice.recording()) {
-          <app-icon name="stop" [size]="14" /> Stop
+          <app-icon name="stop" [size]="14" /> Stop <span class="time">{{ recorder.elapsed().toFixed(1) }} s</span>
         } @else if (practice.checking()) {
           <span class="spinner"></span> Scoring…
         } @else {
@@ -274,6 +274,16 @@ import { SoundUnits } from './sound-units';
         color: var(--rec);
       }
     }
+    /* a slot as wide as the longest time, so the label doesn't move as the digits change; DM Sans has no digits of
+       one width, the system font does */
+    .time {
+      display: inline-block;
+      min-width: 5.5ch;
+      text-align: left;
+      font-family: system-ui, sans-serif;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
     .spinner {
       width: 14px;
       height: 14px;
@@ -312,14 +322,14 @@ export class WordCard {
     loader: ({ params }) => this.engine.soundsLike(params),
   });
   protected pct = (score: number | null) => Math.round((score ?? 0) * 100);
-  /** the word's sounds as spelled, coloured by how surely each was heard; a word that passed both checks shows no
-   * weak sounds (single-letter scores are rough, and a clear word should not look wrong) */
+  /** the word's sounds as spelled, coloured by how surely each was heard; a word that passed both checks shows its
+   * unsure sounds as fair, never off (single-letter scores are rough, and a clear word should not look wrong) */
   protected readonly units = computed(() => this.unitsOf(this.mine()));
   private unitsOf(mine: WordResult | null): SoundUnit[] {
     if (!mine?.letters) return [];
     const units = soundUnits(mine.w, mine.letters);
     return mine.status === 'good'
-      ? units.map((unit) => ({ ...unit, level: unit.level === 'none' ? unit.level : ('good' as const) }))
+      ? units.map((unit) => ({ ...unit, level: unit.level === 'bad' || unit.level === 'warn' ? ('fair' as const) : unit.level }))
       : units;
   }
   /** the sound to work on: the weakest that was off, else for a clear word the least sure one under a clear sound */

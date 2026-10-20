@@ -23,6 +23,10 @@ import { SoundUnit } from '../core/sounds';
       border-radius: 8px;
       background: var(--good-bg);
       color: var(--good-ink);
+      /* right but not sure: half clear, half off */
+      &.fair {
+        background: linear-gradient(135deg, var(--good-bg) 50%, var(--warn-bg) 50%);
+      }
       &.warn {
         background: var(--warn-bg);
         color: var(--warn-ink);
