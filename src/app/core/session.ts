@@ -101,7 +101,12 @@ export class Session {
     if (!text || text.mode === mode || this.takeUnderWay()) return;
     const w0 = this.part()?.w0 ?? 0;
     this.playback.stop();
-    await this.library.setMode(text.id, mode);
+    try {
+      await this.library.setMode(text.id, mode);
+    } catch (error) {
+      this.failure.set(errorMessage(error));
+      return;
+    }
     // another text opened while the mode was saved
     if (this.text()?.id !== text.id) return;
     await this.build(mode, null, w0);
@@ -114,12 +119,21 @@ export class Session {
     const parts = await splitText(text.text, mode);
     if (build !== this.builds) return;
     this.parts.set(parts);
-    const scores = await this.engine.scores(text.id).catch(() => ({}));
+    // scores that can't be loaded are not "nothing practised yet": say so
+    let scores: Record<string, PartScore> = {};
+    let failed: string | null = null;
+    try {
+      scores = await this.engine.scores(text.id);
+    } catch (error) {
+      failed = errorMessage(error);
+    }
     if (build !== this.builds) return;
     this.scores.set(scores);
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     await this.select(partIndex);
+    // after select, which clears the error of the part left
+    if (failed) this.failure.set(failed);
   }
 
   async select(partIndex: number) {
@@ -137,12 +151,16 @@ export class Session {
     writeSetting(`part:${text.id}:${text.mode}`, String(partIndex));
     const part = parts[partIndex];
     if (!this.scores()[part.key]) return;
-    const history = await this.engine.attempts(text.id, part.text);
-    if (this.part() !== part || !history.length) return;
-    this.history.set(history);
-    const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
-    // the user moved on while the try loaded: it is not this part's
-    if (this.part() === part) this.show(attempt);
+    try {
+      const history = await this.engine.attempts(text.id, part.text);
+      if (this.part() !== part || !history.length) return;
+      this.history.set(history);
+      const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
+      // the user moved on while the try loaded: it is not this part's
+      if (this.part() === part) this.show(attempt);
+    } catch (error) {
+      if (this.part() === part) this.failure.set(errorMessage(error));
+    }
   }
 
   /** Show a try, and load its waveform. */
@@ -168,8 +186,12 @@ export class Session {
     const part = this.part();
     if (!text || !part) return;
     this.playback.stop();
-    const attempt = await this.engine.attempt(text.id, part.text, id);
-    if (this.part() === part) this.show(attempt);
+    try {
+      const attempt = await this.engine.attempt(text.id, part.text, id);
+      if (this.part() === part) this.show(attempt);
+    } catch (error) {
+      if (this.part() === part) this.failure.set(errorMessage(error));
+    }
   }
 
   selectWord(wordIndex: number | null) {

@@ -11,8 +11,10 @@ export class Library {
   readonly loaded = signal(false);
   readonly engineState = signal<'checking' | 'ready' | 'down'>('checking');
   readonly activity = signal<Activity | null>(null);
-  /** why the texts could not be loaded or added */
+  /** why the texts could not be loaded, added, renamed or deleted */
   readonly error = signal<string | null>(null);
+  /** the next try at loading the texts while the engine is down: one at a time, however often loading fails */
+  private retry: ReturnType<typeof setTimeout> | null = null;
 
   async loadTexts() {
     try {
@@ -23,7 +25,10 @@ export class Library {
       this.engineState.set('down');
       this.error.set(errorMessage(error));
       // try again until the engine is up, so starting it is enough
-      setTimeout(() => this.engineState() === 'down' && this.loadTexts().then(() => this.loadActivity()), 3000);
+      this.retry ??= setTimeout(() => {
+        this.retry = null;
+        if (this.engineState() === 'down') this.loadTexts().then(() => this.loadActivity());
+      }, 3000);
     } finally {
       this.loaded.set(true);
     }
@@ -46,7 +51,7 @@ export class Library {
   }
 
   async rename(id: string, title: string) {
-    this.replace(await this.engine.updateText(id, { title }));
+    await this.change(async () => this.replace(await this.engine.updateText(id, { title })));
   }
 
   async setMode(id: string, mode: Mode) {
@@ -54,8 +59,20 @@ export class Library {
   }
 
   async remove(id: string) {
-    await this.engine.deleteText(id);
-    this.texts.update((list) => list.filter((item) => item.id !== id));
+    await this.change(async () => {
+      await this.engine.deleteText(id);
+      this.texts.update((list) => list.filter((item) => item.id !== id));
+    });
+  }
+
+  /** Make a change the user asked for; if the engine won't, say why (the text stays as it was). */
+  private async change(make: () => Promise<void>) {
+    try {
+      await make();
+      this.error.set(null);
+    } catch (error) {
+      this.error.set(errorMessage(error));
+    }
   }
 
   private replace(saved: TextItem) {

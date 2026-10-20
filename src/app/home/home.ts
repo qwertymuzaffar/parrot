@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, output, resource, signal } from '@angular/core';
+import { IN_APP } from '../core/engine';
 import { Mode, Part, TextItem } from '../core/models';
 import { readSetting } from '../core/settings';
 import { sentences, shortRanges, splitText } from '../core/split';
@@ -31,6 +32,8 @@ export class Home {
   readonly settings = output<void>();
   protected band = band;
   protected Math = Math;
+  /** in the desktop app the engine is built in: there is nothing for the user to start */
+  protected inApp = IN_APP;
 
   protected query = signal('');
   protected draft = signal('');

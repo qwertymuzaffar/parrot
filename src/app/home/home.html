@@ -54,6 +54,9 @@
           }
         </div>
       </div>
+      @if (library.error() && library.engineState() !== 'down') {
+        <p class="error" role="alert">{{ library.error() }}</p>
+      }
       <div class="go">
         <span class="hint">
           @if (words()) {
@@ -100,9 +103,14 @@
     </div>
 
     @if (library.engineState() === 'down') {
-      <div class="card down">
-        <b>The speech engine isn't running.</b>
-        <span>Start it with <code>python engine/server.py</code>. Parrot connects as soon as it's up.</span>
+      <div class="card down" role="alert">
+        @if (inApp) {
+          <b>Parrot couldn't load your texts.</b>
+          <span>{{ library.error() }} Parrot tries again every few seconds.</span>
+        } @else {
+          <b>The speech engine isn't running.</b>
+          <span>Start it with <code>python engine/server.py</code>. Parrot connects as soon as it's up.</span>
+        }
       </div>
     }
 

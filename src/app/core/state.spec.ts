@@ -37,6 +37,7 @@ class FakeEngine extends Engine {
   /** what the next take is scored as, and the next take of a word alone */
   nextCheck: Attempt | null = null;
   nextWordCheck: Attempt | null = null;
+  /** the engine has stopped answering: every call fails */
   down = false;
   calls: string[] = [];
   /** calls held back until the test lets them through, by call ("attempt t1", "scores <text id>") */
@@ -56,6 +57,10 @@ class FakeEngine extends Engine {
   private async pass(call: string) {
     this.calls.push(call);
     await this.held.get(call);
+  }
+
+  private answer() {
+    if (this.down) throw new EngineError('The speech engine is not running.');
   }
 
   item(change: Partial<TextItem> = {}): TextItem {
@@ -82,7 +87,7 @@ class FakeEngine extends Engine {
   }
   async texts() {
     this.calls.push('texts');
-    if (this.down) throw new EngineError('The speech engine is not running.');
+    this.answer();
     return [...this.library];
   }
   async addText(text: string, title: string, mode: Mode) {
@@ -94,6 +99,7 @@ class FakeEngine extends Engine {
   }
   async updateText(id: string, change: { title?: string; mode?: Mode; opened?: boolean }) {
     await this.pass(`updateText ${JSON.stringify(change)}`);
+    this.answer();
     const index = this.library.findIndex((item) => item.id === id);
     const { opened, ...rest } = change;
     this.library[index] = { ...this.library[index], ...rest, ...(opened ? { opened: '2026-10-20T12:00:00' } : {}) };
@@ -101,10 +107,12 @@ class FakeEngine extends Engine {
   }
   async deleteText(id: string) {
     this.calls.push(`deleteText ${id}`);
+    this.answer();
     this.library = this.library.filter((item) => item.id !== id);
   }
   async scores(textId: string) {
     await this.pass(`scores ${textId}`);
+    this.answer();
     const scores: Record<string, PartScore> = {};
     for (const [part, tries] of Object.entries(this.tries)) {
       if (!tries.length) continue;
@@ -114,10 +122,12 @@ class FakeEngine extends Engine {
   }
   async attempts(_textId: string, part: string) {
     this.calls.push(`attempts ${part}`);
+    this.answer();
     return [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
   }
   async attempt(_textId: string, part: string, id: string) {
     await this.pass(`attempt ${id}`);
+    this.answer();
     return this.tries[part].find((each) => each.id === id)!;
   }
   async check(_textId: string, part: string) {
@@ -324,6 +334,19 @@ describe('the practice state', () => {
       expect([app.engineState(), app.error()]).toEqual(['ready', null]);
     });
 
+    it('tries again on one timer, however often loading fails', async () => {
+      vi.useFakeTimers();
+      engine.down = true;
+      await app.loadTexts();
+      await app.loadTexts();
+      await app.loadTexts();
+      engine.calls = [];
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(engine.calls).toEqual(['texts']);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(engine.calls).toEqual(['texts', 'texts']);
+    });
+
     it('adds a text and opens it', async () => {
       await app.add('One more text.', 'New', 'whole');
       expect(app.texts().map((text) => text.id)).toEqual(['abcdef0123', ID]);
@@ -340,6 +363,17 @@ describe('the practice state', () => {
       await app.open(ID);
       await app.rename(ID, 'Hi');
       expect([app.texts()[0].title, app.text()?.title]).toEqual(['Hi', 'Hi']);
+    });
+
+    it('says why a text could not be renamed or deleted, and keeps it as it was', async () => {
+      engine.down = true;
+      await app.rename(ID, 'Hi');
+      expect([app.texts()[0].title, app.error()]).toEqual(['Greeting', 'The speech engine is not running.']);
+      await app.remove(ID);
+      expect([app.texts().length, app.error()]).toEqual([1, 'The speech engine is not running.']);
+      engine.down = false;
+      await app.rename(ID, 'Hi');
+      expect([app.texts()[0].title, app.error()]).toEqual(['Hi', null]);
     });
 
     it('removes a text', async () => {
@@ -467,6 +501,35 @@ describe('the practice state', () => {
       await changing;
       await settle();
       expect([app.text()?.id, app.parts().length]).toEqual(['b0b0b0b0b0', 3]);
+    });
+
+    it("says the scores couldn't be loaded, rather than showing nothing practised", async () => {
+      engine.tries['Hello there.'] = [attempt('t1', 'Hello there.', 80)];
+      engine.down = true;
+      await app.open(ID);
+      expect([app.view(), app.progress().done, app.error()]).toEqual(['practice', 0, 'The speech engine is not running.']);
+    });
+
+    it("says a part's tries or a try chosen couldn't be loaded", async () => {
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60), attempt('t2', 'How are you?', 75)];
+      await app.open(ID);
+      engine.down = true;
+      app.next();
+      await settle();
+      expect([app.index(), app.result(), app.error()]).toEqual([1, null, 'The speech engine is not running.']);
+      await app.showAttempt('t1');
+      expect(app.error()).toBe('The speech engine is not running.');
+      engine.down = false;
+      app.previous();
+      await settle();
+      expect(app.error()).toBeNull();
+    });
+
+    it("keeps the mode when the engine won't save another, and says why", async () => {
+      await app.open(ID);
+      engine.down = true;
+      await app.setMode('whole');
+      expect([app.parts().length, app.text()?.mode, app.error()]).toEqual([3, 'sentences', 'The speech engine is not running.']);
     });
 
     it('stops anything playing on going home', async () => {

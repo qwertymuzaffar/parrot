@@ -149,6 +149,10 @@
       }
     }
   }
+  .error {
+    margin: 8px 0 0;
+    color: var(--wrong-ink);
+  }
   .go {
     display: flex;
     align-items: center;

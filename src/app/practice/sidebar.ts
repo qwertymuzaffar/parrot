@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, output, signal } from '@angular/core';
+import { IN_APP } from '../core/engine';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
@@ -48,7 +49,7 @@ import { matchesSearch } from '../shared/search';
 
     <footer>
       <span class="dot" [class]="library.engineState()"></span>
-      <span class="status">{{ status() }}</span>
+      <span class="status" [title]="library.error() ?? ''">{{ status() }}</span>
       <button class="btn ghost square" (click)="settings.emit()" aria-label="Settings"><app-icon name="settings" [size]="17" /></button>
     </footer>
   `,
@@ -197,7 +198,9 @@ export class Sidebar {
     const search = this.query();
     return this.library.texts().filter((text) => matchesSearch(search, text.title, text.text));
   });
+  /** the engine is built into the desktop app: when it fails there, it is not for the user to start */
+  private readonly down = IN_APP ? 'Engine error' : 'Engine not running';
   protected readonly status = computed(
-    () => ({ checking: 'Starting…', ready: 'On-device · ready', down: 'Engine not running' })[this.library.engineState()],
+    () => ({ checking: 'Starting…', ready: 'On-device · ready', down: this.down })[this.library.engineState()],
   );
 }
