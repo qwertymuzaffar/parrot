@@ -120,37 +120,30 @@ export class Practice {
     return wpm < 120 ? 'slow · aim 140–165' : wpm < 140 ? 'a little slow · aim 140–165' : wpm > 175 ? 'fast · aim 140–165' : 'a natural pace';
   }
 
+  /** the keyboard shortcuts while practising */
+  private readonly shortcuts: Record<string, () => void> = {
+    ' ': () => this.toggleReference(),
+    r: () => this.session.toggleRecord(),
+    R: () => this.session.toggleRecord(),
+    m: () => this.toggleMine(),
+    M: () => this.toggleMine(),
+    ArrowDown: () => this.session.next(),
+    ArrowRight: () => this.session.next(),
+    ArrowUp: () => this.session.previous(),
+    ArrowLeft: () => this.session.previous(),
+    Escape: () => {
+      this.playback.stop();
+      this.session.selectWord(null);
+    },
+  };
+
   protected key(event: KeyboardEvent) {
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
     if (document.querySelector('dialog[open]')) return;
-    switch (event.key) {
-      case ' ':
-        this.toggleReference();
-        break;
-      case 'r':
-      case 'R':
-        this.session.toggleRecord();
-        break;
-      case 'm':
-      case 'M':
-        this.toggleMine();
-        break;
-      case 'ArrowDown':
-      case 'ArrowRight':
-        this.session.next();
-        break;
-      case 'ArrowUp':
-      case 'ArrowLeft':
-        this.session.previous();
-        break;
-      case 'Escape':
-        this.playback.stop();
-        this.session.selectWord(null);
-        break;
-      default:
-        return;
-    }
+    const action = this.shortcuts[event.key];
+    if (!action) return;
+    action();
     event.preventDefault();
   }
 }
