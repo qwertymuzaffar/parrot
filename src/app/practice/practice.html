@@ -128,7 +128,7 @@
     <button
       class="record"
       [class.on]="recording()"
-      [disabled]="session.checking() || !part"
+      [disabled]="session.checking() || !part || recorder.owner() === 'word'"
       (click)="session.toggleRecord()"
       [attr.aria-label]="recording() ? 'Stop recording (R)' : 'Record (R)'"
       [title]="recording() ? 'Stop (R)' : 'Record (R)'"

@@ -3,16 +3,20 @@ import { Engine } from '../core/engine';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
-import { CLEAR_FROM, leastSure, soundUnits } from '../core/sounds';
+import { WordResult } from '../core/models';
+import { CLEAR_FROM, leastSure, SoundUnit, soundUnits } from '../core/sounds';
 import { soundTip } from '../core/tips';
 import { bare } from '../core/split';
+import { WordPractice } from '../core/word-practice';
 import { escapeHtml } from '../shared/html';
 import { Icon } from '../shared/icon';
+import { band } from '../shared/score';
+import { SoundUnits } from './sound-units';
 
-/** One word up close: how it should sound, what went wrong, and buttons to hear it both ways. */
+/** One word up close: how it should sound, what went wrong, buttons to hear it both ways, and practising it alone. */
 @Component({
   selector: 'app-word-card',
-  imports: [Icon],
+  imports: [Icon, SoundUnits],
   template: `
     <div class="head">
       <h2>{{ word() }}</h2>
@@ -60,11 +64,7 @@ import { Icon } from '../shared/icon';
           >
         </div>
         @if (units().length) {
-          <div class="units">
-            @for (unit of units(); track $index) {
-              <span class="unit" [class]="unit.level" [title]="unit.score == null ? '' : pct(unit.score) + '%'">{{ unit.text }}</span>
-            }
-          </div>
+          <app-sound-units [units]="units()" />
         }
         @if (weak(); as weak) {
           <p class="weak" [innerHTML]="weak"></p>
@@ -81,11 +81,64 @@ import { Icon } from '../shared/icon';
       <p class="why" [innerHTML]="why()"></p>
     }
 
+    @if (practice.tries().length) {
+      <div class="take">
+        <div class="take-head">
+          <span class="eyebrow">Word practice</span>
+          @if (tried()?.score != null) {
+            <span class="pct" [class.unclear]="tried()!.status !== 'good'"
+              ><b>{{ pct(tried()!.score) }}%</b> sound match</span
+            >
+          }
+        </div>
+        @if (triedUnits().length) {
+          <app-sound-units [units]="triedUnits()" />
+        }
+        @if (triedWeak(); as weak) {
+          <p class="weak" [innerHTML]="weak"></p>
+        }
+        @if (triedTip(); as tip) {
+          <p class="tip">
+            <b>How to say {{ tip.sound }}:</b> {{ tip.text }}
+          </p>
+        }
+        @if (triedHeard(); as heard) {
+          <p class="weak" [innerHTML]="heard"></p>
+        }
+        <div class="tried">
+          <button class="btn small" [disabled]="!practice.latest()" (click)="playTry()"><app-icon name="play" [size]="12" /> Play</button>
+          <span class="scores" aria-label="Sound match of the last tries, newest first">
+            @for (each of practice.tries().slice(0, 6); track each.id) {
+              <span class="pill" [class]="band(each.score)">{{ each.score }}%</span>
+            }
+          </span>
+        </div>
+      </div>
+    }
+    @if (practice.error(); as error) {
+      <p class="error">{{ error }}</p>
+    }
+
     <div class="buttons">
       <button class="btn primary" (click)="sayWord()"><app-icon name="volume" [size]="16" /> Hear it</button>
       <button class="btn" (click)="sayWord(true)"><app-icon name="turtle" [size]="16" /> Slowly</button>
       <button class="btn" [disabled]="!mine()?.t" (click)="playMine()"><app-icon name="play" [size]="13" /> Mine</button>
       <button class="btn" [disabled]="!mine()?.t" (click)="compare()"><app-icon name="swap" [size]="16" /> Compare</button>
+      <button
+        class="btn record"
+        [class.on]="practice.recording()"
+        [disabled]="practice.checking() || (recorder.owner() != null && !practice.recording())"
+        (click)="practice.toggleRecord()"
+        [title]="practice.recording() ? 'Stop and score the word' : 'Record the word on its own: it does not change the sentence’s score'"
+      >
+        @if (practice.recording()) {
+          <app-icon name="stop" [size]="14" /> Stop <span class="time">{{ recorder.elapsed().toFixed(1) }} s</span>
+        } @else if (practice.checking()) {
+          <span class="spinner"></span> Scoring…
+        } @else {
+          <app-icon name="mic" [size]="16" /> Record the word
+        }
+      </button>
     </div>
   `,
   styles: `
@@ -169,34 +222,6 @@ import { Icon } from '../shared/icon';
         color: var(--wrong-ink);
       }
     }
-    .units {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-    .unit {
-      font-size: 20px;
-      font-weight: 600;
-      line-height: 1;
-      padding: 7px 9px;
-      border-radius: 8px;
-      background: var(--good-bg);
-      color: var(--good-ink);
-      &.warn {
-        background: var(--warn-bg);
-        color: var(--warn-ink);
-        box-shadow: inset 0 -2px 0 var(--warn-line);
-      }
-      &.bad {
-        background: var(--wrong-bg);
-        color: var(--wrong-ink);
-        box-shadow: inset 0 -2px 0 var(--wrong-ink);
-      }
-      &.none {
-        background: var(--surface-2);
-        color: var(--muted);
-      }
-    }
     .weak {
       margin: 0;
       font-size: 13px;
@@ -222,14 +247,60 @@ import { Icon } from '../shared/icon';
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
     }
+    // ---- practising the word alone
+    .tried {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .scores {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      min-width: 0;
+    }
+    .error {
+      margin: 0;
+      font-size: 13px;
+      color: var(--wrong-ink);
+    }
+    .record {
+      grid-column: 1 / -1;
+      app-icon {
+        color: var(--rec);
+      }
+      &.on {
+        border-color: var(--rec);
+        color: var(--rec);
+      }
+    }
+    .time {
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--line);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class WordCard {
   protected session = inject(Session);
   private playback = inject(Playback);
-  private recorder = inject(Recorder);
+  protected recorder = inject(Recorder);
   private engine = inject(Engine);
+  protected practice = inject(WordPractice);
+  protected band = band;
   protected readonly index = this.session.selected;
   protected readonly raw = computed(() => {
     const wordIndex = this.index();
@@ -238,7 +309,7 @@ export class WordCard {
   protected readonly word = computed(() => bare(this.raw()));
   protected readonly mine = computed(() => {
     const wordIndex = this.index();
-    return wordIndex == null || this.recorder.recording() ? null : (this.session.result()?.words[wordIndex] ?? null);
+    return wordIndex == null || this.session.recording() ? null : (this.session.result()?.words[wordIndex] ?? null);
   });
   protected readonly sounds = resource({
     params: () => this.word() || undefined,
@@ -247,46 +318,46 @@ export class WordCard {
   protected pct = (score: number | null) => Math.round((score ?? 0) * 100);
   /** the word's sounds as spelled, coloured by how surely each was heard; a word that passed both checks shows no
    * weak sounds (single-letter scores are rough, and a clear word should not look wrong) */
-  protected readonly units = computed(() => {
-    const mine = this.mine();
+  protected readonly units = computed(() => this.unitsOf(this.mine()));
+  private unitsOf(mine: WordResult | null): SoundUnit[] {
     if (!mine?.letters) return [];
     const units = soundUnits(mine.w, mine.letters);
     return mine.status === 'good'
       ? units.map((unit) => ({ ...unit, level: unit.level === 'none' ? unit.level : ('good' as const) }))
       : units;
-  });
+  }
   /** the sound to work on: the weakest that was off, else for a clear word the least sure one under a clear sound */
-  private readonly focus = computed(() => {
-    const units = this.units();
+  private focusOf(mine: WordResult | null, units: SoundUnit[]) {
     const off = units.filter((unit) => unit.level === 'bad' || unit.level === 'warn');
-    const least = off.length ? leastSure(off) : this.mine()?.status === 'good' ? leastSure(units) : null;
+    const least = off.length ? leastSure(off) : mine?.status === 'good' ? leastSure(units) : null;
     return least && (off.length || least.score! < CLEAR_FROM) ? least : null;
-  });
+  }
   /** how to say that sound */
-  protected readonly tip = computed(() => {
-    const focus = this.focus();
-    const units = this.units();
+  private tipOf(mine: WordResult | null, units: SoundUnit[]) {
+    const focus = this.focusOf(mine, units);
     return focus ? { sound: focus.text, text: soundTip(focus.text, units.indexOf(focus), units.length) } : null;
-  });
+  }
+  protected readonly tip = computed(() => this.tipOf(this.mine(), this.units()));
   /** the weakest one or two sounds, in words */
-  protected readonly weak = computed(() => {
-    const off = this.units()
+  protected readonly weak = computed(() => this.weakOf(this.mine(), this.units()));
+  private weakOf(mine: WordResult | null, units: SoundUnit[]) {
+    const off = units
       .filter((unit) => unit.level === 'bad' || unit.level === 'warn')
       .sort((first, second) => first.score! - second.score!)
       .slice(0, 2);
     // a misheard or unclear word is explained below instead
-    if (!off.length) return this.mine()?.status === 'good' ? this.closest() : '';
+    if (!off.length) return mine?.status === 'good' ? this.closest(mine, units) : '';
     const said = (unit: (typeof off)[0]) =>
       `<b>${escapeHtml(unit.text)}</b> ${unit.level === 'bad' ? 'sounded wrong' : 'sounded off'} (${this.pct(unit.score)}%)`;
     return 'The ' + off.map(said).join(', and the ') + '.';
-  });
+  }
   /** with no sound off: the one heard least surely, or when all were clear, where the rest of the score is */
-  private closest() {
-    const focus = this.focus();
+  private closest(mine: WordResult | null, units: SoundUnit[]) {
+    const focus = this.focusOf(mine, units);
     if (focus) return `The <b>${escapeHtml(focus.text)}</b> was the least sure (${this.pct(focus.score)}%).`;
-    if (!leastSure(this.units())) return '';
+    if (!leastSure(units)) return '';
     const stress = (this.sounds.value()?.spell?.length ?? 0) > 1 ? ', with the stress on the syllable in capitals' : '';
-    return `Every sound came through clearly, so there is nothing specific to fix. To sound closer still, use Compare and match the rhythm${stress}.`;
+    return `Every sound came through clearly, so there is nothing specific to fix. To sound closer still, listen with Slowly and match the rhythm${stress}.`;
   }
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */
   protected readonly why = computed(() => {
@@ -305,6 +376,19 @@ export class WordCard {
     return out.join(' ');
   });
 
+  // ---- the word said alone (WordPractice): its newest try, its sounds explained as the take's are
+  protected readonly tried = computed(() => this.practice.latest()?.words[0] ?? null);
+  protected readonly triedUnits = computed(() => this.unitsOf(this.tried()));
+  protected readonly triedWeak = computed(() => this.weakOf(this.tried(), this.triedUnits()));
+  protected readonly triedTip = computed(() => this.tipOf(this.tried(), this.triedUnits()));
+  /** speech recognition is unsure of one word heard alone: a mishearing is told gently, beside the sound match */
+  protected readonly triedHeard = computed(() => {
+    const tried = this.tried();
+    if (tried?.status !== 'wrong') return '';
+    const heard = tried.heard ? `heard <b>“${escapeHtml(tried.heard)}”</b>` : 'did not catch it';
+    return `Speech recognition ${heard}: on a single word it can be unsure, so trust the sound match too.`;
+  });
+
   protected sayWord(slow = false) {
     this.playback.sayWord(this.raw(), slow);
   }
@@ -317,5 +401,10 @@ export class WordCard {
   protected compare() {
     const result = this.session.result();
     if (result) this.playback.compareWord(result, this.index()!, this.raw());
+  }
+
+  protected playTry() {
+    const latest = this.practice.latest();
+    if (latest) this.playback.playWordTry(latest);
   }
 }

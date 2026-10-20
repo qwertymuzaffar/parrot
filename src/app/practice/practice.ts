@@ -3,6 +3,7 @@ import { Mode } from '../core/models';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { WordPractice } from '../core/word-practice';
 import { Icon } from '../shared/icon';
 import { band } from '../shared/score';
 import { ScoreRing } from './score-ring';
@@ -23,6 +24,7 @@ export class Practice {
   protected session = inject(Session);
   protected playback = inject(Playback);
   protected recorder = inject(Recorder);
+  private words = inject(WordPractice);
   readonly settings = output<void>();
   protected band = band;
   private stepper = viewChild<ElementRef<HTMLElement>>('stepper');
@@ -35,7 +37,8 @@ export class Practice {
   ];
   protected readonly rates = [0.6, 0.75, 1];
 
-  protected readonly recording = this.recorder.recording;
+  /** a take of the part is being recorded (a word said alone is recorded in its card) */
+  protected readonly recording = this.session.recording;
   /** the try shown, unless a new one is being recorded */
   protected readonly result = computed(() => (this.recording() ? null : this.session.result()));
   protected readonly counts = computed(() => {
@@ -119,6 +122,12 @@ export class Practice {
     if (shown && part) this.playback.compare(shown, part.text);
   }
 
+  /** R records the part, or stops the word being recorded alone (each take is finished by whoever started it) */
+  private toggleRecord() {
+    if (this.recorder.owner() === 'word') this.words.toggleRecord();
+    else this.session.toggleRecord();
+  }
+
   protected pace(wpm: number) {
     return wpm < 120
       ? 'slow · aim 140–165'
@@ -132,8 +141,8 @@ export class Practice {
   /** the keyboard shortcuts while practising */
   private readonly shortcuts: Record<string, () => void> = {
     ' ': () => this.toggleReference(),
-    r: () => this.session.toggleRecord(),
-    R: () => this.session.toggleRecord(),
+    r: () => this.toggleRecord(),
+    R: () => this.toggleRecord(),
     m: () => this.toggleMine(),
     M: () => this.toggleMine(),
     ArrowDown: () => this.session.next(),
