@@ -39,6 +39,24 @@ class FakeEngine extends Engine {
   nextWordCheck: Attempt | null = null;
   down = false;
   calls: string[] = [];
+  /** calls held back until the test lets them through, by call ("attempt t1", "scores <text id>") */
+  private held = new Map<string, Promise<void>>();
+
+  /** Hold a call back; the function returned lets it (and any made meanwhile) through. */
+  hold(call: string) {
+    let release!: () => void;
+    this.held.set(call, new Promise<void>((resolve) => (release = resolve)));
+    return () => {
+      this.held.delete(call);
+      release();
+    };
+  }
+
+  /** log a call, and wait while it is held back */
+  private async pass(call: string) {
+    this.calls.push(call);
+    await this.held.get(call);
+  }
 
   item(change: Partial<TextItem> = {}): TextItem {
     return {
@@ -75,7 +93,7 @@ class FakeEngine extends Engine {
     return added;
   }
   async updateText(id: string, change: { title?: string; mode?: Mode; opened?: boolean }) {
-    this.calls.push(`updateText ${JSON.stringify(change)}`);
+    await this.pass(`updateText ${JSON.stringify(change)}`);
     const index = this.library.findIndex((item) => item.id === id);
     const { opened, ...rest } = change;
     this.library[index] = { ...this.library[index], ...rest, ...(opened ? { opened: '2026-10-20T12:00:00' } : {}) };
@@ -85,7 +103,8 @@ class FakeEngine extends Engine {
     this.calls.push(`deleteText ${id}`);
     this.library = this.library.filter((item) => item.id !== id);
   }
-  async scores() {
+  async scores(textId: string) {
+    await this.pass(`scores ${textId}`);
     const scores: Record<string, PartScore> = {};
     for (const [part, tries] of Object.entries(this.tries)) {
       if (!tries.length) continue;
@@ -98,7 +117,7 @@ class FakeEngine extends Engine {
     return [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
   }
   async attempt(_textId: string, part: string, id: string) {
-    this.calls.push(`attempt ${id}`);
+    await this.pass(`attempt ${id}`);
     return this.tries[part].find((each) => each.id === id)!;
   }
   async check(_textId: string, part: string) {
@@ -394,6 +413,60 @@ describe('the practice state', () => {
       engine.tries['I am fine.'] = [attempt('t2', 'I am fine.', 91)];
       await app.open(ID);
       expect(app.progress()).toEqual({ total: 3, done: 2, avg: 86 });
+    });
+
+    it("doesn't show a part's try on the part moved to while it loaded", async () => {
+      engine.tries['Hello there.'] = [attempt('t1', 'Hello there.', 80, ['wrong', 'good'])];
+      const release = engine.hold('attempt t1');
+      const opening = app.open(ID, 0);
+      await vi.waitFor(() => expect(engine.calls).toContain('attempt t1'));
+      app.next();
+      await settle();
+      release();
+      await opening;
+      await settle();
+      expect([app.index(), app.result(), app.history()]).toEqual([1, null, []]);
+    });
+
+    it("doesn't show a try chosen on a part left while it loaded", async () => {
+      engine.tries['Hello there.'] = [attempt('t1', 'Hello there.', 60), attempt('t2', 'Hello there.', 80)];
+      await app.open(ID, 0);
+      const release = engine.hold('attempt t1');
+      const showing = app.showAttempt('t1');
+      app.next();
+      await settle();
+      release();
+      await showing;
+      await settle();
+      expect([app.index(), app.result()]).toEqual([1, null]);
+    });
+
+    it('opens the text clicked last, where it was left, when an earlier one is still loading', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      localStorage.setItem(`parrot.part:${ID}:sentences`, '2');
+      const releaseFirst = engine.hold(`scores ${ID}`);
+      const first = app.open(ID);
+      await vi.waitFor(() => expect(engine.calls).toContain(`scores ${ID}`));
+      await app.open('b0b0b0b0b0');
+      releaseFirst();
+      await first;
+      await settle();
+      expect([app.text()?.id, app.parts().map((part) => part.text), app.index()]).toEqual(['b0b0b0b0b0', ['One.', 'Two.', 'Three.'], 0]);
+      expect(localStorage.getItem('parrot.part:b0b0b0b0b0:sentences')).toBe('0');
+    });
+
+    it('opens a text clicked while the mode of the one before was saved, in its own mode', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      await app.open(ID);
+      const release = engine.hold('updateText {"mode":"whole"}');
+      const changing = app.setMode('whole');
+      await app.open('b0b0b0b0b0');
+      release();
+      await changing;
+      await settle();
+      expect([app.text()?.id, app.parts().length]).toEqual(['b0b0b0b0b0', 3]);
     });
 
     it('stops anything playing on going home', async () => {

@@ -39,6 +39,8 @@ export class Session {
   private failure = signal<string | null>(null);
   /** the text and part a take is of, from its start: it is scored against them, wherever the user has gone since */
   private taking: { text: TextItem; part: Part } | null = null;
+  /** counts the builds begun: a build that finds a newer one begun (another text opened) gives way to it */
+  private builds = 0;
   /** what went wrong last: with this text, else with the library */
   readonly error = computed(() => this.failure() ?? this.library.error());
 
@@ -100,15 +102,21 @@ export class Session {
     const w0 = this.part()?.w0 ?? 0;
     this.playback.stop();
     await this.library.setMode(text.id, mode);
+    // another text opened while the mode was saved
+    if (this.text()?.id !== text.id) return;
     await this.build(mode, null, w0);
   }
 
   /** Split the open text and go to a part: the saved one, or the one holding word w0. */
   private async build(mode: Mode, savedIndex: string | null, w0?: number) {
     const text = this.text()!;
+    const build = ++this.builds;
     const parts = await splitText(text.text, mode);
+    if (build !== this.builds) return;
     this.parts.set(parts);
-    this.scores.set(await this.engine.scores(text.id).catch(() => ({})));
+    const scores = await this.engine.scores(text.id).catch(() => ({}));
+    if (build !== this.builds) return;
+    this.scores.set(scores);
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     await this.select(partIndex);
@@ -130,7 +138,9 @@ export class Session {
     const history = await this.engine.attempts(text.id, part.text);
     if (this.part() !== part || !history.length) return;
     this.history.set(history);
-    this.show(await this.engine.attempt(text.id, part.text, history[0].id));
+    const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
+    // the user moved on while the try loaded: it is not this part's
+    if (this.part() === part) this.show(attempt);
   }
 
   /** Show a try, and load its waveform. */
@@ -156,7 +166,8 @@ export class Session {
     const part = this.part();
     if (!text || !part) return;
     this.playback.stop();
-    this.show(await this.engine.attempt(text.id, part.text, id));
+    const attempt = await this.engine.attempt(text.id, part.text, id);
+    if (this.part() === part) this.show(attempt);
   }
 
   selectWord(wordIndex: number | null) {
