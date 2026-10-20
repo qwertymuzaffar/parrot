@@ -27,8 +27,10 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
 - **Fix.** Click any word to see how it sounds (a respelling like *sik·STEEN* and its IPA, from the
   [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict)), hear it alone or slowly, hear your own, or both
   one after the other. The card also shows your take of the word: its sound match as a percentage, and its letters
-  grouped into the sounds they spell (*th·i·ng·s*), each green, amber or red, with the weakest one named. Every try is
-  kept, so you can watch your score go up.
+  grouped into the sounds they spell (*th·i·ng·s*), each green, amber or red (half green when it was right but not
+  sure), with the weakest one named and a tip on how to make it. You can also record just that word, as often as you
+  like: each try gets its own sound match and history, without touching the sentence's score. Every try is kept, so
+  you can watch your score go up.
 
 ## Download
 
