@@ -61,8 +61,11 @@ export class Recorder {
     // not awaited: a resume that isn't allowed may never settle, and start() gives up when no sound arrives
     ctx.resume().catch(() => {});
     try {
+      // the microphone as it is: the engine evens out a take's level and filters its rumble itself, while the
+      // browser's gain control and noise suppression adapt as they go, so a take right after the microphone opens
+      // came out 25 dB quieter for its first seconds, then cut out and jumped to full level
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
     } catch (error) {
       ctx.close();
