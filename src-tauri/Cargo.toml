@@ -37,6 +37,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "s
 futures-util = "0.3"
 similar = "3.2"
 sha1 = "0.11"
+# to check a downloaded model is the file it should be
+sha2 = "0.10"
 flate2 = "1.1"
 chrono = "0.4"
 regex = "1.13"
