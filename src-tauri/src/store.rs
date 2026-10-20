@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub fn norm(text: &str) -> String {
@@ -98,6 +99,22 @@ pub struct Activity {
     pub average: Option<i64>,
 }
 
+/// Write a file whole or not at all: to <file>.tmp first, then renamed over it, so a crash or power cut midway leaves
+/// the old file (a half-written meta.json would lose the title and mode, a half-written try would vanish).
+fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".tmp");
+    let temporary = PathBuf::from(temporary);
+    let written = fs::File::create(&temporary).and_then(|mut file| {
+        file.write_all(contents)?;
+        file.sync_all()
+    });
+    written.and_then(|()| fs::rename(&temporary, path)).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        error.to_string()
+    })
+}
+
 fn rounded_mean(total: i64, count: usize) -> Option<i64> {
     (count > 0).then(|| (total as f64 / count as f64).round() as i64)
 }
@@ -156,7 +173,7 @@ impl Store {
                 meta.insert(key.to_string(), value.clone());
             }
         }
-        fs::write(dir.join("meta.json"), serde_json::to_string_pretty(&meta).unwrap()).map_err(|error| error.to_string())
+        write_whole(&dir.join("meta.json"), serde_json::to_string_pretty(&meta).unwrap().as_bytes())
     }
 
     fn read_attempts(dir: &Path) -> Vec<Attempt> {
@@ -238,7 +255,7 @@ impl Store {
         }
         let dir = self.texts().join(sha(&body));
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-        fs::write(dir.join("text.txt"), &body).map_err(|error| error.to_string())?;
+        write_whole(&dir.join("text.txt"), body.as_bytes())?;
         let created = if dir.join("meta.json").exists() { None } else { Some(json!(now())) };
         let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty()).map(Value::from);
         Self::save_meta(&dir, &[("title", title), ("mode", mode.map(Value::from)), ("created", created)])?;
@@ -312,7 +329,7 @@ impl Store {
     }
 
     pub fn save_attempt(&self, dir: &Path, attempt: &Attempt) -> Result<(), String> {
-        fs::write(dir.join(format!("{}.json", attempt.id)), serde_json::to_string_pretty(attempt).unwrap()).map_err(|error| error.to_string())
+        write_whole(&dir.join(format!("{}.json", attempt.id)), serde_json::to_string_pretty(attempt).unwrap().as_bytes())
     }
 
     /// Tries per day for the last 7 days (today last), and their average score.
@@ -321,7 +338,8 @@ impl Store {
         let mut days: BTreeMap<chrono::NaiveDate, usize> = (0..7).map(|days_ago| (today - chrono::Duration::days(days_ago), 0)).collect();
         let (mut total, mut scored) = (0i64, 0usize);
         if let Ok(texts) = fs::read_dir(self.texts()) {
-            for text in texts.flatten() {
+            // a folder without its text is no text of the library (list() leaves it out too)
+            for text in texts.flatten().filter(|text| text.path().join("text.txt").exists()) {
                 let parts = fs::read_dir(text.path()).into_iter().flatten().flatten();
                 for part in parts.filter(|part| part.file_name().to_string_lossy().starts_with("p-")) {
                     for file in fs::read_dir(part.path()).into_iter().flatten().flatten() {
@@ -460,6 +478,25 @@ mod tests {
     }
 
     #[test]
+    fn files_are_replaced_whole() {
+        let dir = std::env::temp_dir().join(format!("parrot-write-whole-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", Some("Greeting".into()), None).unwrap().id;
+        let text = dir.join("texts").join(&id);
+        store.update(&id, Some("Hi".into()), None, true).unwrap();
+        assert_eq!(Store::meta(&text)["title"], "Hi");
+        let names: Vec<String> = fs::read_dir(&text).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.iter().all(|name| !name.ends_with(".tmp")), "{names:?}");
+        // a .tmp a crash left behind is no try and no part of the text
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        fs::write(part.join("20261020-153000.json.tmp"), "{").unwrap();
+        assert!(store.attempts(&id, "Hello there.").unwrap().is_empty());
+        assert_eq!(store.activity().tries, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn tries_in_the_same_second_keep_apart_and_in_order() {
         let dir = std::env::temp_dir().join(format!("parrot-same-second-{}", std::process::id()));
         let store = Store { data: dir.clone() };
@@ -491,6 +528,22 @@ mod tests {
         // a try whose recording is gone still holds on to its id
         fs::write(part.join("20261020-160000.json"), "{}").unwrap();
         assert_eq!(Store::new_try(&part, "20261020-160000").unwrap(), "20261020-160000-2");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_folder_left_without_its_text_has_no_activity() {
+        let dir = std::env::temp_dir().join(format!("parrot-ghost-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", None, None).unwrap().id;
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        store.delete(&id).unwrap();
+        // what a take scored during the delete used to leave: texts/<id>/p-<sha>/<try> without text.txt
+        fs::create_dir_all(&part).unwrap();
+        let today = Local::now().format("%Y%m%d-%H%M%S");
+        fs::write(part.join(format!("{today}.json")), "{}").unwrap();
+        assert!(store.list().is_empty());
+        assert!(store.activity().days.iter().all(|day| day.tries == 0));
         let _ = fs::remove_dir_all(dir);
     }
 

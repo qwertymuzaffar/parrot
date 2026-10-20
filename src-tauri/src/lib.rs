@@ -97,7 +97,12 @@ impl Engine {
             .ok_or("Nothing was heard in the recording. Is the microphone on?")?;
         let secs = take.seconds();
         let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
-        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+        // not create_dir_all: a text deleted while the take was scored must not come back as a folder of its tries
+        match std::fs::create_dir(dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err("the text was deleted".into()),
+            Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => return Err(error.to_string()),
+            _ => {}
+        }
         let now = chrono::Local::now();
         let id = Store::new_try(dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
         let file = dir.join(format!("{id}.wav"));
@@ -504,6 +509,28 @@ mod tests {
         // later takes say the same, not "file not found"
         assert!(engine.with_recognizer(|_| Ok(())).unwrap_err().contains("restart Parrot"));
         let _ = std::fs::remove_dir_all(models);
+    }
+
+    #[test]
+    fn a_take_of_a_deleted_text_is_not_kept() {
+        let data = std::env::temp_dir().join(format!("parrot-deleted-take-{}", std::process::id()));
+        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let id = engine.store.add("Hello there.", None, None).unwrap().id;
+        let part = engine.store.part_dir(&id, "Hello there.").unwrap();
+        let tone: Vec<f32> =
+            (0..16000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
+        let wav_path = data.join("take.wav");
+        audio::write_wav(&wav_path, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
+        let wav = std::fs::read(&wav_path).unwrap();
+        // the text is deleted while the take is being scored
+        let delete_while_scoring = |engine: &Engine, _audio: &[f32], _secs: f64, _txt: &str| {
+            engine.store.delete(&engine.store.list()[0].id).unwrap();
+            Ok(Scored { heard: String::new(), words: vec![], score: 0, wpm: 0 })
+        };
+        let error = engine.keep_take(&part, "Hello there.", &wav, delete_while_scoring).unwrap_err();
+        assert_eq!(error, "the text was deleted");
+        assert!(!data.join("texts").join(&id).exists(), "no folder of the text comes back");
+        let _ = std::fs::remove_dir_all(data);
     }
 
     #[test]
