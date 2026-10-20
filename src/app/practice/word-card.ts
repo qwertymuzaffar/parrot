@@ -132,7 +132,7 @@ import { SoundUnits } from './sound-units';
         [title]="practice.recording() ? 'Stop and score the word' : 'Record the word on its own: it does not change the sentence’s score'"
       >
         @if (practice.recording()) {
-          <app-icon name="stop" [size]="14" /> Stop <span class="time">{{ recorder.elapsed().toFixed(1) }} s</span>
+          <app-icon name="stop" [size]="14" /> Stop
         } @else if (practice.checking()) {
           <span class="spinner"></span> Scoring…
         } @else {
@@ -273,10 +273,6 @@ import { SoundUnits } from './sound-units';
         border-color: var(--rec);
         color: var(--rec);
       }
-    }
-    .time {
-      font-weight: 500;
-      font-variant-numeric: tabular-nums;
     }
     .spinner {
       width: 14px;

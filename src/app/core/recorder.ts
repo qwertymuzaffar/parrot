@@ -19,6 +19,9 @@ export type TakeFor = 'part' | 'word';
 /** What to say when the microphone would not start. */
 export const micError = (error: unknown) => `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`;
 
+/** how long a take goes on after Stop is clicked */
+const AFTER_STOP_MS = 250;
+
 /**
  * The microphone: one take at a time, with its length and a level for the meter. A take is plain PCM made into a
  * WAV file, the same on every system (no browser codec to decode in the engine).
@@ -153,13 +156,14 @@ export class Recorder {
   async stop(): Promise<Blob> {
     if (!this.ctx || !this.capturing) return new Blob();
     clearInterval(this.timer);
-    // let the last block arrive from the audio thread
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    this.recording.set(false);
+    this.level.set(0);
+    // keep listening a moment after the click: a take stopped right as a word ends would lose its last sound, and a
+    // short word with it (the owner stays set, so no other take starts meanwhile)
+    await new Promise((resolve) => setTimeout(resolve, AFTER_STOP_MS));
     this.capturing = false;
     const rate = this.ctx.sampleRate;
-    this.recording.set(false);
     this.owner.set(null);
-    this.level.set(0);
     this.idle = window.setTimeout(() => this.close(), 120_000);
     const total = this.blocks.reduce((sum, block) => sum + block.length, 0);
     const pcm = new Int16Array(total);

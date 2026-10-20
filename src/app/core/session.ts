@@ -174,8 +174,9 @@ export class Session {
   private async finishRecording() {
     const text = this.text()!;
     const part = this.part()!;
-    const blob = await this.recorder.stop();
+    // scoring from the click on, while the take's last moment is still being recorded
     this.checking.set(true);
+    const blob = await this.recorder.stop();
     try {
       const attempt = await this.engine.check(text.id, part.text, blob);
       this.scores.update((scores) => ({

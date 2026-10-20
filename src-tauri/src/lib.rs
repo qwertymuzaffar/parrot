@@ -81,7 +81,9 @@ impl Engine {
     /// what was heard and scored.
     fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: fn(&Self, &[f32], f64, &str) -> Result<Scored, String>) -> Result<Attempt, String> {
         let raw = audio::read_wav(wav)?;
-        let take = audio::clean(raw).filter(|cleaned| cleaned.seconds() >= 0.5).ok_or("Nothing was heard in the recording. Is the microphone on?")?;
+        let take = audio::clean(raw)
+            .filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE)
+            .ok_or("Nothing was heard in the recording. Is the microphone on?")?;
         let secs = take.seconds();
         let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;

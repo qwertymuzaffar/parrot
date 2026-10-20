@@ -98,8 +98,9 @@ export class WordPractice {
 
   private async finishRecording() {
     const practised = this.taking!;
-    const blob = await this.recorder.stop();
+    // scoring from the click on, while the take's last moment is still being recorded
     this.checking.set(true);
+    const blob = await this.recorder.stop();
     try {
       const attempt = await this.engine.checkWord(practised.textId, practised.word, blob);
       const tries = await this.engine.wordAttempts(practised.textId, practised.word);

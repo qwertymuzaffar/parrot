@@ -63,6 +63,10 @@ fn db(rms: f32) -> f32 {
     20.0 * rms.max(1e-9).log10()
 }
 
+/// The shortest cleaned take that is kept: a short word said alone, with the lead-in kept before it and a take
+/// stopped right after it, is about this long. Shorter is a breath or a click, not speech.
+pub const SHORTEST_TAKE: f64 = 0.3;
+
 /// Clean a take: high-pass, trim the silence before (keeping 0.15 s) and after (0.25 s) the voice, and level it
 /// to about -20 dBFS of speech, never above 0.95. Returns None when nothing but silence was recorded.
 pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
@@ -172,6 +176,17 @@ mod tests {
         samples.extend(vec![0.0001f32; rate as usize / 2]);
         let out = clean(Pcm { samples, rate }).expect("the voice is kept");
         assert!(out.seconds() > 1.0, "{}", out.seconds());
+    }
+
+    #[test]
+    fn a_short_word_stopped_right_after_is_long_enough() {
+        // "out" said alone (0.2 s), the take stopped 50 ms after it: under the half second once asked for
+        let rate = 48000;
+        let mut samples = vec![0.0001f32; rate as usize / 2];
+        samples.extend(tone(rate, 0.2, 0.05));
+        samples.extend(vec![0.0001f32; rate as usize / 20]);
+        let out = clean(Pcm { samples, rate }).unwrap();
+        assert!(out.seconds() >= SHORTEST_TAKE && out.seconds() < 0.5, "{}", out.seconds());
     }
 
     #[test]
