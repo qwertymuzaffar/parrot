@@ -1,6 +1,7 @@
 :host {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 332px;
+  // the texts column gives up a little room in narrow windows (236 px from a 1240 px window up)
+  grid-template-columns: clamp(200px, 19.1vw, 236px) minmax(0, 1fr) 332px;
   height: 100%;
   overflow: hidden;
 }
@@ -10,6 +11,8 @@ main {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  // the dock fits itself to the centre's width
+  container: centre / inline-size;
 }
 
 header {
@@ -375,6 +378,48 @@ header {
     padding: 0;
     font-size: 12px;
     font-weight: 600;
+  }
+}
+
+// a dock button reduced to its icon: its label stays for screen readers, and its title for the pointer
+@mixin icon-only {
+  width: 44px;
+  padding: 0;
+  .label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+// "Mine, then correct" gives up its label in a narrower centre, or makes room for Stop while something plays
+@container centre (width < 700px) {
+  .dock:has(.stop) .compare {
+    @include icon-only;
+  }
+}
+@container centre (width < 660px) {
+  .dock .compare {
+    @include icon-only;
+  }
+}
+
+// the narrowest (the smallest window): each side of the record button stacks its buttons in two rows
+@container centre (width < 560px) {
+  .dock {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 14px;
+    padding-inline: 16px;
+    .side {
+      flex-wrap: wrap;
+    }
+    .rates button {
+      width: 36px;
+    }
   }
 }
 

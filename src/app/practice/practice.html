@@ -144,11 +144,13 @@
         <app-icon [name]="playback.playing() === 'mine' && !playback.paused() ? 'pause' : 'play'" [size]="15" />
         Mine
       </button>
-      <button class="btn" [disabled]="!take" (click)="compare()" title="Your take, then the reference">
-        <app-icon name="swap" [size]="16" /> Mine, then correct
+      <button class="btn compare" [disabled]="!take" (click)="compare()" title="Your take, then the reference">
+        <app-icon name="swap" [size]="16" /> <span class="label">Mine, then correct</span>
       </button>
       @if (playback.playing()) {
-        <button class="btn ghost square" (click)="playback.stop()" aria-label="Stop (Esc)"><app-icon name="stop" [size]="15" /></button>
+        <button class="btn ghost square stop" (click)="playback.stop()" aria-label="Stop (Esc)">
+          <app-icon name="stop" [size]="15" />
+        </button>
       }
     </div>
   </footer>
