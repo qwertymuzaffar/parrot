@@ -12,7 +12,7 @@ mod text;
 
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use store::{Activity, Attempt, AttemptSummary, PartScore, Store, TextItem};
 use tauri::{AppHandle, Manager, State};
@@ -67,12 +67,24 @@ impl Engine {
     /// Save a take (a WAV file), score it against `part` and keep the result next to it.
     fn check(&self, text_id: &str, part: &str, wav: &[u8]) -> Result<Attempt, String> {
         let dir = self.store.part_dir(text_id, part)?;
+        self.keep_take(&dir, &store::norm(part), wav, score_take)
+    }
+
+    /// A take of one word of the text said alone, kept with that word's own tries: they never count toward the
+    /// part's or the text's scores.
+    fn check_word(&self, text_id: &str, word: &str, wav: &[u8]) -> Result<Attempt, String> {
+        let dir = self.store.word_dir(text_id, word)?;
+        self.keep_take(&dir, store::bare(word), wav, score_word)
+    }
+
+    /// Clean a take, score it against `txt` (as a part or as a word alone) and save both in `dir`: the recording, and
+    /// what was heard and scored.
+    fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: fn(&Self, &[f32], f64, &str) -> Result<Scored, String>) -> Result<Attempt, String> {
         let raw = audio::read_wav(wav)?;
         let take = audio::clean(raw).filter(|cleaned| cleaned.seconds() >= 0.5).ok_or("Nothing was heard in the recording. Is the microphone on?")?;
-        let txt = store::norm(part);
         let secs = take.seconds();
-        let scored = score_take(self, &audio::resample(&take, 16000), secs, &txt)?;
-        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
+        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         let now = chrono::Local::now();
         let id = now.format("%Y%m%d-%H%M%S").to_string();
         let file = dir.join(format!("{id}.wav"));
@@ -80,7 +92,7 @@ impl Engine {
         let attempt = Attempt {
             id,
             when: now.format("%Y-%m-%dT%H:%M:%S").to_string(),
-            text: txt,
+            text: txt.to_string(),
             heard: scored.heard,
             score: scored.score,
             wpm: scored.wpm,
@@ -88,7 +100,7 @@ impl Engine {
             duration: (secs * 100.0).round() / 100.0,
             audio: file.strip_prefix(&self.store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
         };
-        self.store.save_attempt(&dir, &attempt)?;
+        self.store.save_attempt(dir, &attempt)?;
         Ok(attempt)
     }
 }
@@ -148,6 +160,14 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Re
     })
 }
 
+/// Judge a take of one word said alone. Both checks give its verdict, but its score is the sound match: heard without
+/// the words around it, a single word is often misheard by speech recognition, and a score of 0 or 100 tells little.
+fn score_word(listener: &impl Listen, audio: &[f32], secs: f64, word: &str) -> Result<Scored, String> {
+    let mut scored = score_take(listener, audio, secs, word)?;
+    scored.score = scored.words.first().and_then(|said| said.score).map(|sound| (sound * 100.0).round() as i64).unwrap_or(0);
+    Ok(scored)
+}
+
 /// Run blocking engine work off the main thread.
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|error| error.to_string())?
@@ -198,6 +218,16 @@ fn attempt(engine: State<'_, Shared>, text: String, part: String, id: String) ->
 }
 
 #[tauri::command]
+fn word_attempts(engine: State<'_, Shared>, text: String, word: String) -> Result<Vec<AttemptSummary>, String> {
+    engine.store.word_attempts(&text, &word)
+}
+
+#[tauri::command]
+fn word_attempt(engine: State<'_, Shared>, text: String, word: String, id: String) -> Result<Attempt, String> {
+    engine.store.word_attempt(&text, &word, &id)
+}
+
+#[tauri::command]
 fn activity(engine: State<'_, Shared>) -> Activity {
     engine.store.activity()
 }
@@ -228,13 +258,26 @@ fn percent_decode(encoded: &str) -> String {
 /// A take: the WAV file as the request body, the text id and the part (URI-encoded) in the headers.
 #[tauri::command]
 async fn check(engine: State<'_, Shared>, request: tauri::ipc::Request<'_>) -> Result<Attempt, String> {
+    let (text_id, part, wav) = take_request(&request, "x-part")?;
+    let engine = engine.inner().clone();
+    blocking(move || engine.check(&text_id, &part, &wav)).await
+}
+
+/// A take of one word alone: the WAV file as the request body, the text id and the word (URI-encoded) in the headers.
+#[tauri::command]
+async fn check_word(engine: State<'_, Shared>, request: tauri::ipc::Request<'_>) -> Result<Attempt, String> {
+    let (text_id, word, wav) = take_request(&request, "x-word")?;
+    let engine = engine.inner().clone();
+    blocking(move || engine.check_word(&text_id, &word, &wav)).await
+}
+
+/// What a take sent to check or check_word carries: the text id, what was read (in the header `read`) and the WAV.
+fn take_request(request: &tauri::ipc::Request<'_>, read: &str) -> Result<(String, String, Vec<u8>), String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected the recording as raw bytes".into());
     };
     let header = |name: &str| request.headers().get(name).and_then(|value| value.to_str().ok()).map(percent_decode).unwrap_or_default();
-    let (text_id, part, wav) = (header("x-text"), header("x-part"), bytes.clone());
-    let engine = engine.inner().clone();
-    blocking(move || engine.check(&text_id, &part, &wav)).await
+    Ok((header("x-text"), header(read), bytes.clone()))
 }
 
 #[tauri::command]
@@ -272,9 +315,12 @@ pub fn run() {
             scores,
             attempts,
             attempt,
+            word_attempts,
+            word_attempt,
             activity,
             pron,
             check,
+            check_word,
             download_models
         ])
         .build(tauri::generate_context!())
@@ -359,6 +405,18 @@ mod tests {
         assert_eq!(statuses(&scored), vec![WordStatus::Wrong; 2]);
         assert_eq!(scored.score, 0);
         assert_eq!(listener.aligned.borrow().len(), 1);
+    }
+
+    #[test]
+    fn a_word_alone_is_judged_by_both_checks_and_scored_by_its_sound() {
+        let listener = FakeListener::hearing("There.");
+        let scored = score_word(&listener, &[], 0.6, store::bare("there?")).unwrap();
+        assert_eq!(*listener.aligned.borrow(), vec!["there"]);
+        assert_eq!((scored.score, statuses(&scored)), (90, vec![WordStatus::Good]));
+        // misheard, it is still scored by how clearly it was said, and the verdict says what was heard
+        let misheard = score_word(&FakeListener::hearing("Hair."), &[], 0.6, "there").unwrap();
+        assert_eq!((misheard.score, statuses(&misheard), misheard.words[0].heard.as_deref()), (90, vec![WordStatus::Wrong], Some("hair")));
+        assert_eq!(score_word(&FakeListener::hearing(""), &[], 0.6, "there").unwrap().words[0].status, WordStatus::Wrong);
     }
 
     /// A take through the whole engine, as the app runs it: needs the models on this machine.

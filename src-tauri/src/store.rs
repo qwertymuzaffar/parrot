@@ -1,11 +1,15 @@
 //! Where texts and tries are kept: plain files in the app's data folder, the same layout the first (Python) engine
 //! used, so a library made with it opens unchanged.
 //!
-//!     texts/<id>/text.txt          the text (id: the first 10 hex digits of the SHA-1 of its words)
-//!     texts/<id>/meta.json         title, practise mode, when created and last opened
-//!     texts/<id>/p-<sha1>/         one folder per part that has been recorded, named after its words
-//!         <time>.wav + <time>.json a try: the cleaned recording, and what was heard and scored
-//!     trash/                       deleted texts, moved here rather than erased
+//! ```text
+//! texts/<id>/text.txt          the text (id: the first 10 hex digits of the SHA-1 of its words)
+//! texts/<id>/meta.json         title, practise mode, when created and last opened
+//! texts/<id>/p-<sha1>/         one folder per part that has been recorded, named after its words
+//!     <time>.wav + <time>.json a try: the cleaned recording, and what was heard and scored
+//! texts/<id>/w-<sha1>/         one folder per word practised alone, named after it in lower case without the
+//!                              punctuation around it; the same kind of tries, kept apart from the parts' scores
+//! trash/                       deleted texts, moved here rather than erased
+//! ```
 
 use crate::text::WordResult;
 use chrono::Local;
@@ -23,6 +27,11 @@ pub fn norm(text: &str) -> String {
 pub fn sha(text: &str) -> String {
     let digest = Sha1::digest(norm(text).as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()[..10].to_string()
+}
+
+/// A word without the punctuation around it ("“there,” -> there"), as it is said alone.
+pub fn bare(word: &str) -> &str {
+    word.trim_matches(|character: char| ".,;:!?\"“”()".contains(character))
 }
 
 fn now() -> String {
@@ -118,6 +127,18 @@ impl Store {
             return Err("that part is not in the text; reload".into());
         }
         Ok(dir.join(format!("p-{}", sha(part))))
+    }
+
+    /// The folder of one word's tries said alone, checked to really be a word of the text; every place the word is
+    /// in the text ("The", "the,") shares it.
+    pub fn word_dir(&self, id: &str, word: &str) -> Result<PathBuf, String> {
+        let dir = self.text_dir(id)?;
+        let full = fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?;
+        let word = bare(word.trim()).to_lowercase();
+        if word.is_empty() || !full.split_whitespace().any(|each| bare(each).to_lowercase() == word) {
+            return Err("that word is not in the text; reload".into());
+        }
+        Ok(dir.join(format!("w-{}", sha(&word))))
     }
 
     fn meta(dir: &Path) -> serde_json::Map<String, Value> {
@@ -241,17 +262,35 @@ impl Store {
     }
 
     pub fn attempts(&self, id: &str, part: &str) -> Result<Vec<AttemptSummary>, String> {
-        let mut tries = Self::read_attempts(&self.part_dir(id, part)?);
-        tries.reverse();
-        Ok(tries
-            .into_iter()
-            .map(|attempt| AttemptSummary { id: attempt.id, when: attempt.when, score: attempt.score, wpm: attempt.wpm, duration: attempt.duration })
-            .collect())
+        Ok(Self::summaries(&self.part_dir(id, part)?))
     }
 
     pub fn attempt(&self, id: &str, part: &str, attempt: &str) -> Result<Attempt, String> {
+        Self::read_attempt(&self.part_dir(id, part)?, attempt)
+    }
+
+    /// The tries of one word said alone, newest first.
+    pub fn word_attempts(&self, id: &str, word: &str) -> Result<Vec<AttemptSummary>, String> {
+        Ok(Self::summaries(&self.word_dir(id, word)?))
+    }
+
+    pub fn word_attempt(&self, id: &str, word: &str, attempt: &str) -> Result<Attempt, String> {
+        Self::read_attempt(&self.word_dir(id, word)?, attempt)
+    }
+
+    /// The tries in a folder, newest first.
+    fn summaries(dir: &Path) -> Vec<AttemptSummary> {
+        let mut tries = Self::read_attempts(dir);
+        tries.reverse();
+        tries
+            .into_iter()
+            .map(|attempt| AttemptSummary { id: attempt.id, when: attempt.when, score: attempt.score, wpm: attempt.wpm, duration: attempt.duration })
+            .collect()
+    }
+
+    fn read_attempt(dir: &Path, attempt: &str) -> Result<Attempt, String> {
         let name: String = attempt.chars().filter(|character| character.is_ascii_digit() || *character == '-').collect();
-        let path = self.part_dir(id, part)?.join(format!("{name}.json"));
+        let path = dir.join(format!("{name}.json"));
         serde_json::from_str(&fs::read_to_string(&path).map_err(|_| format!("not found: {name}"))?).map_err(|error| error.to_string())
     }
 
@@ -318,6 +357,64 @@ mod tests {
         assert_eq!(store.update(&id, Some("Hi".into()), None, true).unwrap().title, "Hi");
         store.delete(&id).unwrap();
         assert!(store.list().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_word_has_one_folder_wherever_it_is_in_the_text() {
+        let dir = std::env::temp_dir().join(format!("parrot-word-dir-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("“There” it is. Is it there?", None, None).unwrap().id;
+        let there = store.word_dir(&id, "there?").unwrap();
+        assert!(there.file_name().unwrap().to_string_lossy().starts_with("w-"));
+        assert_eq!(store.word_dir(&id, "“There”").unwrap(), there);
+        assert_eq!(store.word_dir(&id, "THERE").unwrap(), there);
+        assert_ne!(store.word_dir(&id, "it").unwrap(), there);
+        for missing in ["here", "it is", "", "?", "the"] {
+            assert!(store.word_dir(&id, missing).is_err(), "{missing:?} is not a word of the text");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn word_tries_never_count_toward_the_text() {
+        let dir = std::env::temp_dir().join(format!("parrot-word-tries-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there. How are you?", None, None).unwrap().id;
+        // named like real tries, today, so the week's activity would count them if it looked
+        let take = Local::now().format("%Y%m%d-%H%M%S").to_string();
+        let attempt = |text: &str, score: i64| Attempt {
+            id: take.clone(),
+            when: now(),
+            text: text.into(),
+            heard: text.into(),
+            words: vec![],
+            duration: 1.0,
+            wpm: 60,
+            score,
+            audio: String::new(),
+        };
+        let word = store.word_dir(&id, "there.").unwrap();
+        fs::create_dir_all(&word).unwrap();
+        store.save_attempt(&word, &attempt("there", 40)).unwrap();
+        assert_eq!(store.word_attempts(&id, "There").unwrap().iter().map(|summary| summary.score).collect::<Vec<_>>(), vec![40]);
+        assert_eq!(store.word_attempt(&id, "there", &take).unwrap().text, "there");
+        assert!(store.scores(&id).unwrap().is_empty());
+        let text = store.list().remove(0);
+        assert_eq!((text.practised, text.average), (0, None));
+        let activity = store.activity();
+        assert_eq!((activity.tries, activity.average), (0, None));
+        assert!(activity.days.iter().all(|day| day.tries == 0));
+        // a part's try beside it still counts, alone
+        let part = store.part_dir(&id, "How are you?").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        store.save_attempt(&part, &attempt("How are you?", 80)).unwrap();
+        assert_eq!(store.scores(&id).unwrap().values().map(|score| (score.last, score.tries)).collect::<Vec<_>>(), vec![(80, 1)]);
+        let text = store.list().remove(0);
+        assert_eq!((text.practised, text.average), (1, Some(80)));
+        let activity = store.activity();
+        assert_eq!((activity.tries, activity.average, activity.days[6].tries), (1, Some(80), 1));
+        assert_eq!(store.attempts(&id, "How are you?").unwrap().len(), 1);
         let _ = fs::remove_dir_all(dir);
     }
 
