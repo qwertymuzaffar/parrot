@@ -4,7 +4,7 @@ import { Engine } from './engine';
 import { errorMessage, Library } from './library';
 import { Attempt, AttemptSummary, Mode, Part, PartScore } from './models';
 import { Playback } from './playback';
-import { Recorder } from './recorder';
+import { micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
 import { bare, splitText } from './split';
 
@@ -28,6 +28,8 @@ export class Session {
   readonly result = signal<Attempt | null>(null);
   readonly history = signal<AttemptSummary[]>([]);
   readonly checking = signal(false);
+  /** a take of the part is being recorded (not one of a word said alone) */
+  readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'part');
   readonly selected = signal<number | null>(null);
   /** the loudness of the shown try, for the waveform (null while loading) */
   readonly peaks = signal<number[] | null>(null);
@@ -157,14 +159,15 @@ export class Session {
   // ---- recording
 
   async toggleRecord() {
-    if (this.recorder.recording()) return this.finishRecording();
-    if (this.checking() || !this.part()) return;
+    // the microphone may be busy with a word said alone (WordPractice): that take is not this one to finish
+    if (this.recorder.owner() === 'part' && this.recorder.recording()) return this.finishRecording();
+    if (this.recorder.owner() || this.checking() || !this.part()) return;
     this.playback.stop();
     try {
-      await this.recorder.start();
+      await this.recorder.start('part');
       this.failure.set(null);
     } catch (error) {
-      this.failure.set(`No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`);
+      this.failure.set(micError(error));
     }
   }
 

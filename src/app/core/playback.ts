@@ -89,6 +89,12 @@ export class Playback {
     return this.cutMyWord(attempt, wordIndex);
   }
 
+  /** A try of one word said alone, played whole (it lights up nothing in the part). */
+  playWordTry(attempt: Attempt) {
+    this.run++;
+    return this.sound.playClip(this.engine.audioUrl(attempt.audio));
+  }
+
   /** A word as I said it, then as it should sound. */
   compareWord(attempt: Attempt, wordIndex: number, word: string) {
     // my word is the chain's first step: it must not start a chain of its own, or the chain stops after it

@@ -73,6 +73,19 @@ export class HttpEngine extends Engine {
     });
   }
 
+  // the Python prototype keeps no tries of single words
+  async checkWord(_textId: string, _word: string, _audio: Blob): Promise<never> {
+    throw new EngineError('Word practice needs the desktop app');
+  }
+
+  async wordAttempts(_textId: string, _word: string): Promise<never> {
+    throw new EngineError('Word practice needs the desktop app');
+  }
+
+  async wordAttempt(_textId: string, _word: string, _id: string): Promise<never> {
+    throw new EngineError('Word practice needs the desktop app');
+  }
+
   activity() {
     return this.http<Activity>('/api/activity');
   }

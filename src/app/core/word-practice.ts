@@ -1,0 +1,116 @@
+import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { Engine } from './engine';
+import { errorMessage } from './library';
+import { Attempt, AttemptSummary } from './models';
+import { Playback } from './playback';
+import { micError, Recorder } from './recorder';
+import { Session } from './session';
+import { bare } from './split';
+
+/** The word practised: the text it is in, the word as written there ("there,"), and the folder its tries share. */
+interface PractisedWord {
+  textId: string;
+  word: string;
+  key: string;
+}
+
+/**
+ * Practising the selected word on its own: its own tries, and recording a new one. Word tries are kept apart from
+ * the part's: they never change its take, its scores, the text's progress or the week's activity.
+ */
+@Injectable({ providedIn: 'root' })
+export class WordPractice {
+  private engine = inject(Engine);
+  private session = inject(Session);
+  private playback = inject(Playback);
+  private recorder = inject(Recorder);
+
+  /** the word selected in the session; the same word elsewhere in the text, or in another case, is the same one */
+  readonly practised = computed<PractisedWord | null>(
+    () => {
+      const text = this.session.text();
+      const wordIndex = this.session.selected();
+      const word = wordIndex == null ? '' : (this.session.words()[wordIndex] ?? '');
+      return text && bare(word) ? { textId: text.id, word, key: `${text.id} ${bare(word).toLowerCase()}` } : null;
+    },
+    { equal: (first, second) => first?.key === second?.key },
+  );
+  /** the word's tries, newest first, and the newest in full */
+  readonly tries = signal<AttemptSummary[]>([]);
+  readonly latest = signal<Attempt | null>(null);
+  readonly checking = signal(false);
+  readonly error = signal<string | null>(null);
+  /** a take of the word is being recorded (not one of the part) */
+  readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'word');
+  /** the word the take being recorded is of */
+  private taking: PractisedWord | null = null;
+
+  constructor() {
+    effect(() => {
+      const practised = this.practised();
+      untracked(() => {
+        // a take of a word no longer shown is dropped, not scored
+        if (this.recorder.owner() === 'word' && this.taking?.key !== practised?.key) void this.recorder.stop();
+        this.load(practised);
+      });
+    });
+  }
+
+  private async load(practised: PractisedWord | null) {
+    this.tries.set([]);
+    this.latest.set(null);
+    this.error.set(null);
+    if (!practised) return;
+    try {
+      const tries = await this.engine.wordAttempts(practised.textId, practised.word);
+      if (!this.still(practised)) return;
+      this.tries.set(tries);
+      if (!tries.length) return;
+      const latest = await this.engine.wordAttempt(practised.textId, practised.word, tries[0].id);
+      if (this.still(practised)) this.latest.set(latest);
+    } catch (error) {
+      if (this.still(practised)) this.error.set(errorMessage(error));
+    }
+  }
+
+  /** whether the word is still the one shown */
+  private still(practised: PractisedWord) {
+    return this.practised()?.key === practised.key;
+  }
+
+  async toggleRecord() {
+    // the microphone may be busy with a take of the part (Session): that take is not this one to finish
+    if (this.recorder.owner() === 'word' && this.recorder.recording()) return this.finishRecording();
+    const practised = this.practised();
+    if (this.recorder.owner() || this.checking() || !practised) return;
+    this.playback.stop();
+    this.taking = practised;
+    try {
+      await this.recorder.start('word');
+      this.error.set(null);
+    } catch (error) {
+      this.error.set(micError(error));
+      return;
+    }
+    // another word was chosen while the microphone opened
+    if (!this.still(practised)) await this.recorder.stop();
+  }
+
+  private async finishRecording() {
+    const practised = this.taking!;
+    const blob = await this.recorder.stop();
+    this.checking.set(true);
+    try {
+      const attempt = await this.engine.checkWord(practised.textId, practised.word, blob);
+      const tries = await this.engine.wordAttempts(practised.textId, practised.word);
+      if (!this.still(practised)) return;
+      this.tries.set(tries);
+      this.latest.set(attempt);
+      this.error.set(null);
+    } catch (error) {
+      if (this.still(practised)) this.error.set(errorMessage(error));
+    } finally {
+      this.checking.set(false);
+    }
+  }
+}

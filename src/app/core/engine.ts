@@ -45,6 +45,15 @@ export abstract class Engine {
   /** Score a take (a WAV recording) of one part of a text. */
   abstract check(textId: string, part: string, audio: Blob): Promise<Attempt>;
 
+  /** Score a take of one word of a text said alone. Word tries are kept apart: they never count toward the part's
+   * or the text's scores. Their score is the word's sound match; its verdict says whether speech recognition heard it. */
+  abstract checkWord(textId: string, word: string, audio: Blob): Promise<Attempt>;
+
+  /** The tries of one word said alone, newest first (every place the word is in the text shares them). */
+  abstract wordAttempts(textId: string, word: string): Promise<AttemptSummary[]>;
+
+  abstract wordAttempt(textId: string, word: string, id: string): Promise<Attempt>;
+
   abstract activity(): Promise<Activity>;
 
   abstract soundsLike(word: string): Promise<SoundsLike>;

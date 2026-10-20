@@ -65,6 +65,19 @@ export class TauriEngine extends Engine {
     return this.call<Attempt>('check', bytes, { headers: { 'x-text': textId, 'x-part': encodeURIComponent(part) } });
   }
 
+  async checkWord(textId: string, word: string, audio: Blob) {
+    const bytes = new Uint8Array(await audio.arrayBuffer());
+    return this.call<Attempt>('check_word', bytes, { headers: { 'x-text': textId, 'x-word': encodeURIComponent(word) } });
+  }
+
+  wordAttempts(textId: string, word: string) {
+    return this.call<AttemptSummary[]>('word_attempts', { text: textId, word });
+  }
+
+  wordAttempt(textId: string, word: string, id: string) {
+    return this.call<Attempt>('word_attempt', { text: textId, word, id });
+  }
+
   activity() {
     return this.call<Activity>('activity');
   }

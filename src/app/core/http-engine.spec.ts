@@ -57,6 +57,13 @@ describe('HttpEngine', () => {
     await expect(new HttpEngine().texts()).rejects.toThrow(/not running/);
   });
 
+  it('says that practising a word alone needs the desktop app', async () => {
+    const engine = new HttpEngine();
+    await expect(engine.wordAttempts('95e3ac5665', 'there')).rejects.toThrow(new EngineError('Word practice needs the desktop app'));
+    await expect(engine.checkWord('95e3ac5665', 'there', new Blob())).rejects.toBeInstanceOf(EngineError);
+    expect(requests).toEqual([]);
+  });
+
   it('serves saved recordings from its files folder', () => {
     expect(new HttpEngine().audioUrl('/files/texts/95e3ac5665/p-1/take.wav')).toBe(`${DEV_ENGINE}/files/texts/95e3ac5665/p-1/take.wav`);
   });

@@ -25,6 +25,8 @@ describe('TauriEngine', () => {
     await engine.deleteText('95e3ac5665');
     await engine.scores('95e3ac5665');
     await engine.attempts('95e3ac5665', 'Hello there.');
+    await engine.wordAttempts('95e3ac5665', 'there.');
+    await engine.wordAttempt('95e3ac5665', 'there.', '20260101-120000');
     await engine.activity();
     await engine.soundsLike('things');
     expect(calls).toEqual([
@@ -34,8 +36,25 @@ describe('TauriEngine', () => {
       { cmd: 'delete_text', args: { id: '95e3ac5665' } },
       { cmd: 'scores', args: { text: '95e3ac5665' } },
       { cmd: 'attempts', args: { text: '95e3ac5665', part: 'Hello there.' } },
+      { cmd: 'word_attempts', args: { text: '95e3ac5665', word: 'there.' } },
+      { cmd: 'word_attempt', args: { text: '95e3ac5665', word: 'there.', id: '20260101-120000' } },
       { cmd: 'activity', args: {} },
       { cmd: 'pron', args: { w: 'things' } },
+    ]);
+  });
+
+  it('sends a take as the raw body, with the text and what was read in the headers', async () => {
+    const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (...args: unknown[]) => unknown } }).__TAURI_INTERNALS__;
+    const invoke = vi.spyOn(internals, 'invoke');
+    const engine = new TauriEngine();
+    await engine.check('95e3ac5665', 'Hello there.', new Blob(['take']));
+    await engine.checkWord('95e3ac5665', '“there,”', new Blob(['take']));
+    // the body's bytes as numbers: the Uint8Array is made in the page, not in the test's own realm
+    const take = [...'take'].map((char) => char.charCodeAt(0));
+    const sent = invoke.mock.calls.map(([cmd, body, options]) => [cmd, Array.from(body as Uint8Array), options]);
+    expect(sent).toEqual([
+      ['check', take, { headers: { 'x-text': '95e3ac5665', 'x-part': 'Hello%20there.' } }],
+      ['check_word', take, { headers: { 'x-text': '95e3ac5665', 'x-word': '%E2%80%9Cthere%2C%E2%80%9D' } }],
     ]);
   });
 

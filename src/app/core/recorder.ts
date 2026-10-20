@@ -13,6 +13,12 @@ class Capture extends AudioWorkletProcessor {
 registerProcessor('parrot-capture', Capture);
 `;
 
+/** Who a take is recorded for: the part being practised (a sentence take) or the word selected, said alone. */
+export type TakeFor = 'part' | 'word';
+
+/** What to say when the microphone would not start. */
+export const micError = (error: unknown) => `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`;
+
 /**
  * The microphone: one take at a time, with its length and a level for the meter. A take is plain PCM made into a
  * WAV file, the same on every system (no browser codec to decode in the engine).
@@ -20,6 +26,8 @@ registerProcessor('parrot-capture', Capture);
 @Injectable({ providedIn: 'root' })
 export class Recorder {
   readonly recording = signal(false);
+  /** who the take is for, from the click that starts it until it stops: only they stop it */
+  readonly owner = signal<TakeFor | null>(null);
   readonly elapsed = signal(0);
   /** 0-1, the loudest sample of the last few milliseconds */
   readonly level = signal(0);
@@ -91,14 +99,16 @@ export class Recorder {
     this.preroll = [];
   }
 
-  async start(): Promise<void> {
+  async start(owner: TakeFor): Promise<void> {
     if (this.capturing) return; // a second click while the microphone opens
     clearTimeout(this.idle);
     this.capturing = true;
+    this.owner.set(owner);
     try {
       await this.open();
     } catch (error) {
       this.capturing = false;
+      this.owner.set(null);
       throw error;
     }
     const ctx = this.ctx!;
@@ -110,6 +120,7 @@ export class Recorder {
     if (!(await Promise.race([arrived, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000))]))) {
       // recording on would only make a silent take: say so now rather than after it
       this.capturing = false;
+      this.owner.set(null);
       this.flowing = null;
       this.close();
       throw new Error('no sound came through');
@@ -147,6 +158,7 @@ export class Recorder {
     this.capturing = false;
     const rate = this.ctx.sampleRate;
     this.recording.set(false);
+    this.owner.set(null);
     this.level.set(0);
     this.idle = window.setTimeout(() => this.close(), 120_000);
     const total = this.blocks.reduce((sum, block) => sum + block.length, 0);

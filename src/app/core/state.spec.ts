@@ -5,10 +5,11 @@ import { Engine, EngineError } from './engine';
 import { Library } from './library';
 import { Activity, Attempt, Mode, PartScore, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
-import { Recorder } from './recorder';
+import { Recorder, TakeFor } from './recorder';
 import { Session } from './session';
 import { Sound, Track } from './sound';
-import { partKey } from './split';
+import { bare, partKey } from './split';
+import { WordPractice } from './word-practice';
 
 const TEXT = 'Hello there. How are you? I am fine.';
 const ID = '95e3ac5665';
@@ -31,8 +32,11 @@ function attempt(id: string, part: string, score: number, statuses: WordStatus[]
 class FakeEngine extends Engine {
   library: TextItem[] = [];
   tries: Record<string, Attempt[]> = {};
-  /** what the next take is scored as */
+  /** the tries of words said alone, by the word in lower case without its punctuation (oldest first) */
+  wordTries: Record<string, Attempt[]> = {};
+  /** what the next take is scored as, and the next take of a word alone */
   nextCheck: Attempt | null = null;
+  nextWordCheck: Attempt | null = null;
   down = false;
   calls: string[] = [];
 
@@ -103,6 +107,21 @@ class FakeEngine extends Engine {
     (this.tries[part] ??= []).push(this.nextCheck);
     return this.nextCheck;
   }
+  async checkWord(_textId: string, word: string) {
+    this.calls.push(`checkWord ${word}`);
+    if (!this.nextWordCheck) throw new EngineError('Nothing was heard in the recording. Is the microphone on?');
+    (this.wordTries[bare(word).toLowerCase()] ??= []).push(this.nextWordCheck);
+    return this.nextWordCheck;
+  }
+  async wordAttempts(_textId: string, word: string) {
+    this.calls.push(`wordAttempts ${word}`);
+    const tries = this.wordTries[bare(word).toLowerCase()] ?? [];
+    return [...tries].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+  }
+  async wordAttempt(_textId: string, word: string, id: string) {
+    this.calls.push(`wordAttempt ${id}`);
+    return this.wordTries[bare(word).toLowerCase()].find((each) => each.id === id)!;
+  }
   async activity(): Promise<Activity> {
     return { days: [], tries: 0, average: null };
   }
@@ -167,13 +186,17 @@ class FakeClips {
 
 class FakeRecorder {
   readonly recording = signal(false);
+  readonly owner = signal<TakeFor | null>(null);
+  readonly elapsed = signal(0);
   micAllowed = true;
-  async start() {
+  async start(owner: TakeFor) {
     if (!this.micAllowed) throw new Error('Permission denied');
+    this.owner.set(owner);
     this.recording.set(true);
   }
   async stop() {
     this.recording.set(false);
+    this.owner.set(null);
     return new Blob(['take'], { type: 'audio/wav' });
   }
 }
@@ -231,6 +254,8 @@ function practiceApp() {
     compareWord: (wordIndex: number) => playback.compareWord(shown(), wordIndex, session.words()[wordIndex]),
     toggleRecord: () => session.toggleRecord(),
     checking: () => session.checking(),
+    recording: () => session.recording(),
+    playWordTry: (attempt: Attempt) => playback.playWordTry(attempt),
   };
 }
 
@@ -524,6 +549,96 @@ describe('the practice state', () => {
       await scoring;
       await settle();
       expect([app.index(), app.result()]).toEqual([2, null]);
+    });
+  });
+  describe('practising a word alone', () => {
+    let words: WordPractice;
+    /** select a word and let its tries load */
+    const choose = async (wordIndex: number | null) => {
+      app.selectWord(wordIndex);
+      TestBed.tick();
+      await settle();
+    };
+
+    beforeEach(async () => {
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 70, ['good', 'wrong', 'good'])];
+      await app.open(ID, 1);
+      await settle();
+      words = TestBed.inject(WordPractice);
+    });
+
+    it('loads the tries of the word selected, newest first, and the newest in full', async () => {
+      engine.wordTries['you'] = [attempt('w1', 'you', 60), attempt('w2', 'you', 85)];
+      await choose(2);
+      expect([words.tries().map((summary) => summary.id), words.latest()?.id, words.error()]).toEqual([['w2', 'w1'], 'w2', null]);
+      expect(engine.calls).toContain('wordAttempts you?');
+      app.playWordTry(words.latest()!);
+      expect(sound.log).toEqual([`clip audio:texts/${ID}/w2.wav`]);
+      expect(app.nowMine()).toBeNull();
+      await choose(0);
+      expect([words.tries(), words.latest()]).toEqual([[], null]);
+      await choose(null);
+      expect(engine.calls.filter((call) => call.startsWith('wordAttempts'))).toEqual(['wordAttempts you?', 'wordAttempts How']);
+    });
+
+    it("records a word try and scores it, leaving the part's take and scores as they were", async () => {
+      await choose(1);
+      const scores = app.scores();
+      const progress = app.progress();
+      const texts = engine.calls.filter((call) => call === 'texts').length;
+      await words.toggleRecord();
+      expect([recorder.owner(), words.recording(), app.recording()]).toEqual(['word', true, false]);
+      engine.nextWordCheck = attempt('w9', 'are', 72, ['wrong']);
+      await words.toggleRecord();
+      await settle();
+      expect([recorder.recording(), words.checking(), words.error()]).toEqual([false, false, null]);
+      expect([words.latest()?.id, words.tries().map((summary) => summary.id)]).toEqual(['w9', ['w9']]);
+      expect(engine.calls).toContain('checkWord are');
+      expect([app.result()?.id, app.history().map((summary) => summary.id), app.selected()]).toEqual(['t1', ['t1'], 1]);
+      expect([app.scores(), app.progress()]).toEqual([scores, progress]);
+      expect(engine.calls.filter((call) => call === 'texts').length).toBe(texts);
+    });
+
+    it('reports a word try that could not be scored', async () => {
+      await choose(1);
+      await words.toggleRecord();
+      await words.toggleRecord();
+      expect([words.error(), words.checking(), words.latest()]).toEqual([
+        'Nothing was heard in the recording. Is the microphone on?',
+        false,
+        null,
+      ]);
+    });
+
+    it("doesn't finish a word take as a take of the part", async () => {
+      await choose(1);
+      await words.toggleRecord();
+      await app.toggleRecord();
+      expect([recorder.recording(), recorder.owner()]).toEqual([true, 'word']);
+      expect(engine.calls.some((call) => call.startsWith('check '))).toBe(false);
+      engine.nextWordCheck = attempt('w1', 'are', 90);
+      await words.toggleRecord();
+      expect(engine.calls.filter((call) => call.startsWith('check'))).toEqual(['checkWord are']);
+    });
+
+    it("doesn't finish a take of the part as a word take", async () => {
+      await choose(1);
+      await app.toggleRecord();
+      await words.toggleRecord();
+      expect([recorder.recording(), recorder.owner(), words.recording()]).toEqual([true, 'part', false]);
+      engine.nextCheck = attempt('t2', 'How are you?', 100);
+      await app.toggleRecord();
+      await settle();
+      expect(engine.calls.filter((call) => call.startsWith('check'))).toEqual(['check How are you?']);
+      expect([app.result()?.id, words.latest()]).toEqual(['t2', null]);
+    });
+
+    it('drops a word take when another word is chosen', async () => {
+      await choose(1);
+      await words.toggleRecord();
+      await choose(2);
+      expect([recorder.recording(), recorder.owner()]).toEqual([false, null]);
+      expect(engine.calls.some((call) => call.startsWith('checkWord'))).toBe(false);
     });
   });
 });
