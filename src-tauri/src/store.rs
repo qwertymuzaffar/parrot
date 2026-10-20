@@ -168,7 +168,7 @@ impl Store {
                     .collect()
             })
             .unwrap_or_default();
-        files.sort();
+        files.sort_by_key(|path| try_order(path));
         files.iter().filter_map(|path| fs::read_to_string(path).ok().and_then(|contents| serde_json::from_str(&contents).ok())).collect()
     }
 
@@ -294,6 +294,23 @@ impl Store {
         serde_json::from_str(&fs::read_to_string(&path).map_err(|_| format!("not found: {name}"))?).map_err(|error| error.to_string())
     }
 
+    /// Claim the id of a new try in `dir` by creating its empty <id>.wav: the time stamp, or the stamp with -2, -3...
+    /// when a try already has it (a second Parrot, the folder synced from another machine, the clock turned back).
+    pub fn new_try(dir: &Path, stamp: &str) -> Result<String, String> {
+        for count in 1.. {
+            let id = if count == 1 { stamp.to_string() } else { format!("{stamp}-{count}") };
+            if dir.join(format!("{id}.json")).exists() {
+                continue;
+            }
+            match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{id}.wav"))) {
+                Ok(_) => return Ok(id),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        unreachable!("the counter runs out before the folder does")
+    }
+
     pub fn save_attempt(&self, dir: &Path, attempt: &Attempt) -> Result<(), String> {
         fs::write(dir.join(format!("{}.json", attempt.id)), serde_json::to_string_pretty(attempt).unwrap()).map_err(|error| error.to_string())
     }
@@ -329,6 +346,17 @@ impl Store {
             tries: scored as i64,
             average: rounded_mean(total, scored),
         }
+    }
+}
+
+/// Where a try's file goes among the others, oldest first: by its time stamp, then by the -2, -3... a try made in
+/// the same second got (plain name order would put "...-2" before the first and "...-10" before "...-2").
+fn try_order(path: &Path) -> (String, u32) {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    match stem.rsplit_once('-') {
+        // the stamp itself has one dash (20261020-153000)
+        Some((stamp, count)) if stamp.contains('-') => (stamp.to_string(), count.parse().unwrap_or(u32::MAX)),
+        _ => (stem.to_string(), 1),
     }
 }
 
@@ -428,6 +456,41 @@ mod tests {
         fs::write(part.join("aééééx.json"), "{}").unwrap();
         let activity = store.activity();
         assert_eq!((activity.tries, activity.days.iter().map(|day| day.tries).sum::<usize>()), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tries_in_the_same_second_keep_apart_and_in_order() {
+        let dir = std::env::temp_dir().join(format!("parrot-same-second-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", None, None).unwrap().id;
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        let stamp = "20261020-153000";
+        for score in 1..=11 {
+            let take = Store::new_try(&part, stamp).unwrap();
+            let attempt = Attempt {
+                id: take,
+                when: "2026-10-20T15:30:00".into(),
+                text: "Hello there.".into(),
+                heard: String::new(),
+                words: vec![],
+                duration: 1.0,
+                wpm: 60,
+                score,
+                audio: String::new(),
+            };
+            store.save_attempt(&part, &attempt).unwrap();
+        }
+        let tries = store.attempts(&id, "Hello there.").unwrap();
+        // newest first, none lost
+        assert_eq!(tries.iter().map(|summary| summary.score).collect::<Vec<_>>(), (1..=11).rev().collect::<Vec<_>>());
+        assert_eq!((tries[0].id.as_str(), tries[9].id.as_str(), tries[10].id.as_str()), ("20261020-153000-11", "20261020-153000-2", stamp));
+        assert_eq!(store.scores(&id).unwrap().values().next().unwrap().last, 11);
+        assert_eq!(store.attempt(&id, "Hello there.", "20261020-153000-2").unwrap().score, 2);
+        // a try whose recording is gone still holds on to its id
+        fs::write(part.join("20261020-160000.json"), "{}").unwrap();
+        assert_eq!(Store::new_try(&part, "20261020-160000").unwrap(), "20261020-160000-2");
         let _ = fs::remove_dir_all(dir);
     }
 

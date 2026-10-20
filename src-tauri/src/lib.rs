@@ -99,9 +99,11 @@ impl Engine {
         let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         let now = chrono::Local::now();
-        let id = now.format("%Y%m%d-%H%M%S").to_string();
+        let id = Store::new_try(dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
         let file = dir.join(format!("{id}.wav"));
-        audio::write_wav(&file, &take)?;
+        audio::write_wav(&file, &take).inspect_err(|_| {
+            let _ = std::fs::remove_file(&file);
+        })?;
         let attempt = Attempt {
             id,
             when: now.format("%Y-%m-%dT%H:%M:%S").to_string(),
