@@ -81,14 +81,15 @@
             } @else if (session.checking()) {
               <span class="spinner"></span>
               <span>Listening to your take…</span>
+            } @else if (session.error()) {
+              <!-- before the take: a take that failed leaves the try before it on screen -->
+              <span class="error">{{ session.error() }}</span>
             } @else if (take) {
               <b>Your take</b>
               <span>· {{ take.duration.toFixed(1) }} s · try {{ session.history().length }}</span>
               <span class="grow"></span>
               <span class="key"><i class="k-wrong"></i>misheard</span>
               <span class="key"><i class="k-warn"></i>sounded off</span>
-            } @else if (session.error()) {
-              <span class="error">{{ session.error() }}</span>
             } @else {
               <span>Your take appears here. Listen first, then press the red button and read it aloud.</span>
             }

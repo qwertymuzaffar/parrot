@@ -124,6 +124,8 @@ export class Session {
     this.result.set(null);
     this.history.set([]);
     this.selected.set(null);
+    // what went wrong was on the part left (a take that failed, the microphone)
+    this.failure.set(null);
     writeSetting(`part:${text.id}:${text.mode}`, String(partIndex));
     const part = parts[partIndex];
     if (!this.scores()[part.key]) return;

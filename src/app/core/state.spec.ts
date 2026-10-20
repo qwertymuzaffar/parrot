@@ -537,6 +537,14 @@ describe('the practice state', () => {
       ]);
     });
 
+    it("leaves a failed take's error on its part", async () => {
+      await app.toggleRecord();
+      await app.toggleRecord();
+      app.next();
+      await settle();
+      expect([app.index(), app.error()]).toEqual([2, null]);
+    });
+
     it('asks for the microphone when it is not allowed', async () => {
       recorder.micAllowed = false;
       await app.toggleRecord();
