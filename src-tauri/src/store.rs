@@ -10,7 +10,7 @@
 use crate::text::WordResult;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::fs;

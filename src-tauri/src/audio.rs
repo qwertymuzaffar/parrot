@@ -69,11 +69,8 @@ pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
     let rate = pcm.rate as usize;
     high_pass(&mut pcm.samples, pcm.rate);
     let frame = (rate / 100).max(1); // 10 ms
-    let levels: Vec<f32> = pcm
-        .samples
-        .chunks(frame)
-        .map(|chunk| db((chunk.iter().map(|sample| sample * sample).sum::<f32>() / chunk.len() as f32).sqrt()))
-        .collect();
+    let levels: Vec<f32> =
+        pcm.samples.chunks(frame).map(|chunk| db((chunk.iter().map(|sample| sample * sample).sum::<f32>() / chunk.len() as f32).sqrt())).collect();
     let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
     // voice: frames within 35 dB of the loudest, and above the noise floor of a quiet room
     let threshold = (loudest - 35.0).max(-55.0);

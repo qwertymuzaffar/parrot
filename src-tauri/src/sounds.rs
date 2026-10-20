@@ -27,9 +27,21 @@ static DICT: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
 /// respelling and IPA of each vowel
 fn vowel(phone: &str) -> Option<(&'static str, &'static str)> {
     Some(match phone {
-        "AA" => ("aa", "ɑ"), "AE" => ("a", "æ"), "AH" => ("uh", "ʌ"), "AO" => ("aw", "ɔ"), "AW" => ("ow", "aʊ"),
-        "AY" => ("ai", "aɪ"), "EH" => ("eh", "ɛ"), "ER" => ("ur", "ɝ"), "EY" => ("ay", "eɪ"), "IH" => ("i", "ɪ"),
-        "IY" => ("ee", "i"), "OW" => ("oh", "oʊ"), "OY" => ("oy", "ɔɪ"), "UH" => ("u", "ʊ"), "UW" => ("oo", "u"),
+        "AA" => ("aa", "ɑ"),
+        "AE" => ("a", "æ"),
+        "AH" => ("uh", "ʌ"),
+        "AO" => ("aw", "ɔ"),
+        "AW" => ("ow", "aʊ"),
+        "AY" => ("ai", "aɪ"),
+        "EH" => ("eh", "ɛ"),
+        "ER" => ("ur", "ɝ"),
+        "EY" => ("ay", "eɪ"),
+        "IH" => ("i", "ɪ"),
+        "IY" => ("ee", "i"),
+        "OW" => ("oh", "oʊ"),
+        "OY" => ("oy", "ɔɪ"),
+        "UH" => ("u", "ʊ"),
+        "UW" => ("oo", "u"),
         _ => return None,
     })
 }
@@ -37,11 +49,30 @@ fn vowel(phone: &str) -> Option<(&'static str, &'static str)> {
 /// respelling and IPA of each consonant
 fn consonant(phone: &str) -> (&'static str, &'static str) {
     match phone {
-        "B" => ("b", "b"), "CH" => ("ch", "tʃ"), "D" => ("d", "d"), "DH" => ("dh", "ð"), "F" => ("f", "f"),
-        "G" => ("g", "ɡ"), "HH" => ("h", "h"), "JH" => ("j", "dʒ"), "K" => ("k", "k"), "L" => ("l", "l"),
-        "M" => ("m", "m"), "N" => ("n", "n"), "NG" => ("ng", "ŋ"), "P" => ("p", "p"), "R" => ("r", "ɹ"),
-        "S" => ("s", "s"), "SH" => ("sh", "ʃ"), "T" => ("t", "t"), "TH" => ("th", "θ"), "V" => ("v", "v"),
-        "W" => ("w", "w"), "Y" => ("y", "j"), "Z" => ("z", "z"), "ZH" => ("zh", "ʒ"),
+        "B" => ("b", "b"),
+        "CH" => ("ch", "tʃ"),
+        "D" => ("d", "d"),
+        "DH" => ("dh", "ð"),
+        "F" => ("f", "f"),
+        "G" => ("g", "ɡ"),
+        "HH" => ("h", "h"),
+        "JH" => ("j", "dʒ"),
+        "K" => ("k", "k"),
+        "L" => ("l", "l"),
+        "M" => ("m", "m"),
+        "N" => ("n", "n"),
+        "NG" => ("ng", "ŋ"),
+        "P" => ("p", "p"),
+        "R" => ("r", "ɹ"),
+        "S" => ("s", "s"),
+        "SH" => ("sh", "ʃ"),
+        "T" => ("t", "t"),
+        "TH" => ("th", "θ"),
+        "V" => ("v", "v"),
+        "W" => ("w", "w"),
+        "Y" => ("y", "j"),
+        "Z" => ("z", "z"),
+        "ZH" => ("zh", "ʒ"),
         _ => ("", ""),
     }
 }

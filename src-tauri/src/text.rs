@@ -5,42 +5,104 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use similar::{capture_diff_slices, Algorithm, DiffOp};
+use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 static UNITS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen"
-        .split(' ').enumerate().map(|(value, word)| (word, value as i64)).collect()
+        .split(' ')
+        .enumerate()
+        .map(|(value, word)| (word, value as i64))
+        .collect()
 });
 static TENS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     "twenty thirty forty fifty sixty seventy eighty ninety".split(' ').enumerate().map(|(index, word)| (word, 10 * (index as i64 + 2))).collect()
 });
 // "second" is left out on purpose: it is far more often the time unit ("twenty seconds") than the ordinal
 static ORDINALS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
-    [("first", 1), ("third", 3), ("fourth", 4), ("fifth", 5), ("sixth", 6), ("seventh", 7), ("eighth", 8), ("ninth", 9),
-     ("tenth", 10), ("eleventh", 11), ("twelfth", 12), ("thirteenth", 13), ("fourteenth", 14), ("fifteenth", 15),
-     ("sixteenth", 16), ("seventeenth", 17), ("eighteenth", 18), ("nineteenth", 19), ("twentieth", 20), ("thirtieth", 30),
-     ("fortieth", 40), ("fiftieth", 50), ("sixtieth", 60), ("seventieth", 70), ("eightieth", 80), ("ninetieth", 90)]
-        .into_iter().collect()
+    [
+        ("first", 1),
+        ("third", 3),
+        ("fourth", 4),
+        ("fifth", 5),
+        ("sixth", 6),
+        ("seventh", 7),
+        ("eighth", 8),
+        ("ninth", 9),
+        ("tenth", 10),
+        ("eleventh", 11),
+        ("twelfth", 12),
+        ("thirteenth", 13),
+        ("fourteenth", 14),
+        ("fifteenth", 15),
+        ("sixteenth", 16),
+        ("seventeenth", 17),
+        ("eighteenth", 18),
+        ("nineteenth", 19),
+        ("twentieth", 20),
+        ("thirtieth", 30),
+        ("fortieth", 40),
+        ("fiftieth", 50),
+        ("sixtieth", 60),
+        ("seventieth", 70),
+        ("eightieth", 80),
+        ("ninetieth", 90),
+    ]
+    .into_iter()
+    .collect()
 });
 static SCALES: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
-    [("hundred", 100), ("thousand", 1_000), ("million", 1_000_000), ("billion", 1_000_000_000), ("trillion", 1_000_000_000_000)]
-        .into_iter().collect()
+    [("hundred", 100), ("thousand", 1_000), ("million", 1_000_000), ("billion", 1_000_000_000), ("trillion", 1_000_000_000_000)].into_iter().collect()
 });
 /// words that are the same thing said two ways (text spelling / whisper spelling), or that whisper drops
 static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
-    [("it's", "its"), ("percent", ""), ("%", ""), ("dollars", ""), ("dollar", ""), ("fahrenheit", "f"), ("degrees", ""),
-     ("okay", "ok"), ("a.i", "ai"),
-     // British spelling in the text; whisper small.en writes American
-     ("kilometres", "kilometers"), ("metres", "meters"), ("litres", "liters"), ("centimetres", "centimeters"), ("grey", "gray"),
-     ("colour", "color"), ("colours", "colors"), ("plough", "plow"), ("ploughs", "plows"), ("centre", "center"),
-     ("programme", "program"), ("favourite", "favorite"), ("aluminium", "aluminum"), ("travelled", "traveled"),
-     ("travelling", "traveling"), ("fibre", "fiber"), ("theatre", "theater"), ("defence", "defense"), ("licence", "license"),
-     ("neighbour", "neighbor"), ("honour", "honor"), ("behaviour", "behavior"), ("catalogue", "catalog"),
-     ("organise", "organize"), ("realise", "realize"), ("recognise", "recognize"), ("analyse", "analyze"),
-     ("manoeuvre", "maneuver"), ("sulphur", "sulfur"), ("practise", "practice"), ("mould", "mold"), ("storey", "story")]
-        .into_iter().collect()
+    [
+        ("it's", "its"),
+        ("percent", ""),
+        ("%", ""),
+        ("dollars", ""),
+        ("dollar", ""),
+        ("fahrenheit", "f"),
+        ("degrees", ""),
+        ("okay", "ok"),
+        ("a.i", "ai"),
+        // British spelling in the text; whisper small.en writes American
+        ("kilometres", "kilometers"),
+        ("metres", "meters"),
+        ("litres", "liters"),
+        ("centimetres", "centimeters"),
+        ("grey", "gray"),
+        ("colour", "color"),
+        ("colours", "colors"),
+        ("plough", "plow"),
+        ("ploughs", "plows"),
+        ("centre", "center"),
+        ("programme", "program"),
+        ("favourite", "favorite"),
+        ("aluminium", "aluminum"),
+        ("travelled", "traveled"),
+        ("travelling", "traveling"),
+        ("fibre", "fiber"),
+        ("theatre", "theater"),
+        ("defence", "defense"),
+        ("licence", "license"),
+        ("neighbour", "neighbor"),
+        ("honour", "honor"),
+        ("behaviour", "behavior"),
+        ("catalogue", "catalog"),
+        ("organise", "organize"),
+        ("realise", "realize"),
+        ("recognise", "recognize"),
+        ("analyse", "analyze"),
+        ("manoeuvre", "maneuver"),
+        ("sulphur", "sulfur"),
+        ("practise", "practice"),
+        ("mould", "mold"),
+        ("storey", "story"),
+    ]
+    .into_iter()
+    .collect()
 });
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+(?:[.,]\d+)*(?:st|nd|rd|th)?$").unwrap());
 static CLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,2}\.[0-5]\d$").unwrap());
@@ -118,9 +180,7 @@ fn compose(run: &[String]) -> String {
             continue;
         }
         // a new group when a number follows one it cannot combine with (19 | 86, 20 | 24, 3 | 30)
-        if matches!(prev, Some(Kind::Unit | Kind::Tens | Kind::Digits))
-            && !(prev == Some(Kind::Tens) && kind == Kind::Unit && value < 10.0)
-        {
+        if matches!(prev, Some(Kind::Unit | Kind::Tens | Kind::Digits)) && !(prev == Some(Kind::Tens) && kind == Kind::Unit && value < 10.0) {
             groups.push(total + cur);
             total = 0.0;
             cur = 0.0;
@@ -441,16 +501,18 @@ mod tests {
             heard("some GPS-guided tractors veered off course or", "some GPS guided tractors weird of course or"),
             vec![("veered".into(), "weird".into()), ("off".into(), "of".into())]
         );
-        assert_eq!(heard("NASA's Ice Sat Two satellite lost altitude", "NASA's ice set to satellite lost attitude")
-            .into_iter().find(|(word, _)| word == "altitude"), Some(("altitude".into(), "attitude".into())));
+        assert_eq!(
+            heard("NASA's Ice Sat Two satellite lost altitude", "NASA's ice set to satellite lost attitude")
+                .into_iter()
+                .find(|(word, _)| word == "altitude"),
+            Some(("altitude".into(), "attitude".into()))
+        );
     }
 
     #[test]
     fn a_dropped_stretch_is_not_heard() {
-        let got = heard(
-            "I built a Playwright suite of about two hundred tests. On the backend side, I started",
-            "I built a playwright suit. I started",
-        );
+        let got =
+            heard("I built a Playwright suite of about two hundred tests. On the backend side, I started", "I built a playwright suit. I started");
         assert_eq!(got[0], ("suite".into(), "suit".into()));
         assert!(got[1..].iter().all(|(_, heard_as)| heard_as.is_empty()), "{got:?}");
         assert!(got.iter().any(|(word, _)| word == "hundred"));

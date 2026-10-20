@@ -10,7 +10,7 @@ mod sounds;
 mod store;
 mod text;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -244,19 +244,26 @@ pub fn run() {
             // macOS: ~/Library/Application Support/io.github.qwertymuzaffar.parrot (the first engine's folder too)
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(data.join("texts"))?;
-            let engine = Arc::new(Engine {
-                models: data.join("models"),
-                store: Store { data },
-                aligner: Mutex::new(None),
-                recognizer: Mutex::new(None),
-            });
+            let engine =
+                Arc::new(Engine { models: data.join("models"), store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
             let warm = engine.clone();
             std::thread::spawn(move || warm.warm());
             app.manage(engine);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            info, texts, add_text, update_text, delete_text, scores, attempts, attempt, activity, pron, check, download_models
+            info,
+            texts,
+            add_text,
+            update_text,
+            delete_text,
+            scores,
+            attempts,
+            attempt,
+            activity,
+            pron,
+            check,
+            download_models
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -282,7 +289,8 @@ mod tests {
     impl Listen for FakeListener {
         fn align(&self, _audio: &[f32], text: &str) -> Result<Vec<text::WordTime>, String> {
             self.aligned.borrow_mut().push(text.to_string());
-            let word_time = |word_index: usize| text::WordTime { t: Some([word_index as f64, word_index as f64 + 1.0]), score: Some(0.9), letters: None };
+            let word_time =
+                |word_index: usize| text::WordTime { t: Some([word_index as f64, word_index as f64 + 1.0]), score: Some(0.9), letters: None };
             Ok((0..text.split_whitespace().count()).map(word_time).collect())
         }
 
