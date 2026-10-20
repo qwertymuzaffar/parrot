@@ -15,10 +15,25 @@ impl Pcm {
     }
 }
 
+/// The largest take read: some 45 minutes of the interface's 48 kHz 16-bit mono, far more than any take.
+const LARGEST_TAKE: usize = 256 << 20;
+
 /// Read a WAV file (any sample format, any channel count) as mono floats.
 pub fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
+    if bytes.len() > LARGEST_TAKE {
+        return Err(format!("the recording is too long ({} MB)", bytes.len() >> 20));
+    }
     let mut reader = hound::WavReader::new(Cursor::new(bytes)).map_err(|error| format!("not a WAV recording: {error}"))?;
     let spec = reader.spec();
+    if spec.bits_per_sample > 32 {
+        return Err(format!("not a WAV recording Parrot reads: {} bits a sample", spec.bits_per_sample));
+    }
+    // hound reads (and fails on) every sample the header claims: a header claiming millions more than the body
+    // holds would keep the engine busy for seconds or minutes on nothing
+    let claimed_bytes = reader.len() as u64 * spec.bits_per_sample.div_ceil(8) as u64;
+    if claimed_bytes > bytes.len() as u64 {
+        return Err(format!("the recording is damaged: it says it holds {claimed_bytes} bytes of sound in {}", bytes.len()));
+    }
     let ch = spec.channels.max(1) as usize;
     let interleaved: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
@@ -198,6 +213,36 @@ mod tests {
     fn resampling_keeps_the_length() {
         let pcm = Pcm { samples: tone(48000, 2.0, 0.5), rate: 48000 };
         assert_eq!(resample(&pcm, 16000).len(), 32000);
+    }
+
+    /// A 16-bit mono WAV header whose data chunk says it holds `claimed` bytes, followed by `body` bytes of silence.
+    fn wav_claiming(claimed: u32, body: usize) -> Vec<u8> {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + claimed).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&claimed.to_le_bytes());
+        wav.resize(wav.len() + body, 0);
+        wav
+    }
+
+    #[test]
+    fn a_header_claiming_more_than_the_body_is_turned_away() {
+        assert_eq!(read_wav(&wav_claiming(2000, 2000)).unwrap().samples.len(), 1000);
+        // 50 million samples claimed, a thousand there: refused before reading any
+        let started = std::time::Instant::now();
+        let error = read_wav(&wav_claiming(100_000_000, 2000)).err().unwrap();
+        assert!(error.contains("damaged"), "{error}");
+        assert!(started.elapsed().as_secs_f64() < 0.1, "{:?}", started.elapsed());
+        assert!(read_wav(&vec![0; LARGEST_TAKE + 1]).err().unwrap().contains("too long"));
     }
 
     #[test]
