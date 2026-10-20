@@ -16,7 +16,7 @@ static ENVIRONMENT: OnceLock<ort::environment::Environment> = OnceLock::new();
 
 /// The ONNX Runtime environment, made once for the whole process: ONNX Runtime 1.23 (the Intel Mac build) allows
 /// only one per process.
-fn environment() -> Result<&'static ort::environment::Environment, String> {
+pub fn environment() -> Result<&'static ort::environment::Environment, String> {
     if let Some(env) = ENVIRONMENT.get() {
         return Ok(env);
     }

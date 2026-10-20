@@ -40,6 +40,20 @@ pub fn ready(dir: &Path, model: &Model) -> bool {
     std::fs::metadata(path(dir, model)).map(|md| md.len() == model.bytes).unwrap_or(false)
 }
 
+/// Rename a model file that would not load to <file>.bad, so it no longer counts as ready and Setup downloads it
+/// again; returns the message to show instead of `error`, the load's own (kept if the file could not be moved).
+pub fn set_aside(dir: &Path, model: &Model, error: String) -> String {
+    let bad = dir.join(format!("{}.bad", model.file));
+    let _ = std::fs::remove_file(&bad);
+    match std::fs::rename(path(dir, model), &bad) {
+        Ok(()) => {
+            log::warn!("set {} aside: {error}", model.file);
+            format!("{} is damaged; restart Parrot to download it again", model.file)
+        }
+        Err(_) => error,
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct Progress<'a> {
     model: &'a str,

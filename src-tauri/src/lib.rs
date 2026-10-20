@@ -31,7 +31,9 @@ impl Engine {
     fn with_aligner<T>(&self, work: impl FnOnce(&mut align::Aligner) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.aligner.lock().unwrap();
         if guard.is_none() {
-            *guard = Some(align::Aligner::load(&models::path(&self.models, &models::ALIGNER))?);
+            // ONNX Runtime not starting is not the model file's fault: no download would mend it
+            align::environment()?;
+            *guard = Some(self.load(&models::ALIGNER, align::Aligner::load)?);
         }
         work(guard.as_mut().unwrap())
     }
@@ -39,9 +41,18 @@ impl Engine {
     fn with_recognizer<T>(&self, work: impl FnOnce(&asr::Recognizer) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.recognizer.lock().unwrap();
         if guard.is_none() {
-            *guard = Some(asr::Recognizer::load(&models::path(&self.models, &models::WHISPER))?);
+            *guard = Some(self.load(&models::WHISPER, asr::Recognizer::load)?);
         }
         work(guard.as_ref().unwrap())
+    }
+
+    /// Load a model. A file that is there but will not load (damaged, or not the model) is set aside, so the next start
+    /// shows Setup and downloads it again instead of every take failing.
+    fn load<M>(&self, model: &models::Model, load: impl FnOnce(&Path) -> Result<M, String>) -> Result<M, String> {
+        if !models::ready(&self.models, model) {
+            return Err(format!("{} is missing or damaged; restart Parrot to download it again", model.file));
+        }
+        load(&models::path(&self.models, model)).map_err(|error| models::set_aside(&self.models, model, error))
     }
 
     /// Let go of both models before the app quits. whisper.cpp frees its Metal device as the process exits and aborts
@@ -461,6 +472,23 @@ mod tests {
         };
         assert!(engine.check(&id, text, &silent).unwrap_err().contains("Nothing was heard"));
         let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn a_model_that_will_not_load_is_set_aside_to_download_again() {
+        let models = std::env::temp_dir().join(format!("parrot-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&models).unwrap();
+        // the full size, so it passes for ready, but all zeros: not a whisper model
+        std::fs::File::create(models::path(&models, &models::WHISPER)).unwrap().set_len(models::WHISPER.bytes).unwrap();
+        let engine =
+            Engine { store: Store { data: models.clone() }, models: models.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let error = engine.with_recognizer(|_| Ok(())).unwrap_err();
+        assert!(error.contains("damaged; restart Parrot"), "{error}");
+        assert!(!models::ready(&models, &models::WHISPER), "Setup offers the download again");
+        assert!(models.join("ggml-small.en.bin.bad").exists());
+        // later takes say the same, not "file not found"
+        assert!(engine.with_recognizer(|_| Ok(())).unwrap_err().contains("restart Parrot"));
+        let _ = std::fs::remove_dir_all(models);
     }
 
     #[test]
