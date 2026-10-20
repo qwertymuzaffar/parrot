@@ -35,6 +35,31 @@ fn token(character: char) -> Option<usize> {
     if character == '-' { None } else { LETTERS.find(character).map(|letter_index| letter_index + 5) }
 }
 
+/// The model's frame hop (samples at 16 kHz): its convolutional front end gives a frame per 320 samples.
+const HOP: usize = 320;
+/// A take is aligned in windows this long, with CONTEXT more on each side that is run but not kept: the model's
+/// memory grows faster than the take (10 GB for 15 s, 17 GB for a minute; 4.5 GB in these windows), and it was
+/// trained on clips of a few seconds. Scores shift a little from a whole-take run, both ways, and no window short
+/// of the whole take avoids that. Both are multiples of HOP, so a window's frames line up with the take's.
+const WINDOW: usize = 5 * 16000;
+const CONTEXT: usize = 16000 / 2;
+
+/// The windows a take of `samples` is run in: the slice given to the model, and of the frames it gives back, the
+/// first to keep and how many (None: all that are left, for the last window).
+fn windows(samples: usize) -> Vec<(std::ops::Range<usize>, usize, Option<usize>)> {
+    let mut out = vec![];
+    let mut start = 0;
+    while start < samples {
+        let end = (start + WINDOW).min(samples);
+        let from = start.saturating_sub(CONTEXT);
+        let to = (end + CONTEXT).min(samples);
+        let lead = (start - from) / HOP;
+        out.push((from..to, lead, (end < samples).then_some((end - start) / HOP)));
+        start = end;
+    }
+    out
+}
+
 pub struct Aligner {
     session: Session,
 }
@@ -47,17 +72,30 @@ impl Aligner {
         Ok(Self { session })
     }
 
-    /// Per-frame log probabilities of the tokens, for 16 kHz mono audio.
+    /// Per-frame log probabilities of the tokens, for 16 kHz mono audio: the take normalised as a whole, then run
+    /// through the model in windows (see WINDOW), each keeping only the frames it has context on both sides of.
     fn emissions(&mut self, audio: &[f32]) -> Result<(Vec<[f32; TOKENS]>, f64), String> {
         let sample_count = audio.len().max(1);
         let mean = audio.iter().sum::<f32>() / sample_count as f32;
         let var = audio.iter().map(|sample| (sample - mean).powi(2)).sum::<f32>() / sample_count as f32;
         let norm: Vec<f32> = audio.iter().map(|sample| (sample - mean) / (var + 1e-7).sqrt()).collect();
-        let input = Tensor::from_array(([1usize, norm.len()], norm)).map_err(|error| error.to_string())?;
+        let mut rows: Vec<[f32; TOKENS]> = Vec::with_capacity(norm.len() / HOP + 1);
+        for (slice, lead, keep) in windows(norm.len()) {
+            let window = self.run(&norm[slice])?;
+            let keep = keep.unwrap_or(window.len().saturating_sub(lead));
+            rows.extend(window.into_iter().skip(lead).take(keep));
+        }
+        let frames = rows.len().max(1);
+        Ok((rows, audio.len() as f64 / frames as f64 / 16000.0))
+    }
+
+    /// One run of the model over normalised audio: each frame's log probabilities of the tokens.
+    fn run(&mut self, norm: &[f32]) -> Result<Vec<[f32; TOKENS]>, String> {
+        let input = Tensor::from_array(([1usize, norm.len()], norm.to_vec())).map_err(|error| error.to_string())?;
         let out = self.session.run(ort::inputs!["audio" => input]).map_err(|error| format!("aligner failed: {error}"))?;
         let (shape, logits) = out["logits"].try_extract_tensor::<f32>().map_err(|error| error.to_string())?;
         let frames = shape[1] as usize;
-        let rows = (0..frames)
+        Ok((0..frames)
             .map(|frame| {
                 let row = &logits[frame * TOKENS..(frame + 1) * TOKENS];
                 let max = row.iter().cloned().fold(f32::MIN, f32::max);
@@ -68,8 +106,7 @@ impl Aligner {
                 }
                 log_probs
             })
-            .collect();
-        Ok((rows, audio.len() as f64 / frames.max(1) as f64 / 16000.0))
+            .collect())
     }
 
     /// Where each whitespace-separated word of the text is (seconds) and how well it scored. Words with no letters
@@ -256,6 +293,23 @@ mod tests {
                 text.split_whitespace().zip(&words).map(|(word, result)| format!("{word}:{:.2}", result.score.unwrap_or(-1.0))).collect();
             println!("{} || {}", wav.rsplit('/').nth(1).unwrap_or(""), row.join(" "));
         }
+    }
+
+    #[test]
+    fn windows_cover_the_take_on_frame_boundaries() {
+        // a short take is one window, all of it kept
+        assert_eq!(windows(2 * 16000), vec![(0..32000, 0, None)]);
+        assert_eq!(windows(WINDOW), vec![(0..WINDOW, 0, None)]);
+        // a long one: the first keeps its first 5 s, the middle ones the 5 s after their context, the last the rest
+        let plan = windows(12 * 16000);
+        assert_eq!(plan.len(), 3);
+        assert_eq!(plan[0], (0..88000, 0, Some(250)));
+        assert_eq!(plan[1], (72000..168000, 25, Some(250)));
+        assert_eq!(plan[2], (152000..192000, 25, None));
+        for (slice, lead, _) in &plan {
+            assert_eq!((slice.start % HOP, (lead * HOP) % HOP), (0, 0));
+        }
+        assert!(plan.windows(2).all(|pair| pair[0].0.end > pair[1].0.start), "windows overlap");
     }
 
     #[test]
