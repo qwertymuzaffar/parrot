@@ -1,15 +1,8 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
 import { Engine } from '../core/engine';
-import { readSetting, writeSetting } from '../core/settings';
 import { Sound } from '../core/sound';
+import { Theme, ThemeChoice } from '../core/theme';
 import { Icon } from '../shared/icon';
-
-type Theme = 'system' | 'light' | 'dark';
-
-export function applyTheme(theme: Theme) {
-  if (theme === 'system') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', theme);
-}
 
 @Component({
   selector: 'app-settings',
@@ -39,7 +32,7 @@ export function applyTheme(theme: Theme) {
           <span class="eyebrow">Appearance</span>
           <div class="seg">
             @for (option of themes; track option) {
-              <button [class.on]="theme() === option" (click)="setTheme(option)">{{ option[0].toUpperCase() + option.slice(1) }}</button>
+              <button [class.on]="theme.choice() === option" (click)="theme.set(option)">{{ option[0].toUpperCase() + option.slice(1) }}</button>
             }
           </div>
         </section>
@@ -134,10 +127,10 @@ export function applyTheme(theme: Theme) {
 })
 export class Settings {
   protected sound = inject(Sound);
+  protected theme = inject(Theme);
   private engine = inject(Engine);
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
-  protected readonly themes: Theme[] = ['system', 'light', 'dark'];
-  protected theme = signal<Theme>(readSetting<Theme>('theme', 'system'));
+  protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
   private check = signal(0);
   protected health = resource({ params: () => this.check(), loader: () => this.engine.info() });
 
@@ -152,11 +145,5 @@ export class Settings {
 
   protected backdrop(event: MouseEvent) {
     if (event.target === this.dialog().nativeElement) this.close();
-  }
-
-  protected setTheme(theme: Theme) {
-    this.theme.set(theme);
-    writeSetting('theme', theme);
-    applyTheme(theme);
   }
 }

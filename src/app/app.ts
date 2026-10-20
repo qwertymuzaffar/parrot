@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal, viewChild } from '@angular/core';
 import { Engine, EngineInfo, IN_APP } from './core/engine';
-import { readSetting } from './core/settings';
 import { Library } from './core/library';
 import { Session } from './core/session';
+import { Theme } from './core/theme';
 import { Home } from './home/home';
 import { Practice } from './practice/practice';
-import { applyTheme, Settings } from './settings/settings';
+import { Settings } from './settings/settings';
 import { Setup } from './setup/setup';
 
 @Component({
@@ -30,6 +30,7 @@ export class App implements OnInit {
   protected session = inject(Session);
   private library = inject(Library);
   private engine = inject(Engine);
+  private theme = inject(Theme);
   protected settings = viewChild.required(Settings);
   /** the first launch: the speech models still to download */
   protected setup = signal<EngineInfo | null>(null);
@@ -37,7 +38,7 @@ export class App implements OnInit {
   async ngOnInit() {
     // in the desktop app on macOS the title bar is hidden and the window buttons sit over the app
     if (IN_APP && /Mac/.test(navigator.userAgent)) document.documentElement.classList.add('mac-app');
-    applyTheme(readSetting('theme', 'system'));
+    this.theme.apply();
     const info = await this.engine.info().catch(() => null);
     if (info && !(info.models.whisper && info.models.aligner)) {
       this.setup.set(info);
