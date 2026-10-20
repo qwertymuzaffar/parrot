@@ -1,4 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, output, viewChild } from '@angular/core';
+import {
+  afterNextRender,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  Injector,
+  output,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { Mode } from '../core/models';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
@@ -25,10 +37,14 @@ export class Practice {
   protected playback = inject(Playback);
   protected recorder = inject(Recorder);
   private words = inject(WordPractice);
+  private injector = inject(Injector);
   readonly settings = output<void>();
   protected band = band;
   private stepper = viewChild<ElementRef<HTMLElement>>('stepper');
   private sentence = viewChild<ElementRef<HTMLElement>>('sentence');
+  private wordCard = viewChild(WordCard, { read: ElementRef });
+  /** the word whose card was opened from the keyboard: focus goes back to it when the card closes */
+  private keyboardWord: { part: number; word: number } | null = null;
 
   protected readonly modes: { id: Mode; label: string }[] = [
     { id: 'whole', label: 'Whole text' },
@@ -76,6 +92,14 @@ export class Practice {
         this.stepper()?.nativeElement.children[partIndex]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }),
       );
     });
+    // a card closed from the keyboard (Escape, Close) took focus with it: hand it back to the word, if still on its part
+    effect(() => {
+      const from = this.keyboardWord;
+      if (this.session.selected() != null || !from) return;
+      this.keyboardWord = null;
+      if (from.part !== untracked(this.session.index)) return;
+      afterNextRender(() => document.activeElement === document.body && this.wordButton(from.word)?.focus(), { injector: this.injector });
+    });
   }
 
   protected fit() {
@@ -89,6 +113,10 @@ export class Practice {
     }
   }
 
+  private wordButton(wordIndex: number) {
+    return this.sentence()?.nativeElement.children[wordIndex] as HTMLElement | undefined;
+  }
+
   protected status(wordIndex: number) {
     return this.result()?.words[wordIndex]?.status ?? '';
   }
@@ -98,8 +126,25 @@ export class Practice {
     return word?.status === 'wrong' ? (word.heard ? `heard “${word.heard}”` : 'not heard') : '';
   }
 
-  protected wordClick(wordIndex: number) {
+  /** what a screen reader says for a word: how it came out, which the screen shows in colour */
+  protected wordLabel(wordIndex: number, word: string) {
+    const result = this.result()?.words[wordIndex];
+    if (result?.status === 'wrong') return `${word} — ${result.heard ? `misheard as “${result.heard}”` : 'not heard'}`;
+    if (result?.status === 'unclear') return `${word} — sounded off`;
+    return word;
+  }
+
+  /** what a screen reader says for a step: the part and its last score ("Part 3, 64%"), which the bar shows in colour */
+  protected stepLabel(label: string, score: number | undefined) {
+    return `${this.unit()} ${label}, ${score != null ? `${score}%` : 'not practised'}`;
+  }
+
+  protected wordClick(wordIndex: number, event: MouseEvent) {
     this.session.selectWord(wordIndex);
+    // a click from Enter or Space has no click count
+    this.keyboardWord = event.detail === 0 ? { part: this.session.index(), word: wordIndex } : null;
+    // the card says how the word sounds and came out: focus goes there, so a screen reader reads it next
+    afterNextRender(() => this.wordCard()?.nativeElement.focus(), { injector: this.injector });
     const shown = this.result();
     const word = shown?.words[wordIndex];
     if (shown && word?.t && word.status !== 'good') this.playback.compareWord(shown, wordIndex, this.session.words()[wordIndex]);
@@ -159,6 +204,8 @@ export class Practice {
     this.recorder.warm();
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
+    // Space presses the button that has focus, as everywhere else: it means Listen only away from the controls
+    if (event.key === ' ' && el.closest?.('button, a[href], [role="button"]')) return;
     if (document.querySelector('dialog[open]')) return;
     const action = this.shortcuts[event.key];
     if (!action) return;

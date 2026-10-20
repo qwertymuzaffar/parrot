@@ -1,4 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, inject, output, resource, signal } from '@angular/core';
+import {
+  afterNextRender,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  ElementRef,
+  inject,
+  Injector,
+  output,
+  resource,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { IN_APP } from '../core/engine';
 import { Mode, Part, TextItem } from '../core/models';
 import { readSetting } from '../core/settings';
@@ -29,6 +41,7 @@ interface Card {
 export class Home {
   protected library = inject(Library);
   protected session = inject(Session);
+  private injector = inject(Injector);
   readonly settings = output<void>();
   protected band = band;
   protected Math = Math;
@@ -43,6 +56,7 @@ export class Home {
   protected adding = signal(false);
   protected renaming = signal<string | null>(null);
   protected confirming = signal<string | null>(null);
+  private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
 
   protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
   /** how many parts each way of practising would give the draft */
@@ -122,6 +136,12 @@ export class Home {
 
   protected continue(card: Card) {
     this.session.open(card.t.id, card.nextIndex);
+  }
+
+  /** the title becomes a field, focused and selected (autofocus only works for the first one) */
+  protected startRename(id: string) {
+    this.renaming.set(id);
+    afterNextRender(() => this.renameField()?.nativeElement.select(), { injector: this.injector });
   }
 
   protected async rename(text: TextItem, title: string) {

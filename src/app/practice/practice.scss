@@ -202,12 +202,23 @@ header {
     row-gap: 16px;
   }
 
+  // a button that looks like the word: the sentence's own type, no button chrome
   .w {
     position: relative;
+    appearance: none;
+    margin: 0;
+    border: 0;
     border-radius: 8px;
     padding: 0 3px;
+    background: none;
+    letter-spacing: inherit;
+    text-align: inherit;
     cursor: pointer;
     transition: background 0.1s;
+    &:focus-visible {
+      outline: 2px solid var(--muted);
+      outline-offset: 1px;
+    }
     &:hover {
       background: var(--surface-2);
     }

@@ -148,10 +148,13 @@
                 (keydown.escape)="renaming.set(null)"
                 (blur)="rename(card.t, $any($event.target).value)"
                 aria-label="Title"
-                autofocus
+                #renameField
               />
             } @else {
-              <h3>{{ card.t.title }}</h3>
+              <!-- the card's button for the keyboard: its click goes on to the card, which opens the text -->
+              <h3>
+                <button type="button" class="open">{{ card.t.title }}</button>
+              </h3>
             }
             <span class="pill" [class]="band(card.t.average) || 'none'">{{ card.t.average != null ? card.t.average + '%' : 'new' }}</span>
           </div>
@@ -169,7 +172,7 @@
                 <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
                 <button class="btn danger small" (click)="remove(card.t)">Delete</button>
               } @else {
-                <button class="btn ghost small icon" (click)="renaming.set(card.t.id)" aria-label="Rename">
+                <button class="btn ghost small icon" (click)="startRename(card.t.id)" aria-label="Rename">
                   <app-icon name="edit" [size]="15" />
                 </button>
                 <button class="btn ghost small icon" (click)="confirming.set(card.t.id)" aria-label="Delete">

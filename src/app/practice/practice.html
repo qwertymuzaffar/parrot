@@ -29,13 +29,19 @@
         @let stepScore = session.scores()[step.key];
         <li>
           @if (stepIndex === session.index()) {
-            <button class="current" [class]="band(stepScore?.last) || 'none'" aria-current="step" (click)="session.select(stepIndex)">
+            <button
+              class="current"
+              [class]="band(stepScore?.last) || 'none'"
+              aria-current="step"
+              [attr.aria-label]="stepLabel(step.label, stepScore?.last)"
+              (click)="session.select(stepIndex)"
+            >
               <span class="n">{{ step.label }}</span>
               <!-- prettier-ignore -->
               <span>{{ unit() }} {{ step.label }}@if (stepScore) { · <b class="pct">{{ stepScore.last }}%</b>}</span>
             </button>
           } @else {
-            <button (click)="session.select(stepIndex)" [title]="step.text">
+            <button (click)="session.select(stepIndex)" [title]="step.text" [attr.aria-label]="stepLabel(step.label, stepScore?.last)">
               <span>{{ step.label }}</span>
               <span class="bar" [class]="band(stepScore?.last) || 'none'"></span>
             </button>
@@ -57,13 +63,16 @@
         <p #sentence class="sentence" [class]="size()">
           @for (word of session.words(); track $index; let wordIndex = $index) {
             <!-- prettier-ignore -->
-            <span
+            <button
+              type="button"
               class="w"
               [class]="status(wordIndex)"
               [class.now]="playback.nowRef() === wordIndex || playback.nowMine() === wordIndex"
               [class.sel]="session.selected() === wordIndex && !recording()"
-              (click)="wordClick(wordIndex)"
-              >{{ word }}@if (heard(wordIndex); as heardAs) {<span class="tag">{{ heardAs }}</span>}</span
+              [attr.aria-current]="session.selected() === wordIndex && !recording() ? 'true' : null"
+              [attr.aria-label]="wordLabel(wordIndex, word)"
+              (click)="wordClick(wordIndex, $event)"
+              >{{ word }}@if (heard(wordIndex); as heardAs) {<span class="tag">{{ heardAs }}</span>}</button
             >
           }
         </p>

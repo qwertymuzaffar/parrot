@@ -17,6 +17,8 @@ import { SoundUnits } from './sound-units';
 @Component({
   selector: 'app-word-card',
   imports: [Icon, SoundUnits],
+  // focus moves here when a word is opened (see Practice.wordClick), so a screen reader reads the card next
+  host: { role: 'region', tabindex: '-1', '[attr.aria-label]': 'word()' },
   template: `
     <div class="head">
       <h2>{{ word() }}</h2>
@@ -149,6 +151,11 @@ import { SoundUnits } from './sound-units';
       flex-direction: column;
       gap: 12px;
       padding: 18px;
+      outline: none;
+    }
+    :host(:focus-visible) {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     .head {
       display: flex;

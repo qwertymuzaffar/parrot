@@ -341,9 +341,16 @@
   &:hover {
     border-color: var(--muted);
     box-shadow: var(--shadow);
+  }
+  &:hover,
+  &:focus-within {
     .acts {
       opacity: 1;
     }
+  }
+  &:has(.open:focus-visible) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--good-bg);
   }
   .row {
     display: flex;
@@ -359,6 +366,21 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  // the title as a button, looking like the heading it sits in
+  .open {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    letter-spacing: inherit;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    outline: none;
   }
   p {
     margin: 0;
