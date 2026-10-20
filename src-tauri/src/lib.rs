@@ -115,7 +115,8 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Re
     // score low, so score only the words up to the last one heard; the rest count as missed
     let (wrong, _) = text::heard_words(txt, &heard);
     let said = wrong.iter().rposition(|verdict| verdict.is_none()).map(|last_heard| last_heard + 1).unwrap_or(0);
-    if said > 0 && said < mine.len() && wrong[said..].iter().all(|verdict| verdict.as_deref() == Some("")) {
+    let stopped_early = said > 0 && said < mine.len() && wrong[said..].iter().all(|verdict| verdict.as_deref() == Some(""));
+    if stopped_early {
         let first: Vec<&str> = txt.split_whitespace().take(said).collect();
         let head = listener.align(audio, &first.join(" "))?;
         mine.splice(..said, head);
@@ -125,7 +126,8 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Re
     }
     let words = text::judge(txt, &heard, &mine, None);
     let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
-    let spoken = if said > 0 && said < words.len() { said } else { words.len() };
+    // the pace of the words read: all of them, unless the take stopped early
+    let spoken = if stopped_early { said } else { words.len() };
     Ok(Scored {
         score: (100.0 * good as f64 / words.len().max(1) as f64).round() as i64,
         wpm: if secs > 0.0 { (spoken as f64 / secs * 60.0).round() as i64 } else { 0 },
@@ -307,8 +309,8 @@ mod tests {
         let listener = FakeListener::hearing("the beautiful sinks");
         let scored = score_take(&listener, &[], 1.5, "the beautiful things").unwrap();
         assert_eq!(statuses(&scored), vec![WordStatus::Good, WordStatus::Good, WordStatus::Wrong]);
-        // the pace counts the words up to the last one heard right
-        assert_eq!((scored.score, scored.wpm), (67, 80));
+        // a misheard last word was still read, so it counts toward the pace
+        assert_eq!((scored.score, scored.wpm), (67, 120));
         assert_eq!(listener.aligned.borrow().len(), 1, "no second pass when the take reached the end");
     }
 

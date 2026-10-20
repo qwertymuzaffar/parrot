@@ -152,12 +152,14 @@ def check(folder, txt, body, ext, ref=None):
         # score low, so score only the words up to the last one whisper heard; the rest count as missed
         wrong, _ = text.heard_words(txt, heard)
         said = max((index for index, heard_as in enumerate(wrong) if heard_as is None), default=-1) + 1
-        if 0 < said < len(mine) and all(heard_as == "" for heard_as in wrong[said:]):
+        stopped_early = 0 < said < len(mine) and all(heard_as == "" for heard_as in wrong[said:])
+        if stopped_early:
             mine[:said] = align(wav, " ".join(txt.split()[:said]))
             mine[said:] = [{"t": None, "score": 0.0} for _ in mine[said:]]
     words = text.judge(txt, heard, mine, ref)
     good = sum(word["status"] == "good" for word in words)
-    spoken = said if 0 < said < len(words) else len(words)
+    # the pace of the words read: all of them, unless the take stopped early
+    spoken = said if stopped_early else len(words)
     result = {"id": stamp, "when": datetime.datetime.now().isoformat(timespec="seconds"), "text": txt, "heard": heard,
               "words": words, "duration": round(dur, 2), "wpm": round(spoken / dur * 60) if dur else 0,
               "score": round(100 * good / max(1, len(words))),
