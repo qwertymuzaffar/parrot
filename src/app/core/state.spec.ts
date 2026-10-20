@@ -462,6 +462,44 @@ describe('the practice state', () => {
       expect([app.nowMine(), app.nowRef()]).toEqual([null, null]);
     });
 
+    it('listening during a comparison reads the reference once, ending the comparison', async () => {
+      vi.useFakeTimers();
+      const done = app.compare();
+      app.toggleReference();
+      await vi.advanceTimersByTimeAsync(1000);
+      await done;
+      expect(sound.log).toEqual([`play audio:texts/${ID}/t1.wav`, 'speak "How are you?" at 1']);
+    });
+
+    it('a comparison paused on my take still reads the reference once it is resumed and over', async () => {
+      vi.useFakeTimers();
+      const done = app.compare();
+      app.toggleMine();
+      app.toggleMine();
+      sound.end();
+      await vi.advanceTimersByTimeAsync(400);
+      await done;
+      expect(sound.log).toEqual([`play audio:texts/${ID}/t1.wav`, 'toggle pause', 'toggle pause', 'speak "How are you?" at 1']);
+    });
+
+    it('playing my take during a word comparison ends the comparison', async () => {
+      vi.useFakeTimers();
+      const done = app.compareWord(1);
+      await vi.advanceTimersByTimeAsync(0);
+      app.toggleMine();
+      await vi.advanceTimersByTimeAsync(1000);
+      await done;
+      expect(sound.log).toEqual([`clip audio:texts/${ID}/t1.wav#0.47-0.94`, `play audio:texts/${ID}/t1.wav`]);
+    });
+
+    it('a word cut short by the next leaves the highlight on the next', async () => {
+      app.playMyWord(1);
+      await settle();
+      app.playMyWord(2);
+      await settle();
+      expect([sound.log.length, app.nowMine()]).toEqual([2, 2]);
+    });
+
     it('says a word alone, slower on request, without its punctuation', () => {
       app.sayWord(2);
       app.sayWord(2, true);

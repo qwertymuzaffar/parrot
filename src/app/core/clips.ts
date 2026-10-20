@@ -1,5 +1,9 @@
 import { Injectable } from '@angular/core';
 
+/** The decoded audio kept at most, in samples (4 bytes each): about 60 MB, five minutes at 48 kHz. A take decodes
+ * at the device's rate, so a whole text read for a few minutes weighs as much as a hundred sentences. */
+const CACHED_SAMPLES = 15_000_000;
+
 /**
  * Takes as audio the interface can cut: the loudness for the waveform, and a single word cut out exactly, slowed
  * down without lowering the pitch. Decoded takes are cached (a few at most are in use at a time).
@@ -8,6 +12,8 @@ import { Injectable } from '@angular/core';
 export class Clips {
   private ctx: AudioContext | null = null;
   private cache = new Map<string, Promise<AudioBuffer>>();
+  /** the samples of each take decoded and still cached, oldest first */
+  private samples = new Map<string, number>();
 
   private decode(url: string): Promise<AudioBuffer> {
     let decoded = this.cache.get(url);
@@ -17,11 +23,25 @@ export class Clips {
       decoded = fetch(url)
         .then((response) => response.arrayBuffer())
         .then((bytes) => ctx.decodeAudioData(bytes));
-      decoded.catch(() => this.cache.delete(url));
+      decoded.then(
+        (buffer) => this.keep(url, buffer),
+        () => this.cache.delete(url),
+      );
       this.cache.set(url, decoded);
-      if (this.cache.size > 8) this.cache.delete(this.cache.keys().next().value!);
     }
     return decoded;
+  }
+
+  /** Count a decoded take, and drop the oldest while the cache holds too much (never the take just decoded). */
+  private keep(url: string, buffer: AudioBuffer) {
+    this.samples.set(url, buffer.length * buffer.numberOfChannels);
+    let total = [...this.samples.values()].reduce((sum, count) => sum + count, 0);
+    for (const [oldUrl, count] of this.samples) {
+      if (total <= CACHED_SAMPLES || oldUrl === url) break;
+      this.samples.delete(oldUrl);
+      this.cache.delete(oldUrl);
+      total -= count;
+    }
   }
 
   /** The loudest sample of each of sliceCount equal slices of a take, scaled so the loudest slice is 1. */

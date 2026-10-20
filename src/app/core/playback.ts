@@ -23,6 +23,8 @@ export class Playback {
 
   /** every play chain (mine, then the reference) checks this, so Stop really stops it */
   private run = 0;
+  /** the word clip cut last: one cut short by the next leaves the highlight to it */
+  private wordClip: string | null = null;
 
   setRate(rate: number) {
     this.rate.set(rate);
@@ -50,13 +52,16 @@ export class Playback {
       .then(() => this.nowMine.set(null));
   }
 
+  /** Pause or resume the reading, or start it: a comparison under way stops there (pausing one doesn't). */
   toggleReference(text: string) {
     if (this.sound.playing() === 'ref') return this.sound.togglePause();
+    this.run++;
     this.playReference(text);
   }
 
   toggleMine(attempt: Attempt) {
     if (this.sound.playing() === 'mine') return this.sound.togglePause();
+    this.run++;
     this.playMine(attempt);
   }
 
@@ -116,10 +121,13 @@ export class Playback {
     const from = Math.max(before?.t ? before.t[1] : 0, word.t[0] - 0.03);
     const to = Math.min(after?.t ? after.t[0] : word.t[1] + 0.12, word.t[1] + 0.04);
     this.nowMine.set(wordIndex);
-    return this.clips
-      .cut(this.engine.audioUrl(attempt.audio), from, to)
-      .then((url) => this.sound.playClip(url).finally(() => URL.revokeObjectURL(url)))
-      .then(() => this.nowMine.set(null));
+    return this.clips.cut(this.engine.audioUrl(attempt.audio), from, to).then(async (url) => {
+      this.wordClip = url;
+      // the clip ends when it plays out, or when anything else is played or stopped
+      await this.sound.playClip(url);
+      URL.revokeObjectURL(url);
+      if (this.wordClip === url) this.nowMine.set(null);
+    });
   }
 
   /** Play one thing, wait a moment, then the next, unless something else was played or stopped meanwhile. */

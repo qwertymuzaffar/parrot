@@ -95,13 +95,16 @@ export class Sound {
     });
   }
 
-  /** A single word, cut by the engine. */
+  /** A single word or a word try; it ends when it plays out, or when anything else is played or stopped. */
   playClip(url: string): Promise<void> {
     this.stop();
     return new Promise((resolve) => {
+      this.onEnd = resolve;
+      // only this clip may end itself: one replaced while starting fails to play after the next has begun
+      const ended = () => this.onEnd === resolve && this.ended();
       this.clip.src = url;
-      this.clip.onended = () => resolve();
-      this.clip.play().catch(() => resolve());
+      this.clip.onended = ended;
+      this.clip.play().catch(ended);
     });
   }
 
