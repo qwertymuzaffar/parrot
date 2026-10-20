@@ -4,6 +4,7 @@ import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
 import { Logo } from '../shared/logo';
 import { band } from '../shared/score';
+import { matchesSearch } from '../shared/search';
 
 /** Your texts, always at hand while practising. */
 @Component({
@@ -189,8 +190,8 @@ export class Sidebar {
   protected band = band;
   protected query = signal('');
   protected readonly shown = computed(() => {
-    const search = this.query().trim().toLowerCase();
-    return this.library.texts().filter((text) => !search || text.title.toLowerCase().includes(search) || text.text.toLowerCase().includes(search));
+    const search = this.query();
+    return this.library.texts().filter((text) => matchesSearch(search, text.title, text.text));
   });
   protected readonly status = computed(
     () => ({ checking: 'Starting…', ready: 'On-device · ready', down: 'Engine not running' })[this.library.engineState()],

@@ -8,6 +8,7 @@ import { Icon } from '../shared/icon';
 import { Logo } from '../shared/logo';
 import { ringDash } from '../shared/ring';
 import { band } from '../shared/score';
+import { matchesSearch } from '../shared/search';
 
 interface Card {
   t: TextItem;
@@ -69,9 +70,8 @@ export class Home {
   });
 
   protected readonly shown = computed(() => {
-    const search = this.query().trim().toLowerCase();
-    const list = this.cards.value() ?? [];
-    return list.filter((card) => !search || card.t.title.toLowerCase().includes(search) || card.t.text.toLowerCase().includes(search));
+    const search = this.query();
+    return (this.cards.value() ?? []).filter((card) => matchesSearch(search, card.t.title, card.t.text));
   });
 
   /** the text opened last */
