@@ -4,13 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Features — Parrot</title>
-<meta name="description" content="Everything Parrot does: a word-by-word check of your reading, how each word should sound, your take next to the correct one, any text you paste, your progress, and on-device transcription.">
+<meta name="description" content="Everything Parrot does: a word-by-word check of your reading, how each word should sound, practice on a single word, your take next to the correct one, any text you paste, your progress, and on-device transcription.">
+<link rel="canonical" href="https://qwertymuzaffar.github.io/parrot/features/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://qwertymuzaffar.github.io/parrot/features/">
 <meta property="og:title" content="Parrot features">
+<meta property="og:description" content="A verdict for every word you read aloud, how it should sound, and practice on the words that trip you up. Free, open source, on-device.">
 <meta property="og:image" content="https://qwertymuzaffar.github.io/parrot/practice.webp">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" href="../favicon.png">
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
 <link rel="preload" href="../fonts/dm-sans.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="../site.css?v=2">
+<link rel="stylesheet" href="../site.css?v=3">
 </head>
 <body>
 <header class="nav">
@@ -43,7 +48,7 @@
         <h3>A verdict for every word</h3>
         <p>Words a listener would hear as something else turn red, with what was heard. Words that were close but not quite turn amber.</p>
       </div>
-      <div class="art coral"><img src="words.webp" width="1194 1164" height="" alt="A sentence with things marked red and tagged heard sinks, above a waveform with the same stretch in red." loading="lazy"></div>
+      <div class="art coral"><img src="words.webp" width="1194" height="1164" alt="A sentence with things marked red and tagged heard sinks, above a waveform with the same stretch in red." loading="lazy"></div>
     </article>
     <article class="card">
       <div class="text">
@@ -60,6 +65,21 @@
         <p>Play your take with each word lit as you said it, or a single word cut from it, followed by the correct reading.</p>
       </div>
       <div class="art blue middle"><img src="compare.webp" width="1233" height="330" alt="The record button with Mine and Mine, then correct beside it." loading="lazy"></div>
+    </article>
+    <article class="card wide">
+      <div class="text">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></div>
+        <h3>Practise one word</h3>
+        <p>Each sound of a word is marked as you said it: green, amber or red, half green when it was right but not sure, with a tip on how to make the weakest. Then record just that word, as often as you like, without touching the sentence's score.</p>
+      </div>
+      <div class="art mint middle">
+        <div class="mini" role="img" aria-label="The word card for things after three tries of the word alone: 64, 81 and 92 percent sound match. Its sounds th, i, ng and s are green, th only half green, with a tip on how to say th.">
+          <div class="top"><b>things</b><span>92% sound match</span></div>
+          <div class="units"><span class="fair">th</span><span>i</span><span>ng</span><span>s</span></div>
+          <p><b>th</b> was the least sure. Put the tip of your tongue lightly between your teeth and push air out, so it is not a t, d, s or z.</p>
+          <div class="tries"><span>64%</span><span>81%</span><span class="last">92%</span></div>
+        </div>
+      </div>
     </article>
     <article class="card">
       <div class="text">
@@ -91,7 +111,7 @@
         <h3>See yourself improve</h3>
         <p>Every try is kept: watch a sentence go from 82% to 94%, and your pace settle at a natural 140 to 165 words a minute.</p>
       </div>
-      <div class="art teal"><img src="progress.webp" width="1014 883" height="" alt="The score ring at 94% clear, 157 words a minute, plus 6 since the try before, above a chart of tries at 82, 88 and 94." loading="lazy"></div>
+      <div class="art teal"><img src="progress.webp" width="1014" height="883" alt="The score ring at 94% clear, 157 words a minute, plus 6 since the try before, above a chart of tries at 82, 88 and 94." loading="lazy"></div>
     </article>
     <article class="card">
       <div class="text">
@@ -113,7 +133,7 @@
       <div class="text">
         <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
         <h3>On-device and private</h3>
-        <p>Speech recognition runs on your computer with Whisper, offline once its model is downloaded. There's no account and nothing is uploaded: your texts and recordings are plain files in a folder you can open, back up or delete.</p>
+        <p>Speech recognition runs on your computer with Whisper, offline once its model is downloaded. There's no account and nothing is uploaded: your texts and recordings are plain files in a folder you can open, back up or delete. (A system voice marked “online” in Settings sends the text it reads, never your recordings, to its provider.)</p>
       </div>
       <div class="art night private">
         <div class="facts">
