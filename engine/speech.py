@@ -131,7 +131,8 @@ def check(folder, txt, body, ext, ref=None):
     mp3 = os.path.join(folder, stamp + ".mp3")
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "in." + ext)
-        open(src, "wb").write(body)
+        with open(src, "wb") as file:
+            file.write(body)
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", src, "-af",
                         "silenceremove=start_periods=1:start_threshold=-40dB:start_silence=0.15,"
                         "areverse,silenceremove=start_periods=1:start_threshold=-40dB:start_silence=0.25,areverse,"
@@ -164,5 +165,6 @@ def check(folder, txt, body, ext, ref=None):
               "words": words, "duration": round(dur, 2), "wpm": round(spoken / dur * 60) if dur else 0,
               "score": round(100 * good / max(1, len(words))),
               "audio": "/files/" + os.path.relpath(mp3, paths.DATA)}
-    json.dump(result, open(os.path.join(folder, stamp + ".json"), "w"), indent=1)
+    with open(os.path.join(folder, stamp + ".json"), "w") as file:
+        json.dump(result, file, indent=1)
     return result

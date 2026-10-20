@@ -31,10 +31,11 @@ def cmu():
             os.makedirs(os.path.dirname(CMUDICT), exist_ok=True)
             subprocess.run(["curl", "-sSfL", "-o", CMUDICT, CMUDICT_URL], check=True)
         _cmu = {}
-        for line in open(CMUDICT, encoding="utf-8", errors="ignore"):
-            parts = line.split("#")[0].split()
-            if parts and "(" not in parts[0]:
-                _cmu[parts[0]] = parts[1:]
+        with open(CMUDICT, encoding="utf-8", errors="ignore") as lines:
+            for line in lines:
+                parts = line.split("#")[0].split()
+                if parts and "(" not in parts[0]:
+                    _cmu[parts[0]] = parts[1:]
     return _cmu
 
 

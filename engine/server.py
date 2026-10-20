@@ -38,6 +38,21 @@ def sha(phrase):
     return hashlib.sha1(norm(phrase).encode()).hexdigest()[:10]
 
 
+def read_text(path):
+    with open(path) as file:
+        return file.read()
+
+
+def read_json(path):
+    with open(path) as file:
+        return json.load(file)
+
+
+def write_json(path, data):
+    with open(path, "w") as file:
+        json.dump(data, file, indent=1)
+
+
 def text_dir(tid):
     if not ID.fullmatch(tid or ""):
         raise ValueError("bad text id")
@@ -48,8 +63,8 @@ def text_dir(tid):
 
 
 def text_info(folder):
-    meta = json.load(open(os.path.join(folder, "meta.json"))) if os.path.exists(os.path.join(folder, "meta.json")) else {}
-    body = open(os.path.join(folder, "text.txt")).read()
+    meta = read_json(os.path.join(folder, "meta.json")) if os.path.exists(os.path.join(folder, "meta.json")) else {}
+    body = read_text(os.path.join(folder, "text.txt"))
     created = meta.get("created") or datetime.datetime.fromtimestamp(
         os.path.getmtime(os.path.join(folder, "text.txt"))).isoformat(timespec="seconds")
     per_part = scores(os.path.basename(folder))
@@ -67,15 +82,15 @@ def texts():
 
 def save_meta(folder, **kw):
     path = os.path.join(folder, "meta.json")
-    meta = json.load(open(path)) if os.path.exists(path) else {}
+    meta = read_json(path) if os.path.exists(path) else {}
     meta.update({key: value for key, value in kw.items() if value is not None})
-    json.dump(meta, open(path, "w"), indent=1)
+    write_json(path, meta)
 
 
 def part_dir(tid, part):
     """The folder of one part of a text, checked to really be in the text."""
     folder = text_dir(tid)
-    if not part or norm(part) not in norm(open(os.path.join(folder, "text.txt")).read()):
+    if not part or norm(part) not in norm(read_text(os.path.join(folder, "text.txt"))):
         raise ValueError("that part is not in the text; reload")
     return os.path.join(folder, "p-" + sha(part))
 
@@ -84,7 +99,7 @@ def scores(tid):
     """{part key: {"last": score, "best": score, "tries": n}} for every recorded part of a text."""
     out = {}
     for part_folder in glob.glob(os.path.join(text_dir(tid), "p-*", "")):
-        results = [json.load(open(result_path)) for result_path in sorted(glob.glob(os.path.join(part_folder, "*.json")))]
+        results = [read_json(result_path) for result_path in sorted(glob.glob(os.path.join(part_folder, "*.json")))]
         if results:
             out[os.path.basename(os.path.dirname(part_folder))] = {
                 "last": results[-1]["score"], "best": max(result["score"] for result in results), "tries": len(results)}
@@ -104,7 +119,7 @@ def activity(days=7):
             continue
         if day in counts:
             counts[day] += 1
-            total += json.load(open(result_path))["score"]
+            total += read_json(result_path)["score"]
             tries += 1
     return {"days": [{"date": day.isoformat(), "tries": counts[day]} for day in sorted(counts)],
             "tries": tries, "average": round(total / tries) if tries else None}
@@ -113,7 +128,7 @@ def activity(days=7):
 def attempts(folder):
     out = []
     for result_path in sorted(glob.glob(os.path.join(folder, "*.json")), reverse=True):
-        result = json.load(open(result_path))
+        result = read_json(result_path)
         out.append({key: result[key] for key in ("id", "when", "score", "wpm", "duration")})
     return out
 
@@ -153,7 +168,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def file(self, path):
         """With Range, so the player can seek."""
-        data = open(path, "rb").read()
+        with open(path, "rb") as file:
+            data = file.read()
         byte_range = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
         if byte_range:
             first = int(byte_range.group(1) or 0)
@@ -176,8 +192,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/attempts":
                 return attempts(part_dir(query["text"], query["part"]))
             if path == "/api/attempt":
-                return json.load(open(os.path.join(part_dir(query["text"], query["part"]),
-                                                   os.path.basename(query["id"]) + ".json")))
+                return read_json(os.path.join(part_dir(query["text"], query["part"]),
+                                              os.path.basename(query["id"]) + ".json"))
             if path == "/api/activity":
                 return activity()
             if path == "/api/peaks":
@@ -214,7 +230,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("the text is empty")
                 folder = os.path.join(paths.TEXTS, sha(body_text))
                 os.makedirs(folder, exist_ok=True)
-                open(os.path.join(folder, "text.txt"), "w").write(body_text)
+                with open(os.path.join(folder, "text.txt"), "w") as file:
+                    file.write(body_text)
                 created = None if os.path.exists(os.path.join(folder, "meta.json")) else \
                     datetime.datetime.now().isoformat(timespec="seconds")
                 save_meta(folder, title=(payload.get("title") or "").strip() or None, mode=payload.get("mode"),
