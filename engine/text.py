@@ -80,8 +80,8 @@ def _compose(run):
         else:
             value = UNITS.get(tok, TENS.get(tok, ORDINALS.get(tok)))
             kind = "tens" if tok in TENS else "unit"
-        if frac is not None:                       # digits after "point"
-            frac += str(value)
+        if frac is not None:                       # digits after "point" (a decimal's whole part, as the Rust engine)
+            frac += str(int(value))
             continue
         # a new juxtaposed group when a number follows a number that cannot combine with it (19 | 86, 20 | 24, 3 | 30)
         if prev in ("unit", "tens", "digits") and not (prev == "tens" and kind == "unit" and value < 10):
@@ -184,6 +184,8 @@ def heard_words(text, heard):
         owned_count = max(owned_count, prefix_count)
     script_tokens, heard_tokens = toks(text), toks(heard)
     wrong, extra = [None] * len(script_words), [""] * len(script_words)
+    if not script_words:
+        return wrong, extra
     for op, i1, i2, j1, j2 in diff_ops(script_tokens, heard_tokens):
         said = " ".join(heard_tokens[j1:j2]).replace("#", "")
         if op == "insert":
