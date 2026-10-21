@@ -13,6 +13,8 @@ export interface TextItem {
   average: number | null;
   /** the scores of every recorded part, by part key */
   scores: Record<string, PartScore>;
+  /** the text began as a talk: what was said, written down (texts from before 0.4 have none) */
+  spoken?: boolean;
 }
 
 /** One part of a text that is read and recorded on its own. */

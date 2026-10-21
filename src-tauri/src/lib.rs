@@ -410,6 +410,14 @@ async fn talk_stop(app: AppHandle, engine: State<'_, Shared>, talks: State<'_, A
     blocking(move || talks.write_down(&*engine, |done, total| drop(app.emit("talk-progress", json!({ "done": done, "total": total }))))).await
 }
 
+/// Keep the talk written down as a text: `text` is what was said, as the user corrected it, practised whole, and the
+/// recording is its first take.
+#[tauri::command]
+async fn talk_keep(engine: State<'_, Shared>, talks: State<'_, Arc<talk::Talks>>, text: String, title: Option<String>) -> Result<talk::Kept, String> {
+    let (engine, talks) = (engine.inner().clone(), talks.inner().clone());
+    blocking(move || talks.keep(&*engine, &engine.store, &text, title)).await
+}
+
 /// Stop writing down the talk; its recording is kept, to write down again or discard.
 #[tauri::command]
 fn talk_cancel(talks: State<'_, Arc<talk::Talks>>) {
@@ -504,6 +512,7 @@ pub fn run() {
             talk_feed,
             talk_stop,
             talk_cancel,
+            talk_keep,
             talk_discard,
             download_models,
             latest_release,
@@ -700,7 +709,16 @@ mod tests {
             (Some(first), Some(second)) => first[0] <= second[0],
             _ => true,
         }));
-        talks.discard().unwrap();
+        // kept with one word corrected: that word is misheard, as what was written down
+        std::fs::create_dir_all(data.join("texts")).unwrap();
+        let written = heard.words.iter().position(|word| word.w.len() > 4).unwrap();
+        let mut meant: Vec<String> = heard.heard.split_whitespace().map(String::from).collect();
+        meant[written] = "Parakeet".into();
+        let started = std::time::Instant::now();
+        let kept = talks.keep(&engine, &engine.store, &meant.join(" "), None).unwrap();
+        eprintln!("kept in {:.1} s · score {}", started.elapsed().as_secs_f64(), kept.attempt.score);
+        assert_eq!(kept.attempt.words.len(), meant.len());
+        assert_eq!(kept.attempt.words[written].status, WordStatus::Wrong);
         let _ = std::fs::remove_dir_all(data);
     }
 

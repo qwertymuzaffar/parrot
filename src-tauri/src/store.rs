@@ -80,6 +80,8 @@ pub struct TextItem {
     pub practised: usize,
     pub average: Option<i64>,
     pub scores: BTreeMap<String, PartScore>,
+    /// the text began as a talk: what was said, written down
+    pub spoken: bool,
 }
 
 /// A try in the list of a part's tries.
@@ -238,6 +240,7 @@ impl Store {
             created,
             opened: meta.get("opened").and_then(Value::as_str).map(String::from),
             mode: meta.get("mode").and_then(Value::as_str).unwrap_or("sentences").to_string(),
+            spoken: meta.get("spoken").and_then(Value::as_bool).unwrap_or(false),
             practised: last.len(),
             average: rounded_mean(last.iter().sum(), last.len()),
             scores,
@@ -295,6 +298,16 @@ impl Store {
         }
         write_whole(&self.data.join("names.json"), serde_json::to_string_pretty(&names).unwrap().as_bytes())?;
         Ok(names)
+    }
+
+    /// One text as the library shows it.
+    pub fn text(&self, id: &str) -> Result<TextItem, String> {
+        Ok(self.text_info(&self.text_dir(id)?))
+    }
+
+    /// Mark a text as one that began as a talk.
+    pub fn set_spoken(&self, id: &str) -> Result<(), String> {
+        Self::save_meta(&self.text_dir(id)?, &[("spoken", Some(json!(true)))])
     }
 
     /// Moved to the trash folder, not deleted.
@@ -831,7 +844,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("parrot-shapes-{}", std::process::id()));
         let store = Store { data: dir.clone() };
         let added = serde_json::to_value(store.add("Hello there.", None, None).unwrap()).unwrap();
-        assert_eq!(keys(added.clone()), "average created id mode opened practised scores text title words");
+        assert_eq!(keys(added.clone()), "average created id mode opened practised scores spoken text title words");
         assert_eq!((&added["mode"], &added["opened"], &added["average"]), (&json!("sentences"), &Value::Null, &Value::Null));
         assert_eq!(added["title"], "Hello there.…");
         let summary = AttemptSummary { id: "20260101-120000".into(), when: "2026-01-01T12:00:00".into(), score: 80, wpm: 120, duration: 2.5 };

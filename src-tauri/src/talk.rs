@@ -1,13 +1,16 @@
 //! A talk: speech with no text in front of it (a story, an interview answer). The interface sends the recording in
 //! blocks while it is made, into a file under talks/, so a long talk never sits in memory or crosses to the engine in
-//! one piece. When it stops, Whisper writes down what was said and the aligner scores every word of that.
+//! one piece. When it stops, Whisper writes down what was said and the aligner scores every word of that. Kept, the
+//! talk becomes a text (what was said, as the user corrected it) with its recording as the first take.
 
+use crate::store::{self, Attempt, Store, TextItem};
 use crate::text::{self, WordResult, WordStatus};
-use crate::{Listen, MICROPHONE_WITHHELD, NOTHING_HEARD, audio};
+use crate::{Listen, MICROPHONE_WITHHELD, NOTHING_HEARD, audio, score_take};
 use regex::Regex;
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::BufWriter;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
@@ -45,6 +48,41 @@ struct Talk {
     samples: u64,
     /// the file holds the cleaned recording (written down once, so a second writing-down doesn't clean it again)
     cleaned: bool,
+    /// once written down: the stretches it was heard in (16 kHz samples), what was heard in each and where its words
+    /// were placed in it
+    written: Option<Vec<Written>>,
+}
+
+/// One stretch of a talk written down.
+struct Written {
+    stretch: Range<usize>,
+    heard: String,
+    /// the words heard, placed in the stretch
+    placed: Vec<text::WordTime>,
+}
+
+/// A talk kept: the text it became, and its recording as the text's first take.
+#[derive(Serialize, Debug)]
+pub struct Kept {
+    pub text: TextItem,
+    pub attempt: Attempt,
+}
+
+/// Stands in for the models when a talk is kept: what was heard in the stretch is already known, and so is where its
+/// words are when the user didn't change them.
+struct Reheard<'a, L: Listen> {
+    listener: &'a L,
+    written: &'a Written,
+}
+
+impl<L: Listen> Listen for Reheard<'_, L> {
+    fn align(&self, audio: &[f32], text: &str) -> Result<Vec<text::WordTime>, String> {
+        if text == self.written.heard { Ok(self.written.placed.clone()) } else { self.listener.align(audio, text) }
+    }
+
+    fn transcribe(&self, _audio: &[f32], _words: &[text::WordTime]) -> Result<String, String> {
+        Ok(self.written.heard.clone())
+    }
 }
 
 /// The talk under way, if any: one at a time.
@@ -75,7 +113,7 @@ impl Talks {
         let path = self.dir.join(format!("{}.wav", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let spec = hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
         let writer = hound::WavWriter::create(&path, spec).map_err(|error| error.to_string())?;
-        *self.current() = Some(Talk { path, writer: Some(writer), rate, samples: 0, cleaned: false });
+        *self.current() = Some(Talk { path, writer: Some(writer), rate, samples: 0, cleaned: false, written: None });
         Ok(())
     }
 
@@ -141,8 +179,10 @@ impl Talks {
         let duration = pcm.seconds();
         let samples = audio::resample(&pcm, 16000);
         drop(pcm);
+        talk.written = None;
         let mut said: Vec<String> = vec![];
         let mut times: Vec<text::WordTime> = vec![];
+        let mut written = vec![];
         for stretch in audio::stretches(&samples, 16000, STRETCH) {
             if self.cancel.load(Ordering::SeqCst) {
                 return Err(CANCELLED.into());
@@ -156,9 +196,11 @@ impl Talks {
                 let placed = listener.align(audio, &heard)?;
                 times.extend(
                     placed
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|word| text::WordTime { t: word.t.map(|[from, to]| [round3(from + offset), round3(to + offset)]), ..word }),
                 );
+                written.push(Written { stretch: stretch.clone(), heard: heard.clone(), placed });
                 said.push(heard);
             }
             progress(stretch.end as f64 / 16000.0, samples.len() as f64 / 16000.0);
@@ -167,6 +209,7 @@ impl Talks {
         if heard.is_empty() {
             return Err(NO_WORDS.into());
         }
+        talk.written = Some(written);
         // judged against itself: nothing is misheard until the user says what they meant, so the verdicts are the
         // sound scores
         let words = text::judge(&heard, &heard, &times, None);
@@ -180,6 +223,91 @@ impl Talks {
             words,
         })
     }
+}
+
+impl Talks {
+    /// Keep the talk written down: `said` (what was heard, as the user corrected it) becomes a text practised whole,
+    /// titled `title`, and the recording its first take, judged against it as a reading is: a word the user corrected
+    /// is misheard, as what speech recognition wrote. The talk is over once kept.
+    pub fn keep(&self, listener: &impl Listen, store: &Store, said: &str, title: Option<String>) -> Result<Kept, String> {
+        let mut current = self.current();
+        let talk = current.as_mut().ok_or("there is no talk to keep")?;
+        let written = talk.written.as_ref().ok_or("write the talk down first")?;
+        let pcm = audio::read_wav(&fs::read(&talk.path).map_err(|error| error.to_string())?)?;
+        let duration = pcm.seconds();
+        let samples = audio::resample(&pcm, 16000);
+        drop(pcm);
+        let said = store::norm(said);
+        let names = store.names();
+        // each stretch judged against the words the user meant in it, as it was written down: placing the whole talk
+        // at once would take hundreds of MB
+        let mut words: Vec<WordResult> = vec![];
+        for (part, meant) in written.iter().zip(share_out(written, &said)) {
+            if meant.is_empty() {
+                continue;
+            }
+            let reheard = Reheard { listener, written: part };
+            let stretch = &part.stretch;
+            let audio = &samples[stretch.clone()];
+            let scored = score_take(&reheard, audio, audio.len() as f64 / 16000.0, &meant.join(" "), &names)?;
+            let offset = stretch.start as f64 / 16000.0;
+            words.extend(
+                scored.words.into_iter().map(|word| WordResult { t: word.t.map(|[from, to]| [round3(from + offset), round3(to + offset)]), ..word }),
+            );
+        }
+        let text = store.add(&said, title, Some("whole".into()))?;
+        store.set_spoken(&text.id)?;
+        let dir = store.part_dir(&text.id, &said)?;
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let now = chrono::Local::now();
+        let id = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
+        let file = dir.join(format!("{id}.wav"));
+        fs::rename(&talk.path, &file).map_err(|error| error.to_string())?;
+        let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
+        let attempt = Attempt {
+            id,
+            when: now.format("%Y-%m-%dT%H:%M:%S").to_string(),
+            text: said,
+            heard: written.iter().map(|part| part.heard.as_str()).collect::<Vec<_>>().join(" "),
+            score: (100.0 * good as f64 / words.len().max(1) as f64).round() as i64,
+            wpm: (words.len() as f64 / duration * 60.0).round() as i64,
+            pauses: text::pauses(&words),
+            duration: (duration * 100.0).round() / 100.0,
+            audio: file.strip_prefix(&store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
+            words,
+        };
+        store.save_attempt(&dir, &attempt)?;
+        *current = None;
+        // read again: its scores now count the take
+        Ok(Kept { text: store.text(&text.id)?, attempt })
+    }
+}
+
+/// The words the user meant, shared out among the stretches the talk was heard in: each word goes with the word
+/// heard that it stands for (the same, or a correction of it), and a word added goes with the word heard before it.
+fn share_out<'a>(written: &[Written], meant: &'a str) -> Vec<Vec<&'a str>> {
+    let key = |word: &str| store::bare(word).to_lowercase();
+    // the stretch of each word heard
+    let mut owner = vec![];
+    for (stretch_index, part) in written.iter().enumerate() {
+        owner.extend(part.heard.split_whitespace().map(|_| stretch_index));
+    }
+    let heard: Vec<String> = written.iter().flat_map(|part| part.heard.split_whitespace().map(key)).collect();
+    let meant: Vec<&str> = meant.split_whitespace().collect();
+    let meant_keys: Vec<String> = meant.iter().map(|word| key(word)).collect();
+    let mut shared = vec![vec![]; written.len()];
+    if owner.is_empty() {
+        return shared;
+    }
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &heard, &meant_keys) {
+        let (old, new) = (op.old_range(), op.new_range());
+        for (place, meant_index) in new.clone().enumerate() {
+            // a correction goes with the word heard at the same place in it; an addition with the word before it
+            let heard_index = if old.is_empty() { old.start.saturating_sub(1) } else { old.start + place * old.len() / new.len() };
+            shared[owner[heard_index.min(owner.len() - 1)]].push(meant[meant_index]);
+        }
+    }
+    shared
 }
 
 /// What Whisper wrote, without the sounds that aren't words and with single spaces.
@@ -328,6 +456,56 @@ mod tests {
         assert!(talks.write_down(&listener, |_, _| {}).is_err(), "nothing left to write down");
         assert!(talks.start(1000).is_err());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_kept_is_a_text_with_its_first_take() {
+        let (talks, dir) = talks("keep");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-data-{}", std::process::id())) };
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let listener = Stretches { heard: "Muzafar was here, and so were the things.", lengths: RefCell::new(vec![]) };
+        assert!(talks.keep(&listener, &store, "anything", None).unwrap_err().contains("write the talk down first"));
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        let stretches = listener.lengths.borrow().len();
+        assert_eq!(stretches, 2);
+        store.set_name("Muzaffar", true).unwrap();
+        // what was meant: the name spelt right, "things" was "thinks" in the second stretch, and a word added
+        let meant = heard.heard.replacen("Muzafar", "Muzaffar", 1).replacen("things.", "thinks.", 2).replacen("thinks.", "things.", 1) + " Really.";
+        let kept = talks.keep(&listener, &store, &meant, Some("Who was here".into())).unwrap();
+
+        let words = &kept.attempt.words;
+        assert_eq!(words.len(), meant.split_whitespace().count(), "every word meant is judged");
+        assert_eq!(words.iter().map(|word| word.w.as_str()).collect::<Vec<_>>().join(" "), meant);
+        // the name is never misheard; "thinks" was heard as "things"; the word added was not heard
+        assert_eq!(words[0].status, WordStatus::Good);
+        let thinks = words.iter().position(|word| word.w == "thinks.").unwrap();
+        assert!(thinks >= 8, "in the second stretch");
+        assert_eq!((words[thinks].status, words[thinks].heard.as_deref()), (WordStatus::Wrong, Some("things")));
+        assert_eq!((words.last().unwrap().status, words.last().unwrap().heard.as_deref()), (WordStatus::Wrong, Some("")));
+        // the second stretch's words are placed in the second stretch
+        assert!(words[8].t.unwrap()[0] > listener.lengths.borrow()[0] - 0.5);
+
+        assert_eq!((kept.text.title.as_str(), kept.text.mode.as_str(), kept.text.spoken), ("Who was here", "whole", true));
+        assert_eq!(kept.text.scores.values().next().unwrap().last, kept.attempt.score);
+        let saved = store.attempts(&kept.text.id, &meant).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(store.data.join(&kept.attempt.audio).exists(), "the recording moved in with the try");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "and out of talks/");
+        assert!(talks.keep(&listener, &store, &meant, None).is_err(), "a talk is kept once");
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn words_meant_go_with_the_stretch_they_were_heard_in() {
+        let part = |heard: &str| Written { stretch: 0..1, heard: heard.into(), placed: vec![] };
+        let written = vec![part("one two three"), part(""), part("four five")];
+        assert_eq!(share_out(&written, "one two three four five"), vec![vec!["one", "two", "three"], vec![], vec!["four", "five"]]);
+        // a correction stays put, an addition goes with the word before it, a word dropped takes nothing
+        assert_eq!(share_out(&written, "So one, too three, and four"), vec![vec!["So", "one,", "too", "three,", "and"], vec![], vec!["four"]]);
+        assert_eq!(share_out(&written, ""), vec![Vec::<&str>::new(); 3]);
     }
 
     #[test]
