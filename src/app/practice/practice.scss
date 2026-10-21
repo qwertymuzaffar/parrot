@@ -241,6 +241,11 @@ header {
       outline: 2px solid var(--accent);
       outline-offset: 1px;
     }
+    // a name: never counted as misheard
+    &.name {
+      text-decoration: underline dotted var(--muted);
+      text-underline-offset: 5px;
+    }
   }
   // a long pause between two words: a small gap marker, its length in seconds
   .pause {

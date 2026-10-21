@@ -102,6 +102,14 @@ export class TauriEngine extends Engine {
     return this.call<void>('open_data_folder');
   }
 
+  names() {
+    return this.call<string[]>('names');
+  }
+
+  setName(word: string, name: boolean) {
+    return this.call<string[]>('set_name', { word, name });
+  }
+
   soundsLike(word: string) {
     return this.call<SoundsLike>('pron', { w: word });
   }

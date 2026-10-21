@@ -4,6 +4,7 @@ import { Attempt, Part } from '../core/models';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { Names } from '../core/names';
 import { WordPractice } from '../core/word-practice';
 import { Practice } from './practice';
 
@@ -53,6 +54,7 @@ describe('the caption under the part', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Session, useValue: session },
+        { provide: Names, useValue: { has: (word: string) => word === 'Muzaffar' } },
         {
           provide: Playback,
           useValue: {

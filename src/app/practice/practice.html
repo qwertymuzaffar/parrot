@@ -68,6 +68,7 @@
               class="w"
               [class]="status(wordIndex)"
               [class.now]="playback.nowRef() === wordIndex || playback.nowMine() === wordIndex"
+              [class.name]="names.has(word)"
               [class.sel]="session.selected() === wordIndex && !recording()"
               [attr.aria-current]="session.selected() === wordIndex && !recording() ? 'true' : null"
               [attr.aria-label]="wordLabel(wordIndex, word)"

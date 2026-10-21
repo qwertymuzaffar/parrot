@@ -460,6 +460,29 @@ pub const OFF_VS_REFERENCE: f64 = 0.2;
 pub const OFF_BELOW: f64 = 0.75;
 pub const OFF_FLOOR: f64 = 0.5;
 
+/// A word's verdict by how clearly it was said alone: good, or unclear (sounded off).
+fn by_sound(score: Option<f64>, reference_score: Option<f64>) -> WordStatus {
+    match (score, reference_score) {
+        (Some(score), Some(reference_score)) if score < OFF_BELOW && reference_score - score > OFF_VS_REFERENCE => WordStatus::Unclear,
+        (Some(score), None) if score < OFF_FLOOR => WordStatus::Unclear,
+        _ => WordStatus::Good,
+    }
+}
+
+/// How a word is kept in the names list: lower case, without the punctuation around it or a possessive 's.
+pub fn name_key(word: &str) -> String {
+    let word = word.trim_matches(|character: char| !character.is_alphanumeric()).to_lowercase();
+    word.strip_suffix("'s").or_else(|| word.strip_suffix("’s")).unwrap_or(&word).to_string()
+}
+
+/// Names are never misheard: speech recognition writes a name it doesn't know as some other word, every time. A name
+/// it misheard keeps what was heard, for information, and is judged by how clearly it was said.
+pub fn spare_names(words: &mut [WordResult], names: &[String]) {
+    for word in words.iter_mut().filter(|word| word.status == WordStatus::Wrong && names.contains(&name_key(&word.w))) {
+        word.status = by_sound(word.score, word.reference);
+    }
+}
+
 /// Per-word verdicts: good, unclear (sounded off) or wrong (heard as another word, or not heard).
 pub fn judge(text: &str, heard: &str, mine: &[WordTime], reference: Option<&[WordTime]>) -> Vec<WordResult> {
     let (wrong, extra) = heard_words(text, heard);
@@ -468,15 +491,7 @@ pub fn judge(text: &str, heard: &str, mine: &[WordTime], reference: Option<&[Wor
         .map(|(word_index, word)| {
             let score = mine.get(word_index).and_then(|word_time| word_time.score);
             let reference_score = reference.and_then(|reference_times| reference_times.get(word_index)).and_then(|word_time| word_time.score);
-            let status = if wrong[word_index].is_some() {
-                WordStatus::Wrong
-            } else {
-                match (score, reference_score) {
-                    (Some(score), Some(reference_score)) if score < OFF_BELOW && reference_score - score > OFF_VS_REFERENCE => WordStatus::Unclear,
-                    (Some(score), None) if score < OFF_FLOOR => WordStatus::Unclear,
-                    _ => WordStatus::Good,
-                }
-            };
+            let status = if wrong[word_index].is_some() { WordStatus::Wrong } else { by_sound(score, reference_score) };
             WordResult {
                 w: word.to_string(),
                 t: mine.get(word_index).and_then(|word_time| word_time.t),
@@ -562,6 +577,26 @@ mod tests {
         let results = judge(text, "the beautiful sinks", &mine, Some(&reference));
         assert_eq!(results.iter().map(|word| word.status).collect::<Vec<_>>(), vec![WordStatus::Good, WordStatus::Unclear, WordStatus::Wrong]);
         assert_eq!(results[2].heard.as_deref(), Some("sinks"));
+    }
+
+    #[test]
+    fn a_name_is_never_misheard_but_can_sound_off() {
+        let mine = [
+            WordTime { t: None, score: Some(0.9), letters: None },
+            WordTime { t: None, score: Some(0.9), letters: None },
+            WordTime { t: None, score: Some(0.3), letters: None },
+            WordTime { t: None, score: Some(0.9), letters: None },
+        ];
+        let mut results = judge("Muzaffar's from Tashkent, really", "Mozafar's from Tashken, rarely", &mine, None);
+        let names = vec![name_key("Muzaffar's"), name_key("“Tashkent”")];
+        assert_eq!(names, vec!["muzaffar", "tashkent"]);
+        spare_names(&mut results, &names);
+        // the clear name is good, the one said unclearly sounded off, a word that isn't a name stays misheard
+        assert_eq!(
+            results.iter().map(|word| word.status).collect::<Vec<_>>(),
+            vec![WordStatus::Good, WordStatus::Good, WordStatus::Unclear, WordStatus::Wrong]
+        );
+        assert_eq!(results[2].heard.as_deref(), Some("tashken"), "what was heard is kept");
     }
 
     #[test]

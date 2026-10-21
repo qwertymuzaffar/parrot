@@ -70,6 +70,12 @@ export abstract class Engine {
   /** Show the data folder in the computer's file manager. */
   abstract openDataFolder(): Promise<void>;
 
+  /** The words never counted as misheard, in every text (lower case, see nameKey). */
+  abstract names(): Promise<string[]>;
+
+  /** Mark a word as a name, or not, from the next take on; the names after. */
+  abstract setName(word: string, name: boolean): Promise<string[]>;
+
   abstract soundsLike(word: string): Promise<SoundsLike>;
 
   /** URL of a saved recording (paths from the first engine start with /files/). */

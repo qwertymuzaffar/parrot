@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
 import { Engine } from '../core/engine';
+import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
 import { Sound } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
@@ -89,6 +90,35 @@ const MB = 1_000_000;
           }
         </section>
 
+        <section>
+          <span class="eyebrow">Names</span>
+          <p class="hint">
+            Words never counted as misheard, in any text: speech recognition writes a name it doesn't know as some other word. Mark one from
+            its word card.
+          </p>
+          @if (names.list().length) {
+            <ul class="names">
+              @for (name of names.list(); track name) {
+                <li>
+                  {{ name }}
+                  <button
+                    class="btn ghost small icon"
+                    (click)="names.set(name, false)"
+                    [attr.aria-label]="'Remove ' + name + ' from the names'"
+                  >
+                    <app-icon name="close" [size]="13" />
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="hint">No names yet.</p>
+          }
+          @if (names.error(); as error) {
+            <p class="bad">{{ error }}</p>
+          }
+        </section>
+
         @if (health.value(); as info) {
           <section>
             <span class="eyebrow">Texts and recordings</span>
@@ -121,6 +151,23 @@ const MB = 1_000_000;
     </dialog>
   `,
   styles: `
+    .names {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .names li {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px 4px 2px 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      font-size: 13px;
+    }
     dialog {
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -218,6 +265,7 @@ const MB = 1_000_000;
 export class Settings {
   protected sound = inject(Sound);
   protected theme = inject(Theme);
+  protected names = inject(Names);
   private engine = inject(Engine);
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
@@ -247,6 +295,7 @@ export class Settings {
 
   open() {
     this.check.update((count) => count + 1);
+    void this.names.load();
     this.emptying.set(false);
     this.failure.set(null);
     this.dialog().nativeElement.showModal();

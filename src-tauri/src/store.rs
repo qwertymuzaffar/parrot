@@ -276,6 +276,27 @@ impl Store {
         Ok(self.text_info(&dir))
     }
 
+    /// The words never counted as misheard, in every text (text::name_key), sorted.
+    pub fn names(&self) -> Vec<String> {
+        fs::read_to_string(self.data.join("names.json")).ok().and_then(|contents| serde_json::from_str(&contents).ok()).unwrap_or_default()
+    }
+
+    /// Mark a word as a name or not; the names after.
+    pub fn set_name(&self, word: &str, name: bool) -> Result<Vec<String>, String> {
+        let key = crate::text::name_key(word);
+        if key.is_empty() || key.chars().count() > 40 || key.chars().any(char::is_whitespace) {
+            return Err(format!("“{word}” can't be a name"));
+        }
+        let mut names = self.names();
+        names.retain(|kept| *kept != key);
+        if name {
+            names.push(key);
+            names.sort();
+        }
+        write_whole(&self.data.join("names.json"), serde_json::to_string_pretty(&names).unwrap().as_bytes())?;
+        Ok(names)
+    }
+
     /// Moved to the trash folder, not deleted.
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let dir = self.text_dir(id)?;
@@ -501,6 +522,22 @@ mod tests {
         assert_eq!(store.update(&id, Some("Hi".into()), None, true).unwrap().title, "Hi");
         store.delete(&id).unwrap();
         assert!(store.list().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn names_are_kept_for_every_text() {
+        let dir = std::env::temp_dir().join(format!("parrot-names-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let store = Store { data: dir.clone() };
+        assert!(store.names().is_empty());
+        assert_eq!(store.set_name("Tashkent,", true).unwrap(), vec!["tashkent"]);
+        assert_eq!(store.set_name("“Muzaffar’s”", true).unwrap(), vec!["muzaffar", "tashkent"]);
+        assert_eq!(store.set_name("muzaffar", true).unwrap(), vec!["muzaffar", "tashkent"], "marked once");
+        assert_eq!(store.set_name("Tashkent", false).unwrap(), vec!["muzaffar"]);
+        assert_eq!(store.names(), vec!["muzaffar"], "saved");
+        assert!(store.set_name("...", true).is_err());
+        assert!(store.set_name("New York", true).is_err(), "one word at a time");
         let _ = fs::remove_dir_all(dir);
     }
 

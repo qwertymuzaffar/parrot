@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Engine, EngineError, EngineInfo } from './engine';
 import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem, WordStatus } from './models';
+import { nameKey } from './names';
 import { bare, partKey, sentences } from './split';
 
 /** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
@@ -57,6 +58,7 @@ export class DemoEngine extends Engine {
   private library: DemoText[] = [];
   private readonly ready = this.seed();
   private takes = 0;
+  private nameList: string[] = [];
 
   private async seed() {
     for (const sample of SAMPLES) {
@@ -201,6 +203,18 @@ export class DemoEngine extends Engine {
       scored.push(attempt.score);
     }
     return { days, tries: scored.length, average: mean(scored) };
+  }
+
+  async names() {
+    return [...this.nameList];
+  }
+
+  async setName(word: string, name: boolean) {
+    const key = nameKey(word);
+    if (!key || /\s/.test(key)) throw new EngineError(`“${word}” can't be a name`);
+    this.nameList = this.nameList.filter((kept) => kept !== key);
+    if (name) this.nameList = [...this.nameList, key].sort();
+    return [...this.nameList];
   }
 
   async soundsLike(): Promise<SoundsLike> {

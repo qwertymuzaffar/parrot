@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, resource, signal } from '@angular/core';
 import { Engine } from '../core/engine';
+import { Names } from '../core/names';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
@@ -81,6 +82,14 @@ import { SoundUnits } from './sound-units';
 
     @if (why()) {
       <p class="why" [innerHTML]="why()"></p>
+    }
+
+    <label class="name">
+      <input type="checkbox" [checked]="isName()" (change)="markName($any($event.target).checked)" />
+      <span><b>A name</b>: never counted as misheard, in any text{{ isName() ? ', from your next reading on' : '' }}</span>
+    </label>
+    @if (names.error(); as error) {
+      <p class="error">{{ error }}</p>
     }
 
     @if (practice.tries().length) {
@@ -260,6 +269,19 @@ import { SoundUnits } from './sound-units';
       color: var(--ink-2);
       border-left: 2px solid var(--warn-line);
     }
+    .name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink-2);
+      cursor: pointer;
+    }
+    .name input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
     .why {
       margin: 0;
       font-size: 13px;
@@ -343,6 +365,7 @@ export class WordCard {
   protected recorder = inject(Recorder);
   private engine = inject(Engine);
   protected practice = inject(WordPractice);
+  protected names = inject(Names);
   protected band = band;
   /** the word try asked about deleting: the question goes once another word or try is shown */
   protected confirming = signal<string | null>(null);
@@ -418,7 +441,7 @@ export class WordCard {
       // a capitalised word inside the sentence is usually a name
       const wordIndex = this.index() ?? 0;
       if (wordIndex > 0 && /^[A-Z]/.test(this.word()))
-        out.push('Names are often heard as a common word: if you say it the way its owners do, you can ignore the red here.');
+        out.push('Names are often heard as a common word: if this is one, mark it as a name below and it won’t count as misheard again.');
     }
     if (mine.status !== 'good' && mine.ref != null) out.push(`The reference voice scored ${this.pct(mine.ref)}% here.`);
     if (mine.extra) out.push(`Extra words heard after it: “${escapeHtml(mine.extra)}”.`);
@@ -437,6 +460,12 @@ export class WordCard {
     const heard = tried.heard ? `heard <b>“${escapeHtml(tried.heard)}”</b>` : 'did not catch it';
     return `Speech recognition ${heard}: on a single word it can be unsure, so trust the sound match too.`;
   });
+
+  protected readonly isName = computed(() => this.names.has(this.raw()));
+
+  protected markName(name: boolean) {
+    void this.names.set(this.raw(), name);
+  }
 
   protected sayWord(slow = false) {
     this.playback.sayWord(this.raw(), slow);

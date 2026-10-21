@@ -105,14 +105,14 @@ impl Engine {
 
     /// Clean a take, score it against `txt` (as a part or as a word alone) and save both in `dir`: the recording, and
     /// what was heard and scored.
-    fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: fn(&Self, &[f32], f64, &str) -> Result<Scored, String>) -> Result<Attempt, String> {
+    fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: Scorer<Self>) -> Result<Attempt, String> {
         let raw = audio::read_wav(wav)?;
         if audio::blank(&raw) {
             return Err(MICROPHONE_WITHHELD.into());
         }
         let take = audio::clean(raw).filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE).ok_or(NOTHING_HEARD)?;
         let secs = take.seconds();
-        let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
+        let scored = score(self, &audio::resample(&take, 16000), secs, txt, &self.store.names())?;
         // not create_dir_all: a text deleted while the take was scored must not come back as a folder of its tries
         match std::fs::create_dir(dir) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err("the text was deleted".into()),
@@ -171,6 +171,9 @@ impl Listen for Engine {
     }
 }
 
+/// How a take is judged: as a part (score_take) or as a word alone (score_word).
+type Scorer<L> = fn(&L, &[f32], f64, &str, &[String]) -> Result<Scored, String>;
+
 /// A take judged against its text, before it is saved.
 struct Scored {
     heard: String,
@@ -179,8 +182,8 @@ struct Scored {
     wpm: i64,
 }
 
-/// Judge a take (16 kHz, `secs` long) of `txt` word by word.
-fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Result<Scored, String> {
+/// Judge a take (16 kHz, `secs` long) of `txt` word by word; `names` are never misheard.
+fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str, names: &[String]) -> Result<Scored, String> {
     let mut mine = listener.align(audio, txt)?;
     let heard = listener.transcribe(audio, &mine)?;
     // stopped before the end: the aligner squeezes the whole text into the take and the words that were said
@@ -196,7 +199,8 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Re
             *word_time = text::WordTime { score: Some(0.0), ..Default::default() };
         }
     }
-    let words = text::judge(txt, &heard, &mine, None);
+    let mut words = text::judge(txt, &heard, &mine, None);
+    text::spare_names(&mut words, names);
     let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
     // the pace of the words read: all of them, unless the take stopped early
     let spoken = if stopped_early { said } else { words.len() };
@@ -210,8 +214,8 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str) -> Re
 
 /// Judge a take of one word said alone. Both checks give its verdict, but its score is the sound match: heard without
 /// the words around it, a single word is often misheard by speech recognition, and a score of 0 or 100 tells little.
-fn score_word(listener: &impl Listen, audio: &[f32], secs: f64, word: &str) -> Result<Scored, String> {
-    let mut scored = score_take(listener, audio, secs, word)?;
+fn score_word(listener: &impl Listen, audio: &[f32], secs: f64, word: &str, names: &[String]) -> Result<Scored, String> {
+    let mut scored = score_take(listener, audio, secs, word, names)?;
     scored.score = scored.words.first().and_then(|said| said.score).map(|sound| (sound * 100.0).round() as i64).unwrap_or(0);
     Ok(scored)
 }
@@ -314,6 +318,18 @@ fn word_attempts(engine: State<'_, Shared>, text: String, word: String) -> Resul
 #[tauri::command]
 fn word_attempt(engine: State<'_, Shared>, text: String, word: String, id: String) -> Result<Attempt, String> {
     engine.store.word_attempt(&text, &word, &id)
+}
+
+/// The words never counted as misheard, in every text.
+#[tauri::command]
+fn names(engine: State<'_, Shared>) -> Vec<String> {
+    engine.store.names()
+}
+
+/// Mark a word as a name, or not; the names after.
+#[tauri::command]
+fn set_name(engine: State<'_, Shared>, word: String, name: bool) -> Result<Vec<String>, String> {
+    engine.store.set_name(&word, name)
 }
 
 #[tauri::command]
@@ -479,6 +495,8 @@ pub fn run() {
             word_attempts,
             word_attempt,
             activity,
+            names,
+            set_name,
             pron,
             check,
             check_word,
@@ -537,7 +555,7 @@ mod tests {
     #[test]
     fn a_whole_take_scores_every_word() {
         let listener = FakeListener::hearing("the cat sat down");
-        let scored = score_take(&listener, &[], 2.0, "the cat sat down").unwrap();
+        let scored = score_take(&listener, &[], 2.0, "the cat sat down", &[]).unwrap();
         assert_eq!((scored.score, scored.wpm), (100, 120));
         assert_eq!(statuses(&scored), vec![WordStatus::Good; 4]);
         assert_eq!(*listener.aligned.borrow(), vec!["the cat sat down"]);
@@ -546,7 +564,7 @@ mod tests {
     #[test]
     fn a_misheard_word_is_wrong_and_the_rest_still_count() {
         let listener = FakeListener::hearing("the beautiful sinks");
-        let scored = score_take(&listener, &[], 1.5, "the beautiful things").unwrap();
+        let scored = score_take(&listener, &[], 1.5, "the beautiful things", &[]).unwrap();
         assert_eq!(statuses(&scored), vec![WordStatus::Good, WordStatus::Good, WordStatus::Wrong]);
         // a misheard last word was still read, so it counts toward the pace
         assert_eq!((scored.score, scored.wpm), (67, 120));
@@ -554,9 +572,19 @@ mod tests {
     }
 
     #[test]
+    fn a_misheard_name_does_not_count_against_the_take() {
+        let listener = FakeListener::hearing("I'm Mozafar from Tashkent");
+        let names = vec!["muzaffar".to_string()];
+        let scored = score_take(&listener, &[], 2.0, "I'm Muzaffar from Tashkent", &names).unwrap();
+        assert_eq!(statuses(&scored), vec![WordStatus::Good; 4]);
+        assert_eq!((scored.score, scored.words[1].heard.as_deref()), (100, Some("mozafar")));
+        assert_eq!(score_take(&listener, &[], 2.0, "I'm Muzaffar from Tashkent", &[]).unwrap().score, 75, "not a name, it is misheard");
+    }
+
+    #[test]
     fn a_take_stopped_early_scores_only_what_was_said() {
         let listener = FakeListener::hearing("the cat");
-        let scored = score_take(&listener, &[], 1.0, "the cat sat down").unwrap();
+        let scored = score_take(&listener, &[], 1.0, "the cat sat down", &[]).unwrap();
         // placed again with only the words said, and the rest missed
         assert_eq!(*listener.aligned.borrow(), vec!["the cat sat down", "the cat"]);
         assert_eq!(statuses(&scored), vec![WordStatus::Good, WordStatus::Good, WordStatus::Wrong, WordStatus::Wrong]);
@@ -569,7 +597,7 @@ mod tests {
     #[test]
     fn nothing_heard_is_all_missed() {
         let listener = FakeListener::hearing("");
-        let scored = score_take(&listener, &[], 1.0, "the cat").unwrap();
+        let scored = score_take(&listener, &[], 1.0, "the cat", &[]).unwrap();
         assert_eq!(statuses(&scored), vec![WordStatus::Wrong; 2]);
         assert_eq!(scored.score, 0);
         assert_eq!(listener.aligned.borrow().len(), 1);
@@ -578,13 +606,13 @@ mod tests {
     #[test]
     fn a_word_alone_is_judged_by_both_checks_and_scored_by_its_sound() {
         let listener = FakeListener::hearing("There.");
-        let scored = score_word(&listener, &[], 0.6, store::bare("there?")).unwrap();
+        let scored = score_word(&listener, &[], 0.6, store::bare("there?"), &[]).unwrap();
         assert_eq!(*listener.aligned.borrow(), vec!["there"]);
         assert_eq!((scored.score, statuses(&scored)), (90, vec![WordStatus::Good]));
         // misheard, it is still scored by how clearly it was said, and the verdict says what was heard
-        let misheard = score_word(&FakeListener::hearing("Hair."), &[], 0.6, "there").unwrap();
+        let misheard = score_word(&FakeListener::hearing("Hair."), &[], 0.6, "there", &[]).unwrap();
         assert_eq!((misheard.score, statuses(&misheard), misheard.words[0].heard.as_deref()), (90, vec![WordStatus::Wrong], Some("hair")));
-        assert_eq!(score_word(&FakeListener::hearing(""), &[], 0.6, "there").unwrap().words[0].status, WordStatus::Wrong);
+        assert_eq!(score_word(&FakeListener::hearing(""), &[], 0.6, "there", &[]).unwrap().words[0].status, WordStatus::Wrong);
     }
 
     /// A take through the whole engine, as the app runs it: needs the models on this machine.
@@ -705,7 +733,7 @@ mod tests {
         audio::write_wav(&wav_path, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
         let wav = std::fs::read(&wav_path).unwrap();
         // the text is deleted while the take is being scored
-        let delete_while_scoring = |engine: &Engine, _audio: &[f32], _secs: f64, _txt: &str| {
+        let delete_while_scoring = |engine: &Engine, _audio: &[f32], _secs: f64, _txt: &str, _names: &[String]| {
             engine.store.delete(&engine.store.list()[0].id).unwrap();
             Ok(Scored { heard: String::new(), words: vec![], score: 0, wpm: 0 })
         };
@@ -727,7 +755,7 @@ mod tests {
         audio::write_wav(&wav_path, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
         let wav = std::fs::read(&wav_path).unwrap();
         // "Well," then 1.5 s before "I think so."
-        let paused = |_: &Engine, _: &[f32], _: f64, txt: &str| {
+        let paused = |_: &Engine, _: &[f32], _: f64, txt: &str, _: &[String]| {
             let times = [[0.0, 0.3], [1.8, 1.9], [1.9, 2.2], [2.2, 2.5]].map(|t| text::WordTime { t: Some(t), score: Some(0.9), letters: None });
             Ok(Scored { heard: txt.into(), words: text::judge(txt, txt, &times, None), score: 100, wpm: 100 })
         };
@@ -748,7 +776,8 @@ mod tests {
             audio::write_wav(&wav_path, &audio::Pcm { samples, rate: 48000 }).unwrap();
             std::fs::read(&wav_path).unwrap()
         };
-        let unscored = |_: &Engine, _: &[f32], _: f64, _: &str| -> Result<Scored, String> { panic!("a take of no sound is never scored") };
+        let unscored =
+            |_: &Engine, _: &[f32], _: f64, _: &str, _: &[String]| -> Result<Scored, String> { panic!("a take of no sound is never scored") };
         let zeros = take("zeros.wav", vec![0.0; 48000]);
         assert_eq!(engine.keep_take(&part, "Hello there.", &zeros, unscored).unwrap_err(), MICROPHONE_WITHHELD);
         // a quiet room is a microphone that works, with no one speaking

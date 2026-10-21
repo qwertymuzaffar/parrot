@@ -180,6 +180,15 @@ class FakeEngine extends Engine {
   async soundsLike() {
     return {};
   }
+  nameList: string[] = [];
+  async names() {
+    return this.nameList;
+  }
+  async setName(word: string, name: boolean) {
+    this.calls.push(`setName ${word} ${name}`);
+    this.nameList = name ? [...this.nameList, word.toLowerCase()] : this.nameList.filter((kept) => kept !== word.toLowerCase());
+    return this.nameList;
+  }
   audioUrl(path: string) {
     return `audio:${path}`;
   }

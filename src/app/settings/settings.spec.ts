@@ -25,12 +25,20 @@ class FakeUpdates extends Updates {
 
 describe('Settings: check for updates', () => {
   let updates: FakeUpdates;
+  let names: string[] = [];
 
   async function settings() {
     TestBed.configureTestingModule({
       providers: [
         { provide: Updates, useValue: updates },
-        { provide: Engine, useValue: { info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }) } },
+        {
+          provide: Engine,
+          useValue: {
+            info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }),
+            names: async () => names,
+            setName: async (word: string, name: boolean) => (names = name ? [...names, word] : names.filter((kept) => kept !== word)),
+          },
+        },
         { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
       ],
     });
@@ -46,7 +54,10 @@ describe('Settings: check for updates', () => {
     return { element, button, status, click };
   }
 
-  beforeEach(() => (updates = new FakeUpdates()));
+  beforeEach(() => {
+    updates = new FakeUpdates();
+    names = [];
+  });
 
   it('shows the version and asks nothing until the button is clicked', async () => {
     const { element, button, status } = await settings();
@@ -76,6 +87,15 @@ describe('Settings: check for updates', () => {
     ]);
     await click(link);
     expect(updates.opened).toEqual(['https://github.com/qwertymuzaffar/parrot/releases/tag/v0.10.0']);
+  });
+
+  it('lists the names, and removes one', async () => {
+    names = ['muzaffar', 'tashkent'];
+    const { element, click } = await settings();
+    const listed = () => [...element.querySelectorAll('.names li')].map((item) => item.textContent!.trim());
+    expect(listed()).toEqual(['muzaffar', 'tashkent']);
+    await click(element.querySelector<HTMLElement>('[aria-label="Remove tashkent from the names"]')!);
+    expect(listed()).toEqual(['muzaffar']);
   });
 
   it('says why when GitHub cannot be asked, and can ask again', async () => {

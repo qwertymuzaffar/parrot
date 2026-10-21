@@ -16,6 +16,7 @@ import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
+import { Names } from '../core/names';
 import { Icon } from '../shared/icon';
 import { band } from '../shared/score';
 import { ScoreRing } from './score-ring';
@@ -37,6 +38,7 @@ export class Practice {
   protected playback = inject(Playback);
   protected recorder = inject(Recorder);
   private words = inject(WordPractice);
+  protected names = inject(Names);
   private injector = inject(Injector);
   readonly settings = output<void>();
   protected band = band;
@@ -134,9 +136,10 @@ export class Practice {
   /** what a screen reader says for a word: how it came out, which the screen shows in colour */
   protected wordLabel(wordIndex: number, word: string) {
     const result = this.result()?.words[wordIndex];
-    if (result?.status === 'wrong') return `${word} — ${result.heard ? `misheard as “${result.heard}”` : 'not heard'}`;
-    if (result?.status === 'unclear') return `${word} — sounded off`;
-    return word;
+    const said = this.names.has(word) ? `${word}, a name` : word;
+    if (result?.status === 'wrong') return `${said} — ${result.heard ? `misheard as “${result.heard}”` : 'not heard'}`;
+    if (result?.status === 'unclear') return `${said} — sounded off`;
+    return said;
   }
 
   /** what a screen reader says for a step: the part and its last score ("Part 3, 64%"), which the bar shows in colour */

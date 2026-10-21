@@ -4,6 +4,7 @@ import { Attempt, WordResult, WordStatus } from '../core/models';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { Names } from '../core/names';
 import { WordPractice } from '../core/word-practice';
 import { Practice } from './practice';
 
@@ -37,6 +38,7 @@ describe('the practice screen', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Session, useValue: session },
+        { provide: Names, useValue: { has: (word: string) => word === 'Muzaffar' } },
         { provide: Playback, useValue: playback },
         { provide: Recorder, useValue: { warm: vi.fn(), owner: signal(null) } },
         { provide: WordPractice, useValue: { toggleRecord: vi.fn() } },
@@ -95,6 +97,12 @@ describe('the practice screen', () => {
     ]);
     expect(labels.stepLabel('3', 64)).toBe('Sentence 3, 64%');
     expect(labels.stepLabel('4')).toBe('Sentence 4, not practised');
+  });
+
+  it('says which words are names', () => {
+    session.result.set(null);
+    expect(labels.wordLabel(0, 'Muzaffar')).toBe('Muzaffar, a name');
+    expect(labels.wordLabel(1, 'here')).toBe('here');
   });
 
   it('marks a long pause after the word it follows', () => {
