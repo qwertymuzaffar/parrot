@@ -234,6 +234,47 @@ fn delete_text(engine: State<'_, Shared>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn delete_attempt(engine: State<'_, Shared>, text: String, part: String, id: String) -> Result<(), String> {
+    engine.store.delete_attempt(&text, &part, &id)
+}
+
+#[tauri::command]
+fn delete_word_attempt(engine: State<'_, Shared>, text: String, word: String, id: String) -> Result<(), String> {
+    engine.store.delete_word_attempt(&text, &word, &id)
+}
+
+/// How much the deleted texts in the trash take, in bytes.
+#[tauri::command]
+async fn trash_size(engine: State<'_, Shared>) -> Result<u64, String> {
+    let engine = engine.inner().clone();
+    blocking(move || Ok(engine.store.trash_size())).await
+}
+
+/// Erase the deleted texts now rather than TRASH_DAYS on; what is left in the trash, in bytes.
+#[tauri::command]
+async fn empty_trash(engine: State<'_, Shared>) -> Result<u64, String> {
+    let engine = engine.inner().clone();
+    blocking(move || Ok(engine.store.empty_trash())).await
+}
+
+/// Show the data folder in the file manager. Only ever this folder, so the interface needs no permission to open paths.
+#[tauri::command]
+fn open_data_folder(engine: State<'_, Shared>) -> Result<(), String> {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    let mut child =
+        std::process::Command::new(opener).arg(&engine.store.data).spawn().map_err(|error| format!("could not open the data folder: {error}"))?;
+    // waited for elsewhere, so it doesn't linger as a zombie; explorer's exit code means nothing
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+#[tauri::command]
 fn scores(engine: State<'_, Shared>, text: String) -> Result<BTreeMap<String, PartScore>, String> {
     engine.store.scores(&text)
 }
@@ -359,7 +400,11 @@ pub fn run() {
             let models = data.join("models");
             let engine = Arc::new(Engine { models, store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
             let warm = engine.clone();
-            std::thread::spawn(move || warm.warm());
+            std::thread::spawn(move || {
+                // deleted texts are erased for good TRASH_DAYS on, as the confirmation says
+                warm.store.expire_trash(chrono::Local::now().naive_local());
+                warm.warm();
+            });
             app.manage(engine);
             Ok(())
         })
@@ -369,6 +414,11 @@ pub fn run() {
             add_text,
             update_text,
             delete_text,
+            delete_attempt,
+            delete_word_attempt,
+            trash_size,
+            empty_trash,
+            open_data_folder,
             scores,
             attempts,
             attempt,

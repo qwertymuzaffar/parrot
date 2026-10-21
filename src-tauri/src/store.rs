@@ -8,11 +8,11 @@
 //!     <time>.wav + <time>.json a try: the cleaned recording, and what was heard and scored
 //! texts/<id>/w-<sha1>/         one folder per word practised alone, named after it in lower case without the
 //!                              punctuation around it; the same kind of tries, kept apart from the parts' scores
-//! trash/                       deleted texts, moved here rather than erased
+//! trash/<id>-<time>/          deleted texts, moved here rather than erased, and erased for good TRASH_DAYS later
 //! ```
 
 use crate::text::WordResult;
-use chrono::Local;
+use chrono::{Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -34,6 +34,9 @@ pub fn sha(text: &str) -> String {
 pub fn bare(word: &str) -> &str {
     word.trim_matches(|character: char| ".,;:!?\"“”()".contains(character))
 }
+
+/// How long a deleted text stays in the trash before Parrot erases it for good (the confirmation says so).
+pub const TRASH_DAYS: i64 = 30;
 
 fn now() -> String {
     Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
@@ -273,9 +276,54 @@ impl Store {
     /// Moved to the trash folder, not deleted.
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let dir = self.text_dir(id)?;
-        let trash = self.data.join("trash");
+        let trash = self.trash();
         fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
         fs::rename(&dir, trash.join(format!("{id}-{}", Local::now().format("%Y%m%d-%H%M%S")))).map_err(|error| error.to_string())
+    }
+
+    fn trash(&self) -> PathBuf {
+        self.data.join("trash")
+    }
+
+    /// Erase for good what was put in the trash more than TRASH_DAYS before `now`: when it was deleted is in its
+    /// name (<id>-<time>), else it is when it last changed; something with neither is kept.
+    pub fn expire_trash(&self, now: NaiveDateTime) {
+        let oldest = now - chrono::Duration::days(TRASH_DAYS);
+        self.clear_trash(|entry| deleted_at(entry).is_some_and(|when| when < oldest));
+    }
+
+    /// Erase everything in the trash; what is left (nothing, unless something could not be removed), in bytes.
+    pub fn empty_trash(&self) -> u64 {
+        self.clear_trash(|_| true);
+        self.trash_size()
+    }
+
+    /// How much the trash holds, in bytes.
+    pub fn trash_size(&self) -> u64 {
+        if self.trash_folder().is_some() { size_of(&self.trash()) } else { 0 }
+    }
+
+    /// The trash folder, if it is a real folder: one that is a link would lead out of the data folder.
+    fn trash_folder(&self) -> Option<PathBuf> {
+        let trash = self.trash();
+        fs::symlink_metadata(&trash).is_ok_and(|metadata| metadata.is_dir()).then_some(trash)
+    }
+
+    /// Remove the entries of the trash `erase` picks, and nothing outside it: a link in it is removed as a link, never
+    /// followed (remove_dir_all doesn't follow links either).
+    fn clear_trash(&self, erase: impl Fn(&fs::DirEntry) -> bool) {
+        let Some(trash) = self.trash_folder() else { return };
+        for entry in fs::read_dir(&trash).into_iter().flatten().flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            if !erase(&entry) {
+                continue;
+            }
+            let path = entry.path();
+            let removed = if kind.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
+            if let Err(error) = removed {
+                log::warn!("could not erase {} from the trash: {error}", path.display());
+            }
+        }
     }
 
     pub fn attempts(&self, id: &str, part: &str) -> Result<Vec<AttemptSummary>, String> {
@@ -303,6 +351,33 @@ impl Store {
             .into_iter()
             .map(|attempt| AttemptSummary { id: attempt.id, when: attempt.when, score: attempt.score, wpm: attempt.wpm, duration: attempt.duration })
             .collect()
+    }
+
+    /// Delete one try of a part: its recording and its result. The part's scores are counted from the tries left.
+    pub fn delete_attempt(&self, id: &str, part: &str, attempt: &str) -> Result<(), String> {
+        Self::remove_attempt(&self.part_dir(id, part)?, attempt)
+    }
+
+    /// Delete one try of a word said alone.
+    pub fn delete_word_attempt(&self, id: &str, word: &str, attempt: &str) -> Result<(), String> {
+        Self::remove_attempt(&self.word_dir(id, word)?, attempt)
+    }
+
+    fn remove_attempt(dir: &Path, attempt: &str) -> Result<(), String> {
+        // a try's id is its time stamp: anything else could name a file elsewhere
+        if attempt.is_empty() || !attempt.chars().all(|character| character.is_ascii_digit() || character == '-') {
+            return Err("bad try id".into());
+        }
+        let result = dir.join(format!("{attempt}.json"));
+        if !result.is_file() {
+            return Err(format!("not found: {attempt}"));
+        }
+        // the result first: without it the try is gone from every list, even if its recording stayed behind
+        fs::remove_file(&result).map_err(|error| error.to_string())?;
+        match fs::remove_file(dir.join(format!("{attempt}.wav"))) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
+            _ => Ok(()),
+        }
     }
 
     fn read_attempt(dir: &Path, attempt: &str) -> Result<Attempt, String> {
@@ -375,6 +450,27 @@ fn try_order(path: &Path) -> (String, u32) {
         // the stamp itself has one dash (20261020-153000)
         Some((stamp, count)) if stamp.contains('-') => (stamp.to_string(), count.parse().unwrap_or(u32::MAX)),
         _ => (stem.to_string(), 1),
+    }
+}
+
+/// When an entry of the trash was deleted: the time in its name (<id>-<YYYYMMDD-HHMMSS>), else when it last changed.
+fn deleted_at(entry: &fs::DirEntry) -> Option<NaiveDateTime> {
+    let name = entry.file_name();
+    let name = name.to_string_lossy();
+    let stamp = name.len().checked_sub(15).and_then(|start| name.get(start..));
+    stamp.and_then(|stamp| NaiveDateTime::parse_from_str(stamp, "%Y%m%d-%H%M%S").ok()).or_else(|| {
+        // the entry's own time, a link's included: DirEntry::metadata doesn't follow links
+        let modified = entry.metadata().and_then(|metadata| metadata.modified()).ok()?;
+        Some(chrono::DateTime::<Local>::from(modified).naive_local())
+    })
+}
+
+/// The bytes in a file, or in a folder and everything in it; links count as themselves, not what they lead to.
+fn size_of(path: &Path) -> u64 {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::read_dir(path).into_iter().flatten().flatten().map(|entry| size_of(&entry.path())).sum(),
+        Ok(metadata) => metadata.len(),
+        Err(_) => 0,
     }
 }
 
@@ -461,6 +557,144 @@ mod tests {
         assert_eq!((activity.tries, activity.average, activity.days[6].tries), (1, Some(80), 1));
         assert_eq!(store.attempts(&id, "How are you?").unwrap().len(), 1);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// A try saved in `dir` the way the engine saves one: its result and its recording.
+    fn save_try(store: &Store, dir: &Path, id: &str, text: &str, score: i64) {
+        fs::create_dir_all(dir).unwrap();
+        let attempt = Attempt {
+            id: id.into(),
+            when: now(),
+            text: text.into(),
+            heard: text.into(),
+            words: vec![],
+            duration: 1.0,
+            wpm: 60,
+            score,
+            audio: String::new(),
+        };
+        store.save_attempt(dir, &attempt).unwrap();
+        fs::write(dir.join(format!("{id}.wav")), "RIFF").unwrap();
+    }
+
+    #[test]
+    fn a_try_is_deleted_with_its_recording_and_the_scores_follow() {
+        let dir = std::env::temp_dir().join(format!("parrot-delete-try-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there. How are you?", None, None).unwrap().id;
+        let part = store.part_dir(&id, "How are you?").unwrap();
+        save_try(&store, &part, "20261001-120000", "How are you?", 90);
+        save_try(&store, &part, "20261002-120000", "How are you?", 40);
+        let scores = |store: &Store| store.scores(&id).unwrap().values().map(|score| (score.last, score.best, score.tries)).collect::<Vec<_>>();
+        assert_eq!(scores(&store), vec![(40, 90, 2)]);
+        // an id that is not a time stamp names no try, wherever it would lead
+        fs::write(dir.join("texts/keep.json"), "{}").unwrap();
+        for bad in ["", "../../keep", "20261002-120000.json", "*", "20261002-12000a"] {
+            assert_eq!(store.delete_attempt(&id, "How are you?", bad), Err("bad try id".into()), "{bad:?}");
+        }
+        assert!(dir.join("texts/keep.json").exists());
+        assert!(store.delete_attempt(&id, "How are you?", "20260101-000000").unwrap_err().starts_with("not found"));
+        assert!(store.delete_attempt(&id, "Not in it", "20261002-120000").is_err());
+        store.delete_attempt(&id, "How are you?", "20261002-120000").unwrap();
+        assert!(!part.join("20261002-120000.json").exists() && !part.join("20261002-120000.wav").exists());
+        assert_eq!(scores(&store), vec![(90, 90, 1)]);
+        assert_eq!(store.attempts(&id, "How are you?").unwrap().iter().map(|summary| summary.id.as_str()).collect::<Vec<_>>(), ["20261001-120000"]);
+        // a try whose recording is already gone still goes
+        fs::remove_file(part.join("20261001-120000.wav")).unwrap();
+        store.delete_attempt(&id, "How are you?", "20261001-120000").unwrap();
+        assert!(store.scores(&id).unwrap().is_empty());
+        assert_eq!(store.list()[0].practised, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_word_try_is_deleted_from_the_words_folder() {
+        let dir = std::env::temp_dir().join(format!("parrot-delete-word-try-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", None, None).unwrap().id;
+        let word = store.word_dir(&id, "there.").unwrap();
+        save_try(&store, &word, "20261001-120000", "there", 70);
+        save_try(&store, &word, "20261002-120000", "there", 80);
+        assert_eq!(store.delete_word_attempt(&id, "there", "../20261001-120000"), Err("bad try id".into()));
+        store.delete_word_attempt(&id, "There", "20261002-120000").unwrap();
+        assert_eq!(store.word_attempts(&id, "there").unwrap().iter().map(|summary| summary.score).collect::<Vec<_>>(), vec![70]);
+        assert!(!word.join("20261002-120000.wav").exists());
+        assert!(store.delete_word_attempt(&id, "elsewhere", "20261001-120000").is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_trash_is_emptied_of_what_was_deleted_long_enough_ago() {
+        let root = std::env::temp_dir().join(format!("parrot-trash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (data, outside) = (root.join("data"), root.join("outside"));
+        let store = Store { data: data.clone() };
+        let now = Local::now().naive_local();
+        let stamp = |days_ago: i64| (now - chrono::Duration::days(days_ago)).format("%Y%m%d-%H%M%S").to_string();
+        let trash = data.join("trash");
+        // deleted 31 and 29 days ago, by the time in their names
+        let old = trash.join(format!("95e3ac5665-{}", stamp(31)));
+        let recent = trash.join(format!("091ec5749e-{}", stamp(29)));
+        for dir in [&old, &recent] {
+            fs::create_dir_all(dir.join("p-1")).unwrap();
+            fs::write(dir.join("p-1/take.wav"), "RIFF").unwrap();
+        }
+        // no time in the name: by when it last changed
+        let unnamed_new = trash.join("leftover");
+        fs::create_dir_all(&unnamed_new).unwrap();
+        let unnamed_old = trash.join("leftover.txt");
+        fs::write(&unnamed_old, "old").unwrap();
+        let forty_days = std::time::Duration::from_secs(40 * 86400);
+        fs::File::options().write(true).open(&unnamed_old).unwrap().set_modified(std::time::SystemTime::now() - forty_days).unwrap();
+        // a link to a folder outside, named as if long deleted: the link goes, never what it leads to
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("precious.txt"), "mine").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, trash.join(format!("abcdef0123-{}", stamp(60)))).unwrap();
+        let text = store.add("Hello there.", None, None).unwrap().id;
+
+        store.expire_trash(now);
+        assert!(!old.exists() && !unnamed_old.exists());
+        assert!(recent.join("p-1/take.wav").exists() && unnamed_new.exists());
+        assert!(!trash.join(format!("abcdef0123-{}", stamp(60))).exists());
+        assert!(outside.join("precious.txt").exists());
+        assert!(store.text_dir(&text).is_ok(), "texts are not in the trash");
+        assert_eq!(store.trash_size(), 4);
+        // a second run finds nothing more to erase
+        store.expire_trash(now);
+        assert!(recent.exists());
+
+        assert_eq!(store.empty_trash(), 0);
+        assert_eq!(fs::read_dir(&trash).unwrap().count(), 0);
+        assert!(outside.join("precious.txt").exists() && store.text_dir(&text).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_trash_folder_that_is_a_link_is_left_alone() {
+        let root = std::env::temp_dir().join(format!("parrot-trash-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (data, outside) = (root.join("data"), root.join("outside"));
+        let entry = outside.join("95e3ac5665-20200101-120000");
+        fs::create_dir_all(&entry).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        std::os::unix::fs::symlink(&outside, data.join("trash")).unwrap();
+        let store = Store { data };
+        store.expire_trash(Local::now().naive_local());
+        assert_eq!((store.empty_trash(), store.trash_size()), (0, 0));
+        assert!(entry.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_trash_is_an_empty_one() {
+        let store = Store { data: std::env::temp_dir().join(format!("parrot-no-trash-{}", std::process::id())) };
+        store.expire_trash(Local::now().naive_local());
+        assert_eq!((store.trash_size(), store.empty_trash()), (0, 0));
+        assert!(!store.data.exists());
     }
 
     #[test]
