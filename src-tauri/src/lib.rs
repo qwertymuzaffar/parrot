@@ -9,6 +9,7 @@ mod models;
 mod sounds;
 mod store;
 mod text;
+mod updates;
 
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -322,6 +323,18 @@ async fn download_models(app: AppHandle, engine: State<'_, Shared>) -> Result<()
     Ok(())
 }
 
+/// The latest release on GitHub: asked only when the user clicks "Check for updates" in Settings.
+#[tauri::command]
+async fn latest_release() -> Result<updates::Release, String> {
+    updates::latest().await
+}
+
+/// Open one of Parrot's own pages (a release, the website) in the system browser.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    updates::open(&url)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -354,7 +367,9 @@ pub fn run() {
             pron,
             check,
             check_word,
-            download_models
+            download_models,
+            latest_release,
+            open_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

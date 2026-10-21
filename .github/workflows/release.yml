@@ -75,6 +75,8 @@ jobs:
           releaseBody: See the assets below for macOS, Windows and Linux, or the download page at https://qwertymuzaffar.github.io/parrot/.
           releaseDraft: true
           prerelease: false
+          # no updater (the app's "Check for updates" links to the release instead): no latest.json
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
       - name: Upload under fixed names for the download page
@@ -89,8 +91,16 @@ jobs:
             macos-latest)
               if [[ "${{ matrix.args }}" == *x86_64* ]]; then
                 cp $b/x86_64-apple-darwin/release/bundle/dmg/*.dmg fixed/Parrot-macOS-Intel.dmg
+                arch=x64
               else
                 cp $b/aarch64-apple-darwin/release/bundle/dmg/*.dmg fixed/Parrot-macOS-Apple-chip.dmg
+                arch=aarch64
+              fi
+              # tauri-action uploads the .app as Parrot_<arch>.app.tar.gz whether or not updater artifacts are made;
+              # with no updater it is only a second copy of the DMG's contents
+              assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+              if grep -qxF "Parrot_$arch.app.tar.gz" <<< "$assets"; then
+                gh release delete-asset "$tag" "Parrot_$arch.app.tar.gz" --yes
               fi ;;
             windows-latest)
               cp $b/release/bundle/nsis/*-setup.exe fixed/Parrot-Windows-setup.exe

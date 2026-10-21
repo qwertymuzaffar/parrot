@@ -65,6 +65,9 @@ Texts and recordings are plain files in the app's data folder (macOS:
 `~/Library/Application Support/io.github.qwertymuzaffar.parrot`, Windows: `%APPDATA%\io.github.qwertymuzaffar.parrot`,
 Linux: `~/.local/share/io.github.qwertymuzaffar.parrot`).
 
+Parrot looks for a new version only when you click **Check for updates** in Settings: it asks GitHub for the latest
+release, and sends nothing else.
+
 ## Development
 
 Requirements: Node 22+, Rust, and CMake (to build whisper.cpp).

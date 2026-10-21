@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, inject, resource, signa
 import { Engine } from '../core/engine';
 import { Sound } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
+import { UpdateCheck, Updates } from '../core/updates';
 import { Icon } from '../shared/icon';
 
 @Component({
@@ -60,6 +61,33 @@ import { Icon } from '../shared/icon';
             <p class="bad">The speech engine is not answering.</p>
           }
         </section>
+
+        <section>
+          <span class="eyebrow">Updates</span>
+          @if (version.value(); as current) {
+            <div class="update">
+              <span>Parrot {{ current }}</span>
+              <button class="btn" (click)="checkForUpdates(current)" [disabled]="update().state === 'checking'">
+                {{ update().state === 'checking' ? 'Checking…' : 'Check for updates' }}
+              </button>
+            </div>
+            @let check = update();
+            <p class="hint" [class.bad]="check.state === 'failed'" role="status">
+              @if (check.state === 'latest') {
+                You have the latest version ({{ check.version }}).
+              } @else if (check.state === 'newer') {
+                Parrot {{ check.release.version }} is out.
+                <a [href]="check.release.url" target="_blank" rel="noopener" (click)="openRelease($event)">Download it</a>
+              } @else if (check.state === 'failed') {
+                {{ check.message }}
+              } @else {
+                Asks GitHub for the latest version, only when you click.
+              }
+            </p>
+          } @else if (!version.isLoading()) {
+            <p class="hint">A development build: there is no version to check.</p>
+          }
+        </section>
       </div>
     </dialog>
   `,
@@ -111,6 +139,13 @@ import { Icon } from '../shared/icon';
     .seg {
       margin-top: 8px;
     }
+    .update {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+    }
     .hint {
       color: var(--ink-2);
       font-size: 13px;
@@ -145,8 +180,24 @@ export class Settings {
   private engine = inject(Engine);
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
+  private updates = inject(Updates);
   private check = signal(0);
   protected health = resource({ params: () => this.check(), loader: () => this.engine.info() });
+  /** the running version, read from the app (no network); none in a plain browser */
+  protected version = resource({ loader: () => this.updates.current() });
+  protected update = signal<UpdateCheck>({ state: 'idle' });
+
+  /** Ask GitHub for the latest release: only ever on this click. */
+  protected async checkForUpdates(current: string) {
+    this.update.set({ state: 'checking' });
+    this.update.set(await this.updates.check(current));
+  }
+
+  /** The link opens in the system browser, not in the app. */
+  protected openRelease(event: MouseEvent) {
+    event.preventDefault();
+    this.updates.open((event.currentTarget as HTMLAnchorElement).href).catch(() => {});
+  }
 
   open() {
     this.check.update((count) => count + 1);
