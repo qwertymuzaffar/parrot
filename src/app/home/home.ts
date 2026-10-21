@@ -17,6 +17,7 @@ import { sentences, shortRanges, splitText } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
+import { TalkCard } from '../talk/talk-card';
 import { Logo } from '../shared/logo';
 import { ringDash } from '../shared/ring';
 import { band } from '../shared/score';
@@ -32,7 +33,7 @@ interface Card {
 
 @Component({
   selector: 'app-home',
-  imports: [Icon, Logo],
+  imports: [Icon, Logo, TalkCard],
   templateUrl: './home.html',
   styleUrl: './home.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

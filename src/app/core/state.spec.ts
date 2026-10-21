@@ -1080,6 +1080,7 @@ describe('the practice state', () => {
       wpm: 120,
       score: 83,
       pauses: [[2, 1.4]],
+      audio: 'talks/20261021-100000.wav',
     };
 
     beforeEach(() => {

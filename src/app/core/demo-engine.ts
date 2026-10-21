@@ -244,6 +244,7 @@ export class DemoEngine extends Engine {
     const words = attempt.words;
     const duration = words.at(-1)!.t![1] + 0.3;
     talk.written = {
+      audio: URL.createObjectURL(wav(joined(talk.blocks, talk.samples), talk.rate)),
       heard: DEMO_TALK,
       words,
       duration,
@@ -272,15 +273,9 @@ export class DemoEngine extends Engine {
       if (!same && !this.nameList.includes(nameKey(word))) verdicts[wordIndex] = 'wrong';
       else if (talk.written!.words[wordIndex]?.status === 'unclear') verdicts[wordIndex] = 'unclear';
     });
-    const pcm = new Int16Array(talk.samples);
-    let at = 0;
-    for (const block of talk.blocks) {
-      pcm.set(block, at);
-      at += block.length;
-    }
     const words = text.text.split(' ').length;
     const score = Math.round((100 * (words - Object.keys(verdicts).length)) / words);
-    const attempt = judged(text.text, score, verdicts, URL.createObjectURL(wav(pcm, talk.rate)), new Date(), ++this.takes);
+    const attempt = judged(text.text, score, verdicts, talk.written.audio, new Date(), ++this.takes);
     attempt.words.forEach((word, wordIndex) => word.status === 'wrong' && (word.heard = bare(heard[wordIndex] ?? '').toLowerCase()));
     attempt.heard = talk.written.heard;
     listOf(text.tries, text.text).push(attempt);
@@ -327,6 +322,17 @@ export class DemoEngine extends Engine {
   audioUrl(path: string) {
     return path;
   }
+}
+
+/** The blocks of a talk as one recording. */
+function joined(blocks: Int16Array[], samples: number) {
+  const pcm = new Int16Array(samples);
+  let at = 0;
+  for (const block of blocks) {
+    pcm.set(block, at);
+    at += block.length;
+  }
+  return pcm;
 }
 
 function norm(text: string) {

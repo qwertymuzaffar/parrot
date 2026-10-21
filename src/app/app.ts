@@ -6,16 +6,20 @@ import { Theme } from './core/theme';
 import { Home } from './home/home';
 import { Practice } from './practice/practice';
 import { Settings } from './settings/settings';
+import { Talking } from './core/talking';
+import { TalkPreview } from './talk/talk-preview';
 import { Setup } from './setup/setup';
 
 @Component({
   selector: 'app-root',
-  imports: [Home, Practice, Settings, Setup],
+  imports: [Home, Practice, Settings, Setup, TalkPreview],
   template: `
     <!-- the strip under the macOS window buttons: drags the window, as the hidden title bar did -->
     <div class="titlebar" data-tauri-drag-region></div>
     @if (setup(); as info) {
       <app-setup [info]="info" (done)="ready()" />
+    } @else if (talking.checking()) {
+      <app-talk-preview />
     } @else if (session.view() === 'practice') {
       <app-practice (settings)="settings().open()" />
     } @else {
@@ -28,6 +32,7 @@ import { Setup } from './setup/setup';
 })
 export class App implements OnInit {
   protected session = inject(Session);
+  protected talking = inject(Talking);
   private library = inject(Library);
   private engine = inject(Engine);
   private theme = inject(Theme);

@@ -46,6 +46,8 @@ export class Talking {
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
+  /** the talk is written down and being checked: the preview shows */
+  readonly checking = computed(() => this.state() === 'preview' || this.state() === 'keeping');
   /** seconds left before the talk stops itself */
   readonly left = computed(() => Math.max(0, LONGEST_TALK - this.recorder.elapsed()));
 

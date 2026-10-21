@@ -70,6 +70,8 @@
       </div>
     </section>
 
+    <app-talk-card />
+
     <section class="card week" aria-label="This week">
       <div class="head">
         <span class="eyebrow">This week</span>
@@ -163,7 +165,10 @@
             @if (confirming() === card.t.id) {
               <span class="ask">Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span>
             } @else {
-              <span>{{ card.t.words }} words · {{ modeName(card.t.mode) }} · {{ when(card.t.opened ?? card.t.created) }}</span>
+              <span
+                >{{ card.t.words }} words · {{ card.t.spoken ? 'spoken · ' : '' }}{{ modeName(card.t.mode) }} ·
+                {{ when(card.t.opened ?? card.t.created) }}</span
+              >
             }
             <span class="acts" [class.asking]="confirming() === card.t.id" (click)="$event.stopPropagation()">
               @if (confirming() === card.t.id) {

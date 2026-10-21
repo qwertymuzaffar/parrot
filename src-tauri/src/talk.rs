@@ -38,6 +38,8 @@ pub struct Heard {
     pub score: i64,
     /// the long pauses: the word each comes after, and how long it is (seconds)
     pub pauses: Vec<(usize, f64)>,
+    /// the recording (cleaned), relative to the data folder, to play back while the talk is checked
+    pub audio: String,
 }
 
 struct Talk {
@@ -87,6 +89,7 @@ impl<L: Listen> Listen for Reheard<'_, L> {
 
 /// The talk under way, if any: one at a time.
 pub struct Talks {
+    /// talks/ in the data folder
     dir: PathBuf,
     current: Mutex<Option<Talk>>,
     cancel: AtomicBool,
@@ -214,7 +217,10 @@ impl Talks {
         // sound scores
         let words = text::judge(&heard, &heard, &times, None);
         let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
+        let file_name = talk.path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+        let folder = self.dir.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
         Ok(Heard {
+            audio: format!("{folder}/{file_name}"),
             score: (100.0 * good as f64 / words.len() as f64).round() as i64,
             wpm: (words.len() as f64 / duration * 60.0).round() as i64,
             pauses: text::pauses(&words),
@@ -393,6 +399,7 @@ mod tests {
         assert!(reported.windows(2).all(|pair| pair[0].0 < pair[1].0));
         assert!((reported.last().unwrap().0 - reported.last().unwrap().1).abs() < 0.01);
         assert!(heard.duration > 55.0 && heard.duration <= 60.0, "{}", heard.duration);
+        assert!(dir.parent().unwrap().join(&heard.audio).exists(), "the recording is where it says: {}", heard.audio);
         assert!(!dir.join("texts").exists(), "a talk written down is kept nowhere but talks/");
         talks.discard().unwrap();
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "discarding removes the recording");

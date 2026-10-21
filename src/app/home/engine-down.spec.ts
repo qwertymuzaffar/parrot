@@ -2,7 +2,9 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Library } from '../core/library';
 import { TextItem } from '../core/models';
+import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { Talking } from '../core/talking';
 import { Home } from './home';
 
 describe('the home screen when the texts cannot be loaded', () => {
@@ -21,6 +23,9 @@ describe('the home screen when the texts cannot be loaded', () => {
           },
         },
         { provide: Session, useValue: {} },
+        // the Just talk card, at rest
+        { provide: Talking, useValue: { state: signal('idle'), failure: signal(null), stopReason: signal(null) } },
+        { provide: Recorder, useValue: { owner: signal(null) } },
       ],
     });
     const fixture = TestBed.createComponent(Home);

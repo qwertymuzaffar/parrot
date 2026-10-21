@@ -76,6 +76,8 @@ export interface Talk {
   score: number;
   /** the long pauses: the word each comes after, and how long it is (seconds) */
   pauses: [number, number][];
+  /** the recording, to play back while the talk is checked (relative to the data folder) */
+  audio: string;
 }
 
 /** A talk kept: the text it became, and its recording as the text's first take. */
