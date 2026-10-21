@@ -64,7 +64,8 @@ The pronunciation dictionary ([CMUdict](https://github.com/cmusphinx/cmudict), B
 Texts and recordings are plain files in the app's data folder (macOS:
 `~/Library/Application Support/io.github.qwertymuzaffar.parrot`, Windows: `%APPDATA%\io.github.qwertymuzaffar.parrot`,
 Linux: `~/.local/share/io.github.qwertymuzaffar.parrot`). The models are in its `models` folder, except on Windows,
-where they stay out of the roaming profile, in `%LOCALAPPDATA%\io.github.qwertymuzaffar.parrot\models`.
+where they stay out of the roaming profile, in `%LOCALAPPDATA%\io.github.qwertymuzaffar.parrot\models`. A deleted
+text goes to its `trash` folder and is erased for good 30 days later; Settings opens the folder and empties the trash.
 
 Parrot looks for a new version only when you click **Check for updates** in Settings: it asks GitHub for the latest
 release, and sends nothing else.

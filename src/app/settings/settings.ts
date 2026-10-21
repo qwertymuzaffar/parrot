@@ -1,9 +1,12 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
 import { Engine } from '../core/engine';
+import { errorMessage } from '../core/library';
 import { Sound } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
 import { UpdateCheck, Updates } from '../core/updates';
 import { Icon } from '../shared/icon';
+
+const MB = 1_000_000;
 
 @Component({
   selector: 'app-settings',
@@ -54,9 +57,6 @@ import { Icon } from '../shared/icon';
               <span class="dot"></span>
               {{ info.models.whisper && info.models.aligner ? 'Ready, on this computer' : 'Speech models not downloaded yet' }}
             </p>
-            <p class="hint">
-              Texts and recordings are kept on this computer, in<br /><code>{{ info.data }}</code>
-            </p>
           } @else if (health.error()) {
             <p class="bad">The speech engine is not answering.</p>
           }
@@ -88,6 +88,35 @@ import { Icon } from '../shared/icon';
             <p class="hint">A development build: there is no version to check.</p>
           }
         </section>
+
+        @if (health.value(); as info) {
+          <section>
+            <span class="eyebrow">Texts and recordings</span>
+            <p class="hint">
+              Kept on this computer, in<br /><code>{{ info.data }}</code>
+            </p>
+            @if (trash.hasValue()) {
+              @let bytes = trash.value() ?? 0;
+              <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+              <div class="acts">
+                @if (emptying()) {
+                  <span class="ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
+                  <button class="btn ghost small" (click)="emptying.set(false)">Keep</button>
+                  <button class="btn danger small" (click)="emptyTrash()">Empty</button>
+                } @else {
+                  <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
+                  <button class="btn small" [disabled]="!bytes" (click)="emptying.set(true)">
+                    <app-icon name="trash" [size]="15" />
+                    {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
+                  </button>
+                }
+              </div>
+            }
+            @if (failure(); as failure) {
+              <p class="bad">{{ failure }}</p>
+            }
+          </section>
+        }
       </div>
     </dialog>
   `,
@@ -146,6 +175,18 @@ import { Icon } from '../shared/icon';
       gap: 8px;
       margin-top: 8px;
     }
+    .acts {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      min-height: 36px;
+    }
+    .ask {
+      font-size: 13px;
+      color: var(--ink-2);
+    }
     .hint {
       color: var(--ink-2);
       font-size: 13px;
@@ -198,10 +239,40 @@ export class Settings {
     event.preventDefault();
     this.updates.open((event.currentTarget as HTMLAnchorElement).href).catch(() => {});
   }
+  /** the bytes in the trash: only the desktop app has one */
+  protected trash = resource({ params: () => this.check(), loader: () => this.engine.trashSize() });
+  /** asking whether to empty the trash */
+  protected emptying = signal(false);
+  protected failure = signal<string | null>(null);
 
   open() {
     this.check.update((count) => count + 1);
+    this.emptying.set(false);
+    this.failure.set(null);
     this.dialog().nativeElement.showModal();
+  }
+
+  protected async openFolder() {
+    try {
+      await this.engine.openDataFolder();
+      this.failure.set(null);
+    } catch (error) {
+      this.failure.set(errorMessage(error));
+    }
+  }
+
+  protected async emptyTrash() {
+    this.emptying.set(false);
+    try {
+      this.trash.set(await this.engine.emptyTrash());
+      this.failure.set(null);
+    } catch (error) {
+      this.failure.set(errorMessage(error));
+    }
+  }
+
+  protected size(bytes: number) {
+    return bytes < MB ? `${Math.max(1, Math.round(bytes / 1000))} KB` : `${Math.round(bytes / MB)} MB`;
   }
 
   close() {

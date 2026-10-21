@@ -27,8 +27,13 @@ describe('TauriEngine', () => {
     await engine.attempts('95e3ac5665', 'Hello there.');
     await engine.wordAttempts('95e3ac5665', 'there.');
     await engine.wordAttempt('95e3ac5665', 'there.', '20260101-120000');
+    await engine.deleteAttempt('95e3ac5665', 'Hello there.', '20260101-120000');
+    await engine.deleteWordAttempt('95e3ac5665', 'there.', '20260101-120000');
     await engine.activity();
     await engine.soundsLike('things');
+    await engine.trashSize();
+    await engine.emptyTrash();
+    await engine.openDataFolder();
     expect(calls).toEqual([
       { cmd: 'texts', args: {} },
       { cmd: 'add_text', args: { text: 'Hello there.', title: 'Greeting', mode: 'sentences' } },
@@ -38,8 +43,13 @@ describe('TauriEngine', () => {
       { cmd: 'attempts', args: { text: '95e3ac5665', part: 'Hello there.' } },
       { cmd: 'word_attempts', args: { text: '95e3ac5665', word: 'there.' } },
       { cmd: 'word_attempt', args: { text: '95e3ac5665', word: 'there.', id: '20260101-120000' } },
+      { cmd: 'delete_attempt', args: { text: '95e3ac5665', part: 'Hello there.', id: '20260101-120000' } },
+      { cmd: 'delete_word_attempt', args: { text: '95e3ac5665', word: 'there.', id: '20260101-120000' } },
       { cmd: 'activity', args: {} },
       { cmd: 'pron', args: { w: 'things' } },
+      { cmd: 'trash_size', args: {} },
+      { cmd: 'empty_trash', args: {} },
+      { cmd: 'open_data_folder', args: {} },
     ]);
   });
 

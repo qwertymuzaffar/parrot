@@ -10,6 +10,7 @@ import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey } from './split';
 import { WordPractice } from './word-practice';
+import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
 const ID = '95e3ac5665';
@@ -39,6 +40,8 @@ class FakeEngine extends Engine {
   nextWordCheck: Attempt | null = null;
   /** the engine has stopped answering: every call fails */
   down = false;
+  /** why the next delete of a try is refused, if it is */
+  refuseDelete: string | null = null;
   calls: string[] = [];
   /** calls held back until the test lets them through, by call ("attempt t1", "scores <text id>") */
   private held = new Map<string, Promise<void>>();
@@ -130,6 +133,11 @@ class FakeEngine extends Engine {
     this.answer();
     return this.tries[part].find((each) => each.id === id)!;
   }
+  async deleteAttempt(_textId: string, part: string, id: string) {
+    this.calls.push(`deleteAttempt ${id}`);
+    if (this.refuseDelete) throw new EngineError(this.refuseDelete);
+    this.tries[part] = (this.tries[part] ?? []).filter((each) => each.id !== id);
+  }
   async check(_textId: string, part: string) {
     this.calls.push(`check ${part}`);
     if (!this.nextCheck) throw new EngineError('Nothing was heard in the recording. Is the microphone on?');
@@ -150,6 +158,21 @@ class FakeEngine extends Engine {
   async wordAttempt(_textId: string, word: string, id: string) {
     this.calls.push(`wordAttempt ${id}`);
     return this.wordTries[bare(word).toLowerCase()].find((each) => each.id === id)!;
+  }
+  async deleteWordAttempt(_textId: string, word: string, id: string) {
+    this.calls.push(`deleteWordAttempt ${id}`);
+    if (this.refuseDelete) throw new EngineError(this.refuseDelete);
+    const key = bare(word).toLowerCase();
+    this.wordTries[key] = (this.wordTries[key] ?? []).filter((each) => each.id !== id);
+  }
+  async trashSize(): Promise<never> {
+    throw new Error('not used');
+  }
+  async emptyTrash(): Promise<never> {
+    throw new Error('not used');
+  }
+  async openDataFolder(): Promise<never> {
+    throw new Error('not used');
   }
   async activity(): Promise<Activity> {
     return { days: [], tries: 0, average: null };
@@ -269,6 +292,7 @@ function practiceApp() {
     previousScore: () => session.previousScore(),
     troubleWords: () => session.troubleWords(),
     showAttempt: (id: string) => session.showAttempt(id),
+    deleteAttempt: (id: string) => session.deleteAttempt(id),
     selected: () => session.selected(),
     selectWord: (wordIndex: number | null) => session.selectWord(wordIndex),
     rate: () => playback.rate(),
@@ -766,6 +790,94 @@ describe('the practice state', () => {
       expect([app.index(), app.result()]).toEqual([2, null]);
     });
   });
+  describe('deleting a try', () => {
+    const PART = 'How are you?';
+
+    beforeEach(async () => {
+      engine.tries[PART] = [attempt('t1', PART, 60), attempt('t2', PART, 90), attempt('t3', PART, 40)];
+      await app.open(ID, 1);
+      await settle();
+    });
+
+    it('deletes the try shown, counts the scores again and shows the newest one left', async () => {
+      const key = app.part()!.key;
+      expect([app.result()?.id, app.scores()[key]]).toEqual(['t3', { last: 40, best: 90, tries: 3 }]);
+      const texts = engine.calls.filter((call) => call === 'texts').length;
+      await app.deleteAttempt('t3');
+      await settle();
+      expect(engine.calls).toContain('deleteAttempt t3');
+      expect([app.result()?.id, app.history().map((summary) => summary.id)]).toEqual(['t2', ['t2', 't1']]);
+      expect(app.scores()[key]).toEqual({ last: 90, best: 90, tries: 2 });
+      expect(app.progress()).toEqual({ total: 3, done: 1, avg: 90 });
+      expect(engine.calls.filter((call) => call === 'texts').length).toBe(texts + 1);
+    });
+
+    it('keeps the try shown when another one is deleted', async () => {
+      await app.showAttempt('t1');
+      await app.deleteAttempt('t2');
+      await settle();
+      expect([app.result()?.id, app.history().map((summary) => summary.id)]).toEqual(['t1', ['t3', 't1']]);
+      expect(app.scores()[app.part()!.key]).toEqual({ last: 40, best: 60, tries: 2 });
+    });
+
+    it('leaves the part unpractised once its last try is deleted', async () => {
+      for (const id of ['t3', 't2', 't1']) await app.deleteAttempt(id);
+      expect([app.result(), app.history(), app.scores()[app.part()!.key]]).toEqual([null, [], undefined]);
+      expect(app.progress().done).toBe(0);
+    });
+
+    it("says why a try couldn't be deleted, and keeps it", async () => {
+      engine.refuseDelete = 'not found: t3';
+      await expect(app.deleteAttempt('t3')).rejects.toThrow('not found: t3');
+      expect([app.result()?.id, app.history().length]).toEqual(['t3', 3]);
+    });
+
+    it('waits for a take under way', async () => {
+      await app.toggleRecord();
+      await app.deleteAttempt('t3');
+      expect(engine.calls.some((call) => call.startsWith('deleteAttempt'))).toBe(false);
+    });
+
+    it('asks first in the tries chart, and keeps the try on Keep', async () => {
+      const chart = TestBed.createComponent(TriesChart);
+      await chart.whenStable();
+      const element: HTMLElement = chart.nativeElement;
+      const button = (name: string) =>
+        [...element.querySelectorAll('button')].find(
+          (each) => each.textContent?.trim() === name || each.getAttribute('aria-label') === name,
+        )!;
+      button('Delete the try shown').click();
+      await chart.whenStable();
+      expect(element.querySelector('.ask')?.textContent).toBe('Delete this try and its recording?');
+      expect(engine.calls.some((call) => call.startsWith('deleteAttempt'))).toBe(false);
+      button('Keep').click();
+      await chart.whenStable();
+      expect(element.querySelector('.ask')).toBeNull();
+      button('Delete the try shown').click();
+      await chart.whenStable();
+      button('Delete').click();
+      await chart.whenStable();
+      await settle();
+      await chart.whenStable();
+      expect(engine.calls).toContain('deleteAttempt t3');
+      expect(element.querySelector('.ask')).toBeNull();
+      expect([...element.querySelectorAll('.bars b')].map((score) => score.textContent)).toEqual(['60', '90']);
+    });
+
+    it('shows in the tries chart why a try could not be deleted', async () => {
+      engine.refuseDelete = 'Permission denied';
+      const chart = TestBed.createComponent(TriesChart);
+      await chart.whenStable();
+      const element: HTMLElement = chart.nativeElement;
+      element.querySelector<HTMLButtonElement>('[aria-label="Delete the try shown"]')!.click();
+      await chart.whenStable();
+      element.querySelector<HTMLButtonElement>('.btn.danger')!.click();
+      await settle();
+      await chart.whenStable();
+      expect(element.querySelector('.error')?.textContent).toBe('Permission denied');
+    });
+  });
+
   describe('practising a word alone', () => {
     let words: WordPractice;
     /** select a word and let its tries load */
@@ -846,6 +958,26 @@ describe('the practice state', () => {
       await settle();
       expect(engine.calls.filter((call) => call.startsWith('check'))).toEqual(['check How are you?']);
       expect([app.result()?.id, words.latest()]).toEqual(['t2', null]);
+    });
+
+    it('deletes a word try and shows the ones left, leaving the part as it was', async () => {
+      engine.wordTries['you'] = [attempt('w1', 'you', 60), attempt('w2', 'you', 85)];
+      await choose(2);
+      const scores = app.scores();
+      await words.deleteTry('w2');
+      expect(engine.calls).toContain('deleteWordAttempt w2');
+      expect([words.tries().map((summary) => summary.id), words.latest()?.id, words.error()]).toEqual([['w1'], 'w1', null]);
+      expect([app.result()?.id, app.scores()]).toEqual(['t1', scores]);
+      await words.deleteTry('w1');
+      expect([words.tries(), words.latest()]).toEqual([[], null]);
+    });
+
+    it("says why a word try couldn't be deleted", async () => {
+      engine.wordTries['you'] = [attempt('w1', 'you', 60)];
+      await choose(2);
+      engine.refuseDelete = 'not found: w1';
+      await words.deleteTry('w1');
+      expect([words.error(), words.latest()?.id]).toEqual(['not found: w1', 'w1']);
     });
 
     it('drops a word take when another word is chosen', async () => {

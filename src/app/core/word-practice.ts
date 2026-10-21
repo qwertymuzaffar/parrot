@@ -79,6 +79,24 @@ export class WordPractice {
     return this.practised()?.key === practised.key;
   }
 
+  /** Delete one try of the word, and show the tries left. */
+  async deleteTry(id: string) {
+    const practised = this.practised();
+    if (!practised || this.recorder.owner() === 'word' || this.checking()) return;
+    this.playback.stop();
+    try {
+      await this.engine.deleteWordAttempt(practised.textId, practised.word, id);
+      const tries = await this.engine.wordAttempts(practised.textId, practised.word);
+      const latest = tries.length ? await this.engine.wordAttempt(practised.textId, practised.word, tries[0].id) : null;
+      if (!this.still(practised)) return;
+      this.tries.set(tries);
+      this.latest.set(latest);
+      this.error.set(null);
+    } catch (error) {
+      if (this.still(practised)) this.error.set(errorMessage(error));
+    }
+  }
+
   async toggleRecord() {
     // the microphone may be busy with a take of the part (Session): that take is not this one to finish
     if (this.recorder.owner() === 'word' && this.recorder.recording()) return this.finishRecording();

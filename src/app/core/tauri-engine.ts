@@ -60,6 +60,10 @@ export class TauriEngine extends Engine {
     return this.call<Attempt>('attempt', { text: textId, part, id });
   }
 
+  deleteAttempt(textId: string, part: string, id: string) {
+    return this.call<void>('delete_attempt', { text: textId, part, id });
+  }
+
   async check(textId: string, part: string, audio: Blob) {
     const bytes = new Uint8Array(await audio.arrayBuffer());
     return this.call<Attempt>('check', bytes, { headers: { 'x-text': textId, 'x-part': encodeURIComponent(part) } });
@@ -78,8 +82,24 @@ export class TauriEngine extends Engine {
     return this.call<Attempt>('word_attempt', { text: textId, word, id });
   }
 
+  deleteWordAttempt(textId: string, word: string, id: string) {
+    return this.call<void>('delete_word_attempt', { text: textId, word, id });
+  }
+
   activity() {
     return this.call<Activity>('activity');
+  }
+
+  trashSize() {
+    return this.call<number>('trash_size');
+  }
+
+  emptyTrash() {
+    return this.call<number>('empty_trash');
+  }
+
+  openDataFolder() {
+    return this.call<void>('open_data_folder');
   }
 
   soundsLike(word: string) {

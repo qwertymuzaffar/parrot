@@ -42,6 +42,9 @@ export abstract class Engine {
 
   abstract attempt(textId: string, part: string, id: string): Promise<Attempt>;
 
+  /** Delete one try of a part, its recording too; the part's scores are counted again from the tries left. */
+  abstract deleteAttempt(textId: string, part: string, id: string): Promise<void>;
+
   /** Score a take (a WAV recording) of one part of a text. */
   abstract check(textId: string, part: string, audio: Blob): Promise<Attempt>;
 
@@ -54,7 +57,18 @@ export abstract class Engine {
 
   abstract wordAttempt(textId: string, word: string, id: string): Promise<Attempt>;
 
+  abstract deleteWordAttempt(textId: string, word: string, id: string): Promise<void>;
+
   abstract activity(): Promise<Activity>;
+
+  /** How much the deleted texts in the trash take, in bytes. They are erased for good 30 days after. */
+  abstract trashSize(): Promise<number>;
+
+  /** Erase the deleted texts now; what is left in the trash, in bytes. */
+  abstract emptyTrash(): Promise<number>;
+
+  /** Show the data folder in the computer's file manager. */
+  abstract openDataFolder(): Promise<void>;
 
   abstract soundsLike(word: string): Promise<SoundsLike>;
 

@@ -160,10 +160,13 @@
             }
           </div>
           <div class="meta">
-            <span>{{ card.t.words }} words · {{ modeName(card.t.mode) }} · {{ when(card.t.opened ?? card.t.created) }}</span>
-            <span class="acts" (click)="$event.stopPropagation()">
+            @if (confirming() === card.t.id) {
+              <span class="ask">Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span>
+            } @else {
+              <span>{{ card.t.words }} words · {{ modeName(card.t.mode) }} · {{ when(card.t.opened ?? card.t.created) }}</span>
+            }
+            <span class="acts" [class.asking]="confirming() === card.t.id" (click)="$event.stopPropagation()">
               @if (confirming() === card.t.id) {
-                <span class="ask">Delete it and its recordings?</span>
                 <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
                 <button class="btn danger small" (click)="remove(card.t)">Delete</button>
               } @else {

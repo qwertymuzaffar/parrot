@@ -169,6 +169,27 @@ export class DemoEngine extends Engine {
     return pick((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()), id);
   }
 
+  async deleteAttempt(textId: string, part: string, id: string) {
+    remove((await this.find(textId)).tries.get(norm(part)), id);
+  }
+
+  async deleteWordAttempt(textId: string, word: string, id: string) {
+    remove((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()), id);
+  }
+
+  // a deleted text is gone at once here: nothing waits in a trash
+  async trashSize() {
+    return 0;
+  }
+
+  async emptyTrash() {
+    return 0;
+  }
+
+  async openDataFolder(): Promise<never> {
+    throw new EngineError('Opening the data folder needs the desktop app');
+  }
+
   async activity(): Promise<Activity> {
     await this.ready;
     const days = Array.from({ length: 7 }, (_, daysAgo) => ({ date: stamp(new Date(Date.now() - (6 - daysAgo) * DAY)).date, tries: 0 }));
@@ -270,4 +291,11 @@ function pick(tries: Attempt[] = [], id: string) {
   const attempt = tries.find((each) => each.id === id);
   if (!attempt) throw new EngineError(`no such try: ${id}`);
   return attempt;
+}
+
+/** Take a try out of a part's or a word's tries. */
+function remove(tries: Attempt[] | undefined, id: string) {
+  const index = tries?.findIndex((attempt) => attempt.id === id) ?? -1;
+  if (index < 0) throw new EngineError(`not found: ${id}`);
+  tries!.splice(index, 1);
 }

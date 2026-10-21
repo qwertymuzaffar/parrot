@@ -195,6 +195,29 @@ export class Session {
     }
   }
 
+  /** Delete one try of the part shown, and show what is left: the part's scores as the engine counts them now, and
+   * the newest try left if the deleted one was shown. Throws what the engine said if it would not. */
+  async deleteAttempt(id: string) {
+    const text = this.text();
+    const part = this.part();
+    if (!text || !part || this.takeUnderWay() || this.checking()) return;
+    this.playback.stop();
+    await this.engine.deleteAttempt(text.id, part.text, id);
+    this.library.loadTexts();
+    const scores = await this.engine.scores(text.id).catch(() => null);
+    // another text opened meanwhile: these are not its scores
+    if (this.text()?.id !== text.id) return;
+    if (scores) this.scores.set(scores);
+    if (this.part() !== part) return;
+    const history = await this.engine.attempts(text.id, part.text);
+    if (this.part() !== part) return;
+    this.history.set(history);
+    if (this.result()?.id !== id) return;
+    if (!history.length) return this.result.set(null);
+    const newest = await this.engine.attempt(text.id, part.text, history[0].id);
+    if (this.part() === part) this.show(newest);
+  }
+
   selectWord(wordIndex: number | null) {
     this.selected.set(wordIndex);
   }

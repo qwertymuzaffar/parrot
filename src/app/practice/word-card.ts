@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, resource } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, resource, signal } from '@angular/core';
 import { Engine } from '../core/engine';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
@@ -108,12 +108,29 @@ import { SoundUnits } from './sound-units';
           <p class="weak" [innerHTML]="heard"></p>
         }
         <div class="tried">
-          <button class="btn small" [disabled]="!practice.latest()" (click)="playTry()"><app-icon name="play" [size]="12" /> Play</button>
-          <span class="scores" aria-label="Sound match of the last tries, newest first">
-            @for (each of practice.tries().slice(0, 6); track each.id) {
-              <span class="pill" [class]="band(each.score)">{{ each.score }}%</span>
+          @if (asking(); as id) {
+            <span class="ask">Delete this try and its recording?</span>
+            <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
+            <button class="btn danger small" (click)="removeTry(id)">Delete</button>
+          } @else {
+            <button class="btn small" [disabled]="!practice.latest()" (click)="playTry()"><app-icon name="play" [size]="12" /> Play</button>
+            <span class="scores" aria-label="Sound match of the last tries, newest first">
+              @for (each of practice.tries().slice(0, 6); track each.id) {
+                <span class="pill" [class]="band(each.score)">{{ each.score }}%</span>
+              }
+            </span>
+            @if (practice.latest(); as latest) {
+              <button
+                class="btn ghost small icon"
+                [disabled]="practice.checking() || practice.recording()"
+                (click)="confirming.set(latest.id)"
+                aria-label="Delete the newest try of the word"
+                title="Delete the newest try of the word"
+              >
+                <app-icon name="trash" [size]="15" />
+              </button>
             }
-          </span>
+          }
         </div>
       </div>
     }
@@ -261,6 +278,17 @@ import { SoundUnits } from './sound-units';
       display: flex;
       align-items: center;
       gap: 10px;
+      min-height: 36px;
+      .icon {
+        width: 36px;
+        padding: 0;
+        margin-left: auto;
+      }
+    }
+    .ask {
+      flex: 1;
+      font-size: 13px;
+      color: var(--ink-2);
     }
     .scores {
       display: flex;
@@ -316,6 +344,12 @@ export class WordCard {
   private engine = inject(Engine);
   protected practice = inject(WordPractice);
   protected band = band;
+  /** the word try asked about deleting: the question goes once another word or try is shown */
+  protected confirming = signal<string | null>(null);
+  protected readonly asking = computed(() => {
+    const id = this.confirming();
+    return id && id === this.practice.latest()?.id ? id : null;
+  });
   protected readonly index = this.session.selected;
   protected readonly raw = computed(() => {
     const wordIndex = this.index();
@@ -421,5 +455,10 @@ export class WordCard {
   protected playTry() {
     const latest = this.practice.latest();
     if (latest) this.playback.playWordTry(latest);
+  }
+
+  protected removeTry(id: string) {
+    this.confirming.set(null);
+    void this.practice.deleteTry(id);
   }
 }
