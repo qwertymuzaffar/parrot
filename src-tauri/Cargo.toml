@@ -1,6 +1,6 @@
 [package]
 name = "parrot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Read a text aloud and see which words came out wrong"
 authors = ["Muzaffar Qosimov"]
 license = "MIT"

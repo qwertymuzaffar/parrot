@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Parrot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "io.github.qwertymuzaffar.parrot",
   "build": {
     "frontendDist": "../dist/parrot/browser",
