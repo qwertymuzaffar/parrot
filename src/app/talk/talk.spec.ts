@@ -103,6 +103,17 @@ describe('Just talk', () => {
       expect(talking.start).toHaveBeenCalled();
     });
 
+    it('says to wait while the microphone gets ready, and lets the talk be called off', async () => {
+      talking.state.set('recording');
+      const card = await render(TalkCard);
+      expect(card.text()).toContain('Getting the microphone ready. Start talking when it says Listening.');
+      const preparing = card.button(/Preparing/);
+      expect([preparing.disabled, preparing.getAttribute('aria-busy')]).toEqual([true, 'true']);
+      expect(card.text()).not.toContain('Listening…');
+      card.button(/Cancel/).click();
+      expect(talking.stop).toHaveBeenCalled();
+    });
+
     it('shows the time while listening, and the time left in the last minute', async () => {
       talking.state.set('recording');
       talking.recording.set(true);

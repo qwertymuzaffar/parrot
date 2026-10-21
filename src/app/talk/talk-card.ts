@@ -25,23 +25,27 @@ export function clock(seconds: number) {
       <h2 id="talk-title">Just talk</h2>
       @switch (talking.state()) {
         @case ('recording') {
-          <div class="live" role="status">
-            @if (talking.preparing()) {
-              <span class="spinner"></span>
-              <span>Getting the microphone ready…</span>
-            } @else {
+          @if (talking.recording()) {
+            <div class="live" role="status">
               <span class="rec-dot"></span>
               <b>Listening…</b>
               <span class="time" [class.ending]="talking.left() <= 60">
                 {{ talking.left() <= 60 ? clock(talking.left()) + ' left' : clock(recorder.elapsed()) }}
               </span>
-            }
-          </div>
-          <div class="meter" aria-hidden="true"><i [style.width.%]="recorder.level() * 100"></i></div>
-          <div class="go">
-            <span class="hint">Stop when you're done. Esc also stops.</span>
-            <button class="btn primary stop" (click)="talking.stop()"><app-icon name="stop" [size]="14" /> Stop</button>
-          </div>
+            </div>
+            <div class="meter" aria-hidden="true"><i [style.width.%]="recorder.level() * 100"></i></div>
+            <div class="go">
+              <span class="hint">Stop when you're done. Esc also stops.</span>
+              <button class="btn primary stop" (click)="talking.stop()"><app-icon name="stop" [size]="14" /> Stop</button>
+            </div>
+          } @else {
+            <!-- the microphone opening and settling: a word said now would be lost, so the card says to wait -->
+            <p class="hint" role="status">Getting the microphone ready. Start talking when it says Listening.</p>
+            <div class="go">
+              <button class="btn ghost" (click)="talking.stop()">Cancel</button>
+              <button class="btn primary" disabled aria-busy="true"><span class="spinner light"></span> Preparing…</button>
+            </div>
+          }
         }
         @case ('writing') {
           <div class="live" role="status">
@@ -141,6 +145,11 @@ export function clock(seconds: number) {
       margin: 0;
       font-size: 13px;
       color: var(--wrong-ink);
+    }
+    // on the green button: the spinner in the button's own ink
+    .spinner.light {
+      border-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+      border-top-color: var(--accent-ink);
     }
   `,
   host: { '(document:keydown.escape)': 'escape()' },
