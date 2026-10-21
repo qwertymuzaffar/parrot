@@ -61,6 +61,9 @@ pub struct Attempt {
     pub score: i64,
     /// the recording, relative to the data folder (first-engine tries say /files/texts/...)
     pub audio: String,
+    /// the long pauses: the word each comes after, and how long it is (seconds); tries before 0.4 have none
+    #[serde(default)]
+    pub pauses: Vec<(usize, f64)>,
 }
 
 /// A text as the library shows it.
@@ -534,6 +537,7 @@ mod tests {
             wpm: 60,
             score,
             audio: String::new(),
+            pauses: vec![],
         };
         let word = store.word_dir(&id, "there.").unwrap();
         fs::create_dir_all(&word).unwrap();
@@ -572,6 +576,7 @@ mod tests {
             wpm: 60,
             score,
             audio: String::new(),
+            pauses: vec![],
         };
         store.save_attempt(dir, &attempt).unwrap();
         fs::write(dir.join(format!("{id}.wav")), "RIFF").unwrap();
@@ -750,6 +755,7 @@ mod tests {
                 wpm: 60,
                 score,
                 audio: String::new(),
+                pauses: vec![],
             };
             store.save_attempt(&part, &attempt).unwrap();
         }

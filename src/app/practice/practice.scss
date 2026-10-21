@@ -242,6 +242,20 @@ header {
       outline-offset: 1px;
     }
   }
+  // a long pause between two words: a small gap marker, its length in seconds
+  .pause {
+    display: inline-block;
+    margin: 0 4px;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+    line-height: 1.6;
+  }
   .tag {
     position: absolute;
     // from the word's left edge, not centred: centred, a tag on the first word of a line sticks out of the box

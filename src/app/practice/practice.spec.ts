@@ -26,7 +26,11 @@ describe('the practice screen', () => {
   const playback = { toggleReference: vi.fn(), stop: vi.fn() };
   let page: HTMLElement;
   let button: HTMLButtonElement;
-  let labels: { wordLabel(wordIndex: number, word: string): string; stepLabel(label: string, score?: number): string };
+  let labels: {
+    wordLabel(wordIndex: number, word: string): string;
+    stepLabel(label: string, score?: number): string;
+    pauseAfter(wordIndex: number): number | null;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -91,5 +95,13 @@ describe('the practice screen', () => {
     ]);
     expect(labels.stepLabel('3', 64)).toBe('Sentence 3, 64%');
     expect(labels.stepLabel('4')).toBe('Sentence 4, not practised');
+  });
+
+  it('marks a long pause after the word it follows', () => {
+    session.result.set({ words: [], pauses: [[1, 1.8]] } as unknown as Attempt);
+    expect([0, 1, 2].map((wordIndex) => labels.pauseAfter(wordIndex))).toEqual([null, 1.8, null]);
+    // a try from before 0.4 has no pauses
+    session.result.set({ words: [] } as unknown as Attempt);
+    expect(labels.pauseAfter(1)).toBeNull();
   });
 });

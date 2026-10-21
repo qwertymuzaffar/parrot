@@ -53,6 +53,8 @@ export interface Attempt {
   wpm: number;
   score: number;
   audio: string;
+  /** the long pauses: the word each comes after, and how long it is (seconds); tries before 0.4 have none */
+  pauses?: [number, number][];
 }
 
 export interface AttemptSummary {

@@ -121,6 +121,11 @@ export class Practice {
     return this.result()?.words[wordIndex]?.status ?? '';
   }
 
+  /** how long the pause after a word was, when it was a long one (seconds) */
+  protected pauseAfter(wordIndex: number) {
+    return this.result()?.pauses?.find(([after]) => after === wordIndex)?.[1] ?? null;
+  }
+
   protected heard(wordIndex: number) {
     const word = this.result()?.words[wordIndex];
     return word?.status === 'wrong' ? (word.heard ? `heard “${word.heard}”` : 'not heard') : '';

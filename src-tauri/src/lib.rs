@@ -125,6 +125,7 @@ impl Engine {
         audio::write_wav(&file, &take).inspect_err(|_| {
             let _ = std::fs::remove_file(&file);
         })?;
+        let pauses = text::pauses(&scored.words);
         let attempt = Attempt {
             id,
             when: now.format("%Y-%m-%dT%H:%M:%S").to_string(),
@@ -135,6 +136,7 @@ impl Engine {
             words: scored.words,
             duration: (secs * 100.0).round() / 100.0,
             audio: file.strip_prefix(&self.store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
+            pauses,
         };
         self.store.save_attempt(dir, &attempt)?;
         Ok(attempt)
@@ -710,6 +712,28 @@ mod tests {
         let error = engine.keep_take(&part, "Hello there.", &wav, delete_while_scoring).unwrap_err();
         assert_eq!(error, "the text was deleted");
         assert!(!data.join("texts").join(&id).exists(), "no folder of the text comes back");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn a_saved_try_keeps_its_long_pauses() {
+        let data = std::env::temp_dir().join(format!("parrot-pauses-{}", std::process::id()));
+        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let id = engine.store.add("Well, I think so.", None, None).unwrap().id;
+        let part = engine.store.part_dir(&id, "Well, I think so.").unwrap();
+        let tone: Vec<f32> =
+            (0..48000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
+        let wav_path = data.join("take.wav");
+        audio::write_wav(&wav_path, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
+        let wav = std::fs::read(&wav_path).unwrap();
+        // "Well," then 1.5 s before "I think so."
+        let paused = |_: &Engine, _: &[f32], _: f64, txt: &str| {
+            let times = [[0.0, 0.3], [1.8, 1.9], [1.9, 2.2], [2.2, 2.5]].map(|t| text::WordTime { t: Some(t), score: Some(0.9), letters: None });
+            Ok(Scored { heard: txt.into(), words: text::judge(txt, txt, &times, None), score: 100, wpm: 100 })
+        };
+        let attempt = engine.keep_take(&part, "Well, I think so.", &wav, paused).unwrap();
+        assert_eq!(attempt.pauses, vec![(0, 1.5)]);
+        assert_eq!(engine.store.attempt(&id, "Well, I think so.", &attempt.id).unwrap().pauses, vec![(0, 1.5)], "saved with the try");
         let _ = std::fs::remove_dir_all(data);
     }
 
