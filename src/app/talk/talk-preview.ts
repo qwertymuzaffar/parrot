@@ -260,10 +260,6 @@ import { stopNote } from './talk-card';
       gap: 16px;
       font-size: 14px;
     }
-    .stats app-score-ring {
-      width: 72px;
-      height: 72px;
-    }
     .hint {
       color: var(--muted);
       font-size: 13px;

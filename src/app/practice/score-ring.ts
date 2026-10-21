@@ -10,7 +10,7 @@ import { band } from '../shared/score';
       <circle cx="32" cy="32" r="27" class="track" />
       <circle cx="32" cy="32" r="27" class="value" [attr.stroke-dasharray]="dash()" />
     </svg>
-    <div class="num" aria-hidden="true">
+    <div class="num" [class.wide]="score() >= 100" aria-hidden="true">
       <b>{{ score() }}<small>%</small></b>
       <span>clear</span>
     </div>
@@ -63,6 +63,13 @@ import { band } from '../shared/score';
     }
     small {
       font-size: 13px;
+    }
+    // three digits fit inside the ring only a size down
+    .wide b {
+      font-size: 19px;
+    }
+    .wide small {
+      font-size: 11px;
     }
     span {
       font-size: 11px;
