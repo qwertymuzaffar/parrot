@@ -1,5 +1,5 @@
-//! Where texts and tries are kept: plain files in the app's data folder, the same layout the first (Python) engine
-//! used, so a library made with it opens unchanged.
+//! Where texts and tries are kept: plain files in the app's data folder, the same layout Parrot's first engine (a
+//! Python prototype, since removed) used, so a library made with it opens unchanged.
 //!
 //! ```text
 //! texts/<id>/text.txt          the text (id: the first 10 hex digits of the SHA-1 of its words)
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn ids_match_the_python_engine() {
-        // the same text ids the Python engine gives (sha1 of the normalised words), so its library opens unchanged
+        // the same text ids the Python engine gave (sha1 of the normalised words), so its library opens unchanged
         assert_eq!(sha("Hello   there."), "95e3ac5665");
         assert_eq!(sha("I'm a front-end engineer with a bit over ten years"), "091ec5749e");
         assert_eq!(sha("I'm a front-end engineer").len(), 10);

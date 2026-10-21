@@ -104,13 +104,8 @@
 
     @if (library.engineState() === 'down') {
       <div class="card down" role="alert">
-        @if (inApp) {
-          <b>Parrot couldn't load your texts.</b>
-          <span>{{ library.error() }} Parrot tries again every few seconds.</span>
-        } @else {
-          <b>The speech engine isn't running.</b>
-          <span>Start it with <code>python engine/server.py</code>. Parrot connects as soon as it's up.</span>
-        }
+        <b>Parrot couldn't load your texts.</b>
+        <span>{{ library.error() }} Parrot tries again every few seconds.</span>
       </div>
     }
 

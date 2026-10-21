@@ -6,8 +6,8 @@ import { Session } from '../core/session';
 import { Home } from './home';
 
 describe('the home screen when the texts cannot be loaded', () => {
-  /** render the home screen, in the desktop app or a plain browser, with the engine failing as given */
-  async function render(inApp: boolean, error: string) {
+  /** render the home screen with the engine failing as given */
+  async function render(error: string) {
     TestBed.configureTestingModule({
       providers: [
         {
@@ -24,18 +24,13 @@ describe('the home screen when the texts cannot be loaded', () => {
       ],
     });
     const fixture = TestBed.createComponent(Home);
-    fixture.componentInstance['inApp'] = inApp;
     await fixture.whenStable();
     return (fixture.nativeElement as HTMLElement).querySelector('.down')!.textContent!.replace(/\s+/g, ' ').trim();
   }
 
-  it('in the desktop app, gives the engine’s own reason (there is nothing to start)', async () => {
-    const shown = await render(true, 'Could not open the database: disk I/O error');
+  it('gives the engine’s own reason (there is nothing for the user to start)', async () => {
+    const shown = await render('Could not open the database: disk I/O error');
     expect(shown).toContain('Could not open the database: disk I/O error');
     expect(shown).not.toContain('python');
-  });
-
-  it('in a browser, says how to start the engine', async () => {
-    expect(await render(false, 'The speech engine is not running.')).toContain('python engine/server.py');
   });
 });

@@ -1,0 +1,273 @@
+import { Injectable } from '@angular/core';
+import { Engine, EngineError, EngineInfo } from './engine';
+import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem, WordStatus } from './models';
+import { bare, partKey, sentences } from './split';
+
+/** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
+interface DemoText {
+  id: string;
+  title: string;
+  text: string;
+  mode: Mode;
+  created: string;
+  opened: string | null;
+  /** the tries of each part, by its words (oldest first) */
+  tries: Map<string, Attempt[]>;
+  /** the tries of each word said alone, by the word in lower case without its punctuation (oldest first) */
+  wordTries: Map<string, Attempt[]>;
+}
+
+const DAY = 86_400_000;
+
+/** Texts as someone might paste them, with a few tries already made, so every screen has something to show. */
+const SAMPLES: { title: string; mode: Mode; text: string; daysAgo: number; tries: [number, number, Record<number, WordStatus>][] }[] = [
+  {
+    title: 'Introducing yourself',
+    mode: 'sentences',
+    text:
+      "Hi, I'm Alex, and I work as a software engineer in Berlin. I moved here three years ago for a job at a small startup. " +
+      'In my free time I like hiking, cooking and reading about history.',
+    daysAgo: 3,
+    // [sentence, score, the words not heard well]: two tries of the first sentence, one of the second
+    tries: [
+      [0, 71, { 8: 'unclear', 9: 'wrong' }],
+      [0, 88, { 9: 'unclear' }],
+      [1, 94, {}],
+    ],
+  },
+  {
+    title: 'A weather report',
+    mode: 'short',
+    text:
+      'Tomorrow will start cloudy, with a chance of light rain in the north. ' +
+      'By the afternoon, the sun should break through and temperatures will rise to around eighteen degrees.',
+    daysAgo: 1,
+    tries: [],
+  },
+];
+
+/**
+ * An engine kept in memory, for working on the interface in a plain browser (`ng serve`) and for screenshots: a
+ * couple of sample texts and tries, and whatever is added while the page is open. It hears nothing: a take is
+ * given a made-up score, every word good but its longest, and keeps its recording only until the page reloads.
+ * Only the desktop app (TauriEngine) really scores speech.
+ */
+@Injectable()
+export class DemoEngine extends Engine {
+  private library: DemoText[] = [];
+  private readonly ready = this.seed();
+  private takes = 0;
+
+  private async seed() {
+    for (const sample of SAMPLES) {
+      const created = new Date(Date.now() - sample.daysAgo * DAY);
+      const text = await this.store(sample.text, sample.title, sample.mode, created);
+      text.opened = sample.tries.length ? stamp(new Date(Date.now() - DAY / 4)).when : null;
+      const parts = sentences(text.text);
+      sample.tries.forEach(([sentenceIndex, score, verdicts], tryIndex) => {
+        const part = parts[sentenceIndex];
+        const when = new Date(created.getTime() + (tryIndex + 1) * (DAY * 0.6));
+        listOf(text.tries, part).push(judged(part, score, verdicts, '', when));
+      });
+    }
+  }
+
+  private async store(text: string, title: string, mode: Mode, created = new Date()): Promise<DemoText> {
+    const body = norm(text);
+    if (!body) throw new EngineError('the text is empty');
+    // the store's id: the first 10 hex digits of the SHA-1 of the words
+    const id = (await partKey(body)).slice(2);
+    let kept = this.library.find((each) => each.id === id);
+    if (!kept) {
+      kept = { id, title: '', text: body, mode, created: stamp(created).when, opened: null, tries: new Map(), wordTries: new Map() };
+      this.library.push(kept);
+    }
+    kept.title = title.trim() || kept.title || body.split(' ').slice(0, 6).join(' ') + '…';
+    kept.mode = mode;
+    return kept;
+  }
+
+  private async find(id: string) {
+    await this.ready;
+    const text = this.library.find((each) => each.id === id);
+    if (!text) throw new EngineError(`not found: ${id}`);
+    return text;
+  }
+
+  async info(): Promise<EngineInfo> {
+    return {
+      data: 'nowhere: this is the browser demo, which forgets everything on reload',
+      models: { whisper: true, aligner: true },
+      sizes: { whisper: 0, aligner: 0 },
+    };
+  }
+
+  async downloadModels(): Promise<void> {}
+
+  async texts() {
+    await this.ready;
+    const items = await Promise.all(this.library.map((text) => item(text)));
+    return items.sort((left, right) => (right.opened ?? right.created).localeCompare(left.opened ?? left.created));
+  }
+
+  async addText(text: string, title: string, mode: Mode) {
+    await this.ready;
+    return item(await this.store(text, title, mode));
+  }
+
+  async updateText(id: string, change: { title?: string; mode?: Mode; opened?: boolean }) {
+    const text = await this.find(id);
+    if (change.title?.trim()) text.title = change.title.trim();
+    if (change.mode) text.mode = change.mode;
+    if (change.opened) text.opened = stamp(new Date()).when;
+    return item(text);
+  }
+
+  async deleteText(id: string) {
+    const text = await this.find(id);
+    this.library = this.library.filter((each) => each !== text);
+  }
+
+  async scores(textId: string) {
+    return scores(await this.find(textId));
+  }
+
+  async attempts(textId: string, part: string) {
+    return summaries((await this.find(textId)).tries.get(norm(part)));
+  }
+
+  async attempt(textId: string, part: string, id: string) {
+    return pick((await this.find(textId)).tries.get(norm(part)), id);
+  }
+
+  async check(textId: string, part: string, audio: Blob) {
+    const text = await this.find(textId);
+    if (!part.trim() || !text.text.includes(norm(part))) throw new EngineError('that part is not in the text; reload');
+    const words = norm(part).split(' ');
+    const longest = words.reduce((best, word, wordIndex) => (bare(word).length > bare(words[best]).length ? wordIndex : best), 0);
+    const attempt = judged(part, 86, { [longest]: 'unclear' }, URL.createObjectURL(audio), new Date(), this.takes++);
+    listOf(text.tries, part).push(attempt);
+    return attempt;
+  }
+
+  async checkWord(textId: string, word: string, audio: Blob) {
+    const text = await this.find(textId);
+    const said = bare(word.trim()).toLowerCase();
+    if (!said || !text.text.split(' ').some((each) => bare(each).toLowerCase() === said)) {
+      throw new EngineError('that word is not in the text; reload');
+    }
+    const attempt = judged(bare(word.trim()), 90, {}, URL.createObjectURL(audio), new Date(), this.takes++);
+    listOf(text.wordTries, said).push(attempt);
+    return attempt;
+  }
+
+  async wordAttempts(textId: string, word: string) {
+    return summaries((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()));
+  }
+
+  async wordAttempt(textId: string, word: string, id: string) {
+    return pick((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()), id);
+  }
+
+  async activity(): Promise<Activity> {
+    await this.ready;
+    const days = Array.from({ length: 7 }, (_, daysAgo) => ({ date: stamp(new Date(Date.now() - (6 - daysAgo) * DAY)).date, tries: 0 }));
+    const scored: number[] = [];
+    for (const attempt of this.library.flatMap((text) => [...text.tries.values()].flat())) {
+      const day = days.find((each) => attempt.when.startsWith(each.date));
+      if (!day) continue;
+      day.tries++;
+      scored.push(attempt.score);
+    }
+    return { days, tries: scored.length, average: mean(scored) };
+  }
+
+  async soundsLike(): Promise<SoundsLike> {
+    return {};
+  }
+
+  /** The tries made here keep their recording as an object URL; the sample tries have none (""), so their
+   * waveform stays empty and playing them plays nothing. */
+  audioUrl(path: string) {
+    return path;
+  }
+}
+
+function norm(text: string) {
+  return text.split(/\s+/).filter(Boolean).join(' ');
+}
+
+function listOf(tries: Map<string, Attempt[]>, key: string) {
+  const list = tries.get(norm(key)) ?? [];
+  tries.set(norm(key), list);
+  return list;
+}
+
+/** A local time as the store writes it: the date, the time, and a try's id (20261020-153000). */
+function stamp(time: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
+  const clock = `${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
+  return { date, when: `${date}T${clock}`, id: `${date.replace(/-/g, '')}-${clock.replace(/:/g, '')}` };
+}
+
+function mean(values: number[]) {
+  return values.length ? Math.round(values.reduce((total, value) => total + value, 0) / values.length) : null;
+}
+
+/** A try of `part`: every word heard and placed, but those in `verdicts` sounded off (unclear) or not heard (wrong). */
+function judged(part: string, score: number, verdicts: Record<number, WordStatus>, audio: string, time: Date, take = 0): Attempt {
+  const words = norm(part).split(' ');
+  const duration = Math.round((0.4 + words.length * 0.38) * 100) / 100;
+  const { id, when } = stamp(time);
+  return {
+    id: take ? `${id}-${take}` : id,
+    when,
+    text: norm(part),
+    heard: words.filter((_, wordIndex) => verdicts[wordIndex] !== 'wrong').join(' '),
+    words: words.map((word, wordIndex) => {
+      const status = verdicts[wordIndex] ?? 'good';
+      const start = 0.2 + wordIndex * 0.38;
+      return {
+        w: word,
+        t: status === 'wrong' ? null : [start, start + 0.32],
+        score: status === 'good' ? 0.86 + (wordIndex % 3) * 0.05 : status === 'unclear' ? 0.58 : null,
+        ref: null,
+        status,
+        heard: status === 'wrong' ? '' : null,
+        extra: '',
+      };
+    }),
+    duration,
+    wpm: Math.round((words.length / duration) * 60),
+    score,
+    audio,
+  };
+}
+
+async function scores(text: DemoText) {
+  const out: Record<string, PartScore> = {};
+  for (const [part, tries] of text.tries) {
+    if (!tries.length) continue;
+    out[await partKey(part)] = { last: tries.at(-1)!.score, best: Math.max(...tries.map((each) => each.score)), tries: tries.length };
+  }
+  return out;
+}
+
+async function item(text: DemoText): Promise<TextItem> {
+  const partScores = await scores(text);
+  const last = Object.values(partScores).map((part) => part.last);
+  const { id, title, created, opened, mode } = text;
+  const words = text.text.split(' ').length;
+  return { id, title, text: text.text, words, created, opened, mode, practised: last.length, average: mean(last), scores: partScores };
+}
+
+function summaries(tries: Attempt[] = []): AttemptSummary[] {
+  return [...tries].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+}
+
+function pick(tries: Attempt[] = [], id: string) {
+  const attempt = tries.find((each) => each.id === id);
+  if (!attempt) throw new EngineError(`no such try: ${id}`);
+  return attempt;
+}

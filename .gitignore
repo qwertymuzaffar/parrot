@@ -48,8 +48,5 @@ skills-lock.json
 .DS_Store
 Thumbs.db
 
-# Python engine
-__pycache__/
-*.pyc
-.venv/
+# ONNX Runtime for the Intel Mac build (README)
 .ort-intel/

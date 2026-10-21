@@ -78,8 +78,8 @@ cd src-tauri && cargo test --lib    # engine tests
 
 The engine (`src-tauri/src`): `store.rs` keeps texts and tries, `audio.rs` cleans a take, `asr.rs` runs Whisper,
 `align.rs` places each word and scores it and its letters, `text.rs` compares what was read with what was heard,
-`sounds.rs` respells a word. `engine/` holds the first Python prototype, which the interface still uses when opened in a
-plain browser.
+`sounds.rs` respells a word. Opened in a plain browser (`npx ng serve`), the interface runs on a demo engine kept in
+memory (`src/app/core/demo-engine.ts`): sample texts and tries, and made-up scores, for working on it and for screenshots.
 
 ### Intel Macs
 
@@ -122,5 +122,4 @@ MIT. The models keep their own licences (above). The app builds in [whisper.cpp]
 (MIT), [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT), the [ort](https://github.com/pykeio/ort) crate
 (MIT) and CMUdict (BSD-style); their notices are in [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES), which ships with every
 installer. The app and the website use the
-[DM Sans](https://github.com/googlefonts/dm-fonts) font (SIL Open Font License, `docs/fonts/OFL-dm-sans.txt`). The Python prototype in `engine/` uses Meta's MMS aligner, which is
-licensed CC-BY-NC; the app does not.
+[DM Sans](https://github.com/googlefonts/dm-fonts) font (SIL Open Font License, `docs/fonts/OFL-dm-sans.txt`).

@@ -1,7 +1,7 @@
 import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem } from './models';
 
 /** True inside the desktop app: the engine is built in. In a plain browser (development, screenshots) the
- * interface talks to the Python prototype engine over HTTP instead. */
+ * interface runs on a demo engine kept in memory instead. */
 export const IN_APP = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export class EngineError extends Error {}
@@ -20,7 +20,7 @@ export interface ModelProgress {
 }
 
 /** What the interface asks of the speech engine. The app provides the one it runs on (app.config.ts):
- * TauriEngine inside the desktop app, HttpEngine in a plain browser. */
+ * TauriEngine inside the desktop app, DemoEngine in a plain browser. */
 export abstract class Engine {
   /** Where the data is kept and whether the speech models are ready. */
   abstract info(): Promise<EngineInfo>;
