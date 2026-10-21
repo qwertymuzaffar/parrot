@@ -1,15 +1,16 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Clips } from './clips';
-import { Engine, EngineError } from './engine';
+import { Engine, EngineError, TALK_CANCELLED } from './engine';
 import { Library } from './library';
 import { Activity, Attempt, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
-import { Recorder, TakeFor } from './recorder';
+import { Recorder, Sink, TakeFor } from './recorder';
 import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey } from './split';
 import { WordPractice } from './word-practice';
+import { LONGEST_TALK, QUIET_STOP_MS, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
@@ -192,6 +193,7 @@ class FakeEngine extends Engine {
     this.talk = { rate, samples: 0, written: false };
   }
   async talkFeed(samples: Int16Array) {
+    this.calls.push(`talkFeed ${samples.length}`);
     this.answer();
     if (this.refuseFeed) throw new EngineError(this.refuseFeed);
     if (!this.talk) throw new EngineError('no talk is being recorded');
@@ -203,6 +205,10 @@ class FakeEngine extends Engine {
     if (!this.talk) throw new EngineError('there is no talk to write down');
     onProgress({ done: 1, total: 2 });
     await this.pass('talkStop done');
+    if (this.talkCancelled) {
+      this.talkCancelled = false;
+      throw new EngineError(TALK_CANCELLED);
+    }
     const next = this.nextTalk;
     if (next == null || typeof next === 'string')
       throw new EngineError(next ?? 'Nothing was heard in the recording. Is the microphone on?');
@@ -210,8 +216,10 @@ class FakeEngine extends Engine {
     this.talk.written = true;
     return next;
   }
+  talkCancelled = false;
   async talkCancel() {
     this.calls.push('talkCancel');
+    this.talkCancelled = true;
   }
   async talkKeep(text: string, title: string) {
     await this.pass('talkKeep');
@@ -301,15 +309,31 @@ class FakeRecorder {
   readonly elapsed = signal(0);
   readonly preparing = signal(false);
   micAllowed = true;
+  /** how long the take has gone without sound (ms) */
+  quiet = 0;
+  private sink: Sink | null = null;
   warm() {}
-  async start(owner: TakeFor) {
+  async start(owner: TakeFor, sink?: Sink) {
     if (!this.micAllowed) throw new Error('Permission denied');
     this.owner.set(owner);
     this.recording.set(true);
+    this.sink = sink ?? null;
+  }
+  /** `seconds` of a talk recorded, sent on as the recorder sends it */
+  say(seconds: number) {
+    this.sink?.(new Int16Array(seconds * 100), 100);
+  }
+  quietFor() {
+    return this.quiet;
   }
   async stop() {
     this.recording.set(false);
     this.owner.set(null);
+    if (this.sink) {
+      this.say(1);
+      this.sink = null;
+      return new Blob();
+    }
     return new Blob(['take'], { type: 'audio/wav' });
   }
 }
@@ -1044,6 +1068,133 @@ describe('the practice state', () => {
       await choose(2);
       expect([recorder.recording(), recorder.owner()]).toEqual([false, null]);
       expect(engine.calls.some((call) => call.startsWith('checkWord'))).toBe(false);
+    });
+  });
+
+  describe('a talk', () => {
+    let talking: Talking;
+    const written: Talk = {
+      heard: 'I moved here three years ago.',
+      words: attempt('talk', 'I moved here three years ago.', 83, ['good', 'good', 'good', 'unclear']).words,
+      duration: 3,
+      wpm: 120,
+      score: 83,
+      pauses: [[2, 1.4]],
+    };
+
+    beforeEach(() => {
+      talking = TestBed.inject(Talking);
+      engine.nextTalk = written;
+    });
+
+    it('is recorded, sent on as it goes, written down with progress, and kept as a text opened with its take', async () => {
+      await talking.start();
+      expect([talking.state(), talking.recording(), recorder.owner()]).toEqual(['recording', true, 'free']);
+      recorder.say(2);
+      recorder.say(2);
+      await settle();
+      expect(engine.calls.filter((call) => call.startsWith('talk'))).toEqual(['talkStart 100', 'talkFeed 200', 'talkFeed 200']);
+      const release = engine.hold('talkStop done');
+      const stopping = talking.stop();
+      await settle();
+      expect([talking.state(), talking.progress()]).toEqual(['writing', 0.5]);
+      release();
+      await stopping;
+      expect(engine.calls).toContain('talkFeed 100');
+      expect([talking.state(), talking.progress(), talking.talk(), talking.stopReason()]).toEqual(['preview', 1, written, 'you']);
+
+      await talking.keep('I moved here three years ago.', 'Moving');
+      expect(engine.kept).toEqual({ text: 'I moved here three years ago.', title: 'Moving' });
+      expect([talking.state(), talking.talk()]).toEqual(['idle', null]);
+      expect(app.texts()[0]).toMatchObject({ id: 'abcdef0123', spoken: true, mode: 'whole' });
+      expect([app.view(), app.text()?.id, app.result()?.id]).toEqual(['practice', 'abcdef0123', '20261021-100000']);
+    });
+
+    it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {
+      await talking.start();
+      recorder.say(2);
+      const release = engine.hold('talkStop done');
+      const stopping = talking.stop();
+      await settle();
+      talking.cancel();
+      release();
+      await stopping;
+      expect([talking.state(), talking.failure()]).toEqual(['stopped', null]);
+      await talking.writeDown();
+      expect(talking.state()).toBe('preview');
+      await talking.discard();
+      expect([talking.state(), engine.talk]).toEqual(['idle', null]);
+      expect(engine.calls).toContain('talkDiscard');
+    });
+
+    it('stops itself after a long quiet, and at the longest a talk can be', async () => {
+      vi.useFakeTimers();
+      await talking.start();
+      recorder.say(1);
+      recorder.quiet = QUIET_STOP_MS;
+      await vi.advanceTimersByTimeAsync(300);
+      expect([talking.state(), talking.stopReason()]).toEqual(['preview', 'quiet']);
+
+      recorder.quiet = 0;
+      await talking.start();
+      recorder.say(1);
+      recorder.elapsed.set(LONGEST_TALK);
+      expect(talking.left()).toBe(0);
+      await vi.advanceTimersByTimeAsync(300);
+      expect([talking.state(), talking.stopReason()]).toEqual(['preview', 'longest']);
+    });
+
+    it('with nothing in it goes back to the start and says so', async () => {
+      engine.nextTalk = 'Nothing was heard in the recording. Is the microphone on?';
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      expect([talking.state(), talking.failure()]).toEqual(['idle', 'Nothing was heard in the recording. Is the microphone on?']);
+      expect(engine.calls).toContain('talkDiscard');
+    });
+
+    it('keeps its recording when writing it down fails, to try again', async () => {
+      engine.nextTalk = 'speech recognition failed: out of memory';
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      expect([talking.state(), talking.failure()]).toEqual(['stopped', 'speech recognition failed: out of memory']);
+      engine.nextTalk = written;
+      await talking.writeDown();
+      expect([talking.state(), talking.failure()]).toEqual(['preview', null]);
+    });
+
+    it('stops at once and says why when the engine refuses its sound', async () => {
+      engine.refuseFeed = 'No space left on device';
+      await talking.start();
+      recorder.say(2);
+      await settle();
+      expect([talking.state(), talking.failure(), recorder.owner()]).toEqual(['idle', 'No space left on device', null]);
+      expect(engine.calls).toContain('talkDiscard');
+    });
+
+    it('says why it could not be kept, and stays to try again', async () => {
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      engine.down = true;
+      await talking.keep('I moved here.', '');
+      expect([talking.state(), talking.failure()]).toEqual(['preview', 'The speech engine is not running.']);
+    });
+
+    it('waits for a take under way, and says when the microphone is not allowed', async () => {
+      await app.open(ID);
+      await app.toggleRecord();
+      await talking.start();
+      expect([talking.state(), recorder.owner()]).toEqual(['idle', 'part']);
+      await app.toggleRecord();
+      await settle();
+      recorder.micAllowed = false;
+      await talking.start();
+      expect([talking.state(), talking.failure()]).toEqual([
+        'idle',
+        'No microphone: Permission denied. Allow Parrot to use the microphone.',
+      ]);
     });
   });
 });

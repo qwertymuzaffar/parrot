@@ -1,4 +1,4 @@
-import { Recorder, TakeFor } from './recorder';
+import { Recorder, Sink, TakeFor } from './recorder';
 import { Settling } from './settling';
 
 /** The recorder with the microphone stood in for: open at once, settled when the test says, sound when it says. */
@@ -21,10 +21,12 @@ function microphone() {
     settled: () => (settling as unknown as { finish(): void }).finish(),
     /** a block of sound from the microphone */
     sound: () => capture.call(recorder, new Float32Array(128).fill(0.1), 48000),
+    /** a block of a quiet room */
+    quiet: () => capture.call(recorder, new Float32Array(128).fill(0.001), 48000),
     capturing: () => inner['capturing'] as boolean,
     /** start a take; the test then lets the microphone open with a timer tick */
-    start: (owner: TakeFor) => {
-      const started = recorder.start(owner);
+    start: (owner: TakeFor, sink?: Sink) => {
+      const started = recorder.start(owner, sink);
       started.catch(() => {});
       return started;
     },
@@ -99,5 +101,48 @@ describe('Recorder', () => {
     await vi.advanceTimersByTimeAsync(3000);
     await expect(started).rejects.toThrow('no sound came through');
     expect([mic.recorder.owner(), mic.capturing(), mic.ctx.close.mock.calls.length]).toEqual([null, false, 1]);
+  });
+
+  it('sends a talk on in blocks of two seconds as it is recorded, and its last sound when it stops', async () => {
+    const mic = microphone();
+    mic.settled();
+    const sent: number[] = [];
+    const started = mic.start('free', (pcm, rate) => sent.push(pcm.length / rate));
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await started;
+    expect([mic.recorder.recording(), mic.recorder.owner()]).toEqual([true, 'free']);
+    // 3 s of sound: one block sent on, the rest held until it stops
+    for (let block = 0; block < 1125; block++) mic.sound();
+    expect(sent.map((secs) => secs.toFixed(2))).toEqual(['2.00']);
+    const stopping = mic.recorder.stop();
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await stopping).size).toBe(0);
+    expect(sent.reduce((sum, secs) => sum + secs, 0).toFixed(2)).toBe('3.00');
+    // the next take of a part is kept whole again
+    const part = mic.start('part');
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await part;
+    for (let block = 0; block < 10; block++) mic.sound();
+    const stopped = mic.recorder.stop();
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await stopped).size).toBeGreaterThan(44);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('knows how long a take has gone without sound', async () => {
+    const mic = microphone();
+    mic.settled();
+    expect(mic.recorder.quietFor()).toBe(0);
+    const started = mic.start('free', () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    mic.quiet();
+    await started;
+    await vi.advanceTimersByTimeAsync(4000);
+    mic.quiet();
+    expect(mic.recorder.quietFor()).toBeGreaterThanOrEqual(4000);
+    mic.sound();
+    expect(mic.recorder.quietFor()).toBeLessThan(10);
   });
 });

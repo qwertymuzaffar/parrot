@@ -15,8 +15,12 @@ class Capture extends AudioWorkletProcessor {
 registerProcessor('parrot-capture', Capture);
 `;
 
-/** Who a take is recorded for: the part being practised (a sentence take) or the word selected, said alone. */
-export type TakeFor = 'part' | 'word';
+/** Who a take is recorded for: the part being practised (a sentence take), the word selected, said alone, or a talk
+ * (speech with no text, sent on to the engine as it is recorded). */
+export type TakeFor = 'part' | 'word' | 'free';
+
+/** Where a talk's sound goes as it is recorded: 16-bit samples at the microphone's rate. */
+export type Sink = (pcm: Int16Array, rate: number) => void;
 
 /** What to say when the microphone would not start. */
 export const micError = (error: unknown) => `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`;
@@ -26,7 +30,26 @@ const AFTER_STOP_MS = 250;
 /** how long the microphone stays open with nothing recorded and no one about, before it is let go */
 const IDLE_MS = 120_000;
 
+/** a talk is sent on in blocks this long */
+const SINK_MS = 2000;
+/** a sample at least this loud (about -30 dBFS) is sound, not a quiet room */
+const SOUND_PEAK = 0.03;
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Float samples as 16-bit ones. */
+function pcm16(blocks: Float32Array[]) {
+  const total = blocks.reduce((sum, block) => sum + block.length, 0);
+  const pcm = new Int16Array(total);
+  let at = 0;
+  for (const block of blocks) {
+    for (let sampleIndex = 0; sampleIndex < block.length; sampleIndex++) {
+      pcm[at + sampleIndex] = Math.max(-1, Math.min(1, block[sampleIndex])) * 32767;
+    }
+    at += block.length;
+  }
+  return pcm;
+}
 
 /**
  * The microphone: one take at a time, with its length and a level for the meter. A take is plain PCM made into a
@@ -64,6 +87,13 @@ export class Recorder {
   /** the last half second before the take started, so a word begun right on the click is kept */
   private preroll: Float32Array[] = [];
   private flowing: (() => void) | null = null;
+  /** a talk's sound goes here as it is recorded, instead of into blocks */
+  private sink: Sink | null = null;
+  /** the talk's sound not yet sent on */
+  private pending: Float32Array[] = [];
+  private pendingSamples = 0;
+  /** when the take last had sound in it (performance.now()) */
+  private lastSound = 0;
 
   /** Open the microphone and the capture (the slow part, a second or more the first time); it then stays open for
    * two minutes after a take, so the next take starts at once. */
@@ -120,7 +150,14 @@ export class Recorder {
   private capture(samples: Float32Array, rate: number) {
     this.settling?.block(samples, performance.now());
     if (this.capturing) {
-      this.blocks.push(samples);
+      if (samples.some((sample) => sample >= SOUND_PEAK || sample <= -SOUND_PEAK)) this.lastSound = performance.now();
+      if (this.sink) {
+        this.pending.push(samples);
+        this.pendingSamples += samples.length;
+        if (this.pendingSamples >= (rate * SINK_MS) / 1000) this.send(rate);
+      } else {
+        this.blocks.push(samples);
+      }
       this.flowing?.();
       this.flowing = null;
     } else {
@@ -154,7 +191,22 @@ export class Recorder {
     this.preroll = [];
   }
 
-  async start(owner: TakeFor): Promise<void> {
+  /** How long the take has gone without sound (ms): a talk stops itself after a long quiet. */
+  quietFor() {
+    return this.recording() ? performance.now() - this.lastSound : 0;
+  }
+
+  /** Send on the talk's sound recorded so far. */
+  private send(rate: number) {
+    if (!this.pending.length) return;
+    const pcm = pcm16(this.pending);
+    this.pending = [];
+    this.pendingSamples = 0;
+    this.sink?.(pcm, rate);
+  }
+
+  /** Start a take for `owner`. A talk (`free`) gives `sink` its sound as it is recorded, from the half second before. */
+  async start(owner: TakeFor, sink?: Sink): Promise<void> {
     if (this.capturing) return; // a second click while the microphone opens
     const take = ++this.take;
     clearTimeout(this.idle);
@@ -179,7 +231,14 @@ export class Recorder {
       throw error;
     }
     // the take begins with the half second before the click, and shows as recording once sound arrives
-    this.blocks = [...this.preroll];
+    if (sink) {
+      this.sink = sink;
+      this.pending = [...this.preroll];
+      this.pendingSamples = this.pending.reduce((sum, block) => sum + block.length, 0);
+      this.blocks = [];
+    } else {
+      this.blocks = [...this.preroll];
+    }
     this.preroll = [];
     const arrived = new Promise<boolean>((resolve) => (this.flowing = () => resolve(true)));
     const sound = await Promise.race([arrived, sleep(3000).then(() => false)]);
@@ -194,6 +253,7 @@ export class Recorder {
     const analyser = this.analyser!;
     const buf = new Uint8Array(analyser.fftSize);
     const t0 = performance.now();
+    this.lastSound = t0;
     let peak100 = 0;
     let last = t0;
     this.trace.set([]);
@@ -221,6 +281,9 @@ export class Recorder {
     this.preparing.set(false);
     this.flowing = null;
     this.blocks = [];
+    this.sink = null;
+    this.pending = [];
+    this.pendingSamples = 0;
   }
 
   /** Stop and return the take as a WAV file. A take stopped before it got going gives nothing, at once. */
@@ -245,15 +308,13 @@ export class Recorder {
     const rate = this.ctx!.sampleRate;
     this.owner.set(null);
     this.idle = window.setTimeout(() => this.close(), IDLE_MS);
-    const total = this.blocks.reduce((sum, block) => sum + block.length, 0);
-    const pcm = new Int16Array(total);
-    let at = 0;
-    for (const block of this.blocks) {
-      for (let sampleIndex = 0; sampleIndex < block.length; sampleIndex++) {
-        pcm[at + sampleIndex] = Math.max(-1, Math.min(1, block[sampleIndex])) * 32767;
-      }
-      at += block.length;
+    if (this.sink) {
+      // a talk: its last sound goes on, and there is nothing to give back
+      this.send(rate);
+      this.sink = null;
+      return new Blob();
     }
+    const pcm = pcm16(this.blocks);
     this.blocks = [];
     return wav(pcm, rate);
   }
