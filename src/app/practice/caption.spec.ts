@@ -55,7 +55,14 @@ describe('the caption under the part', () => {
         { provide: Session, useValue: session },
         {
           provide: Playback,
-          useValue: { nowRef: signal(null), nowMine: signal(null), playing: signal(null), paused: signal(false), rate: signal(1) },
+          useValue: {
+            nowRef: signal(null),
+            nowMine: signal(null),
+            playing: signal(null),
+            paused: signal(false),
+            rate: signal(1),
+            voiceMissing: signal(false),
+          },
         },
         { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0), warm() {} } },
         { provide: WordPractice, useValue: {} },
