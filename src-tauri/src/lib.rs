@@ -8,6 +8,7 @@ mod audio;
 mod models;
 mod sounds;
 mod store;
+mod talk;
 mod text;
 mod updates;
 
@@ -16,7 +17,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use store::{Activity, Attempt, AttemptSummary, PartScore, Store, TextItem};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use text::WordStatus;
 
 pub struct Engine {
@@ -27,6 +28,9 @@ pub struct Engine {
 }
 
 type Shared = Arc<Engine>;
+
+/// What to say of a take with nothing in it that could be a voice.
+const NOTHING_HEARD: &str = "Nothing was heard in the recording. Is the microphone on?";
 
 /// What to say of a take of nothing but exact zeros. A microphone always picks up some noise, even in a quiet room:
 /// exact zeros are the system keeping it from Parrot, and on macOS the webview then records silence instead of failing.
@@ -106,9 +110,7 @@ impl Engine {
         if audio::blank(&raw) {
             return Err(MICROPHONE_WITHHELD.into());
         }
-        let take = audio::clean(raw)
-            .filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE)
-            .ok_or("Nothing was heard in the recording. Is the microphone on?")?;
+        let take = audio::clean(raw).filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE).ok_or(NOTHING_HEARD)?;
         let secs = take.seconds();
         let scored = score(self, &audio::resample(&take, 16000), secs, txt)?;
         // not create_dir_all: a text deleted while the take was scored must not come back as a folder of its tries
@@ -368,6 +370,42 @@ fn take_request(request: &tauri::ipc::Request<'_>, read: &str) -> Result<(String
     Ok((header("x-text"), header(read), bytes.clone()))
 }
 
+/// Start a talk recorded at `rate` (Hz). Its sound follows in blocks (talk_feed).
+#[tauri::command]
+fn talk_start(talks: State<'_, Arc<talk::Talks>>, rate: u32) -> Result<(), String> {
+    talks.start(rate)
+}
+
+/// More of the talk under way: 16-bit little-endian samples as the request body.
+#[tauri::command]
+fn talk_feed(talks: State<'_, Arc<talk::Talks>>, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the talk's sound as raw bytes".into());
+    };
+    talks.feed(bytes)
+}
+
+/// Stop the talk and write down what was said, reporting "talk-progress" events (seconds done, of the total).
+#[tauri::command]
+async fn talk_stop(app: AppHandle, engine: State<'_, Shared>, talks: State<'_, Arc<talk::Talks>>) -> Result<talk::Heard, String> {
+    let (engine, talks) = (engine.inner().clone(), talks.inner().clone());
+    blocking(move || talks.write_down(&*engine, |done, total| drop(app.emit("talk-progress", json!({ "done": done, "total": total }))))).await
+}
+
+/// Stop writing down the talk; its recording is kept, to write down again or discard.
+#[tauri::command]
+fn talk_cancel(talks: State<'_, Arc<talk::Talks>>) {
+    talks.cancel();
+}
+
+/// Drop the talk and its recording.
+#[tauri::command]
+async fn talk_discard(talks: State<'_, Arc<talk::Talks>>) -> Result<(), String> {
+    let talks = talks.inner().clone();
+    // waits for a writing-down under way to see the cancel and stop
+    blocking(move || talks.discard()).await
+}
+
 #[tauri::command]
 async fn download_models(app: AppHandle, engine: State<'_, Shared>) -> Result<(), String> {
     let dir = engine.models.clone();
@@ -411,6 +449,7 @@ pub fn run() {
             };
             #[cfg(not(target_os = "windows"))]
             let models = data.join("models");
+            app.manage(Arc::new(talk::Talks::open(data.join("talks"))));
             let engine = Arc::new(Engine { models, store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
             let warm = engine.clone();
             std::thread::spawn(move || {
@@ -441,6 +480,11 @@ pub fn run() {
             pron,
             check,
             check_word,
+            talk_start,
+            talk_feed,
+            talk_stop,
+            talk_cancel,
+            talk_discard,
             download_models,
             latest_release,
             open_url
@@ -582,6 +626,51 @@ mod tests {
             std::fs::read(silence_path).unwrap()
         };
         assert!(engine.check(&id, text, &silent).unwrap_err().contains("Nothing was heard"));
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    /// A talk through the whole engine, fed in blocks as the interface sends it: needs the models on this machine
+    /// and a recording of speech (any length up to ten minutes, 16-bit mono).
+    /// PARROT_TALK=talk.wav cargo test --release --lib whole_talk -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn whole_talk() {
+        let home = PathBuf::from(std::env::var("HOME").unwrap());
+        let models = home.join("Library/Application Support/io.github.qwertymuzaffar.parrot/models");
+        let data = std::env::temp_dir().join(format!("parrot-e2e-talk-{}", std::process::id()));
+        let engine = Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        engine.warm();
+        let talks = talk::Talks::open(data.join("talks"));
+        let recording = audio::read_wav(&std::fs::read(std::env::var("PARROT_TALK").unwrap()).unwrap()).unwrap();
+        talks.start(recording.rate).unwrap();
+        let bytes: Vec<u8> = recording.samples.iter().flat_map(|sample| ((sample * 32767.0) as i16).to_le_bytes()).collect();
+        for block in bytes.chunks(recording.rate as usize) {
+            talks.feed(block).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let heard = talks.write_down(&engine, |done, total| eprintln!("  {done:.0} of {total:.0} s")).unwrap();
+        let took = started.elapsed().as_secs_f64();
+        eprintln!(
+            "{took:.1} s for {:.0} s of talk ({:.0} s a minute) · score {} · {} wpm",
+            heard.duration,
+            took / heard.duration * 60.0,
+            heard.score,
+            heard.wpm
+        );
+        eprintln!("heard: {}", heard.heard);
+        for word in heard.words.iter().filter(|word| word.status != WordStatus::Good) {
+            eprintln!("  {} {:?} score={:?}", word.w, word.status, word.score);
+        }
+        eprintln!("pauses: {:?}", heard.pauses);
+        assert!(
+            heard.words.len() > 10 && heard.words.iter().filter(|word| word.t.is_some()).count() * 10 >= heard.words.len() * 9,
+            "most words placed"
+        );
+        assert!(heard.words.windows(2).all(|pair| match (pair[0].t, pair[1].t) {
+            (Some(first), Some(second)) => first[0] <= second[0],
+            _ => true,
+        }));
+        talks.discard().unwrap();
         let _ = std::fs::remove_dir_all(data);
     }
 

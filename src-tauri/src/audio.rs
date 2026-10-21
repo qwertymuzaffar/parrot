@@ -126,6 +126,35 @@ pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
     Some(Pcm { samples: trimmed, rate: pcm.rate })
 }
 
+/// Where to cut a long recording for speech recognition, which hears at most `limit` seconds well at a time: at the
+/// quietest moment of the last 40% of each stretch, the loudness averaged over 300 ms so a pause between words wins
+/// over the gap inside one. The ranges cover every sample, in order.
+pub fn stretches(samples: &[f32], rate: u32, limit: f64) -> Vec<std::ops::Range<usize>> {
+    let frame = (rate as usize / 100).max(1); // 10 ms
+    let levels: Vec<f64> =
+        samples.chunks(frame).map(|chunk| db((chunk.iter().map(|sample| sample * sample).sum::<f32>() / chunk.len() as f32).sqrt()) as f64).collect();
+    // each frame's level averaged with the 15 frames either side
+    let mut running = vec![0f64; levels.len() + 1];
+    for (frame_index, level) in levels.iter().enumerate() {
+        running[frame_index + 1] = running[frame_index] + level;
+    }
+    let smoothed = |frame_index: usize| {
+        let (from, to) = (frame_index.saturating_sub(15), (frame_index + 16).min(levels.len()));
+        (running[to] - running[from]) / (to - from) as f64
+    };
+    let limit_frames = ((limit * 100.0) as usize).max(10);
+    let mut cuts = vec![0];
+    let mut start = 0;
+    while levels.len() - start > limit_frames {
+        let quietest =
+            (start + limit_frames * 6 / 10..start + limit_frames).min_by(|left, right| smoothed(*left).total_cmp(&smoothed(*right))).unwrap();
+        cuts.push(quietest);
+        start = quietest;
+    }
+    cuts.push(levels.len());
+    cuts.windows(2).map(|pair| pair[0] * frame..(pair[1] * frame).min(samples.len())).collect()
+}
+
 /// Resample by linear interpolation, low-passed first when going down so nothing above the new Nyquist folds back.
 pub fn resample(pcm: &Pcm, to: u32) -> Vec<f32> {
     if pcm.rate == to {
@@ -256,5 +285,28 @@ mod tests {
         write_wav(&dir, &Pcm { samples: tone(16000, 0.5, 0.5), rate: 16000 }).unwrap();
         let back = read_wav(&std::fs::read(&dir).unwrap()).unwrap();
         assert_eq!((back.rate, back.samples.len()), (16000, 8000));
+    }
+
+    #[test]
+    fn a_long_recording_is_cut_in_its_pauses() {
+        let rate = 16000;
+        // 70 s of speech-like bursts: 6.5 s of tone, then 0.5 s of quiet, ten times
+        let mut samples = vec![];
+        let mut quiet = vec![];
+        for _ in 0..10 {
+            samples.extend(tone(rate, 6.5, 0.3));
+            quiet.push(samples.len()..samples.len() + rate as usize / 2);
+            samples.extend(vec![0.0005f32; rate as usize / 2]);
+        }
+        let cuts = stretches(&samples, rate, 25.0);
+        assert!(cuts.len() >= 3, "{cuts:?}");
+        assert_eq!((cuts[0].start, cuts.last().unwrap().end), (0, samples.len()), "every sample is in a stretch");
+        for pair in cuts.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start, "the stretches follow on");
+            assert!(quiet.iter().any(|gap| gap.contains(&pair[0].end)), "cut at {} s, not in a pause", pair[0].end as f64 / rate as f64);
+        }
+        assert!(cuts.iter().all(|stretch| stretch.len() <= 25 * rate as usize), "{cuts:?}");
+        // a short recording is one stretch
+        assert_eq!(stretches(&samples[..rate as usize * 10], rate, 25.0), vec![0..rate as usize * 10]);
     }
 }

@@ -414,6 +414,22 @@ pub struct WordTime {
     pub letters: Option<Vec<Option<f64>>>,
 }
 
+/// A gap between two words longer than this (seconds) is a long pause: the listener notices it.
+pub const LONG_PAUSE: f64 = 1.0;
+
+/// The long pauses in a take: the word each comes after, and how long it is (seconds). Only words that were placed
+/// count, so a pause around a word that wasn't heard is measured to the words on either side of it.
+pub fn pauses(words: &[WordResult]) -> Vec<(usize, f64)> {
+    let placed: Vec<(usize, [f64; 2])> = words.iter().enumerate().filter_map(|(word_index, word)| word.t.map(|t| (word_index, t))).collect();
+    placed
+        .windows(2)
+        .filter_map(|pair| {
+            let gap = pair[1].1[0] - pair[0].1[1];
+            (gap > LONG_PAUSE).then(|| (pair[0].0, (gap * 100.0).round() / 100.0))
+        })
+        .collect()
+}
+
 /// A word's verdict, saved and sent as "good", "unclear" or "wrong".
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -546,6 +562,16 @@ mod tests {
         let results = judge(text, "the beautiful sinks", &mine, Some(&reference));
         assert_eq!(results.iter().map(|word| word.status).collect::<Vec<_>>(), vec![WordStatus::Good, WordStatus::Unclear, WordStatus::Wrong]);
         assert_eq!(results[2].heard.as_deref(), Some("sinks"));
+    }
+
+    #[test]
+    fn long_pauses_are_found_between_placed_words() {
+        let placed = |t: Option<[f64; 2]>| WordTime { t, score: Some(0.9), letters: None };
+        // a 0.6 s gap, then a word not placed, then 1.8 s from "for" to "words"
+        let mine = [placed(Some([0.0, 0.4])), placed(Some([1.0, 1.3])), placed(None), placed(Some([3.1, 3.5]))];
+        let results = judge("pausing for some words", "pausing for some words", &mine, None);
+        assert_eq!(pauses(&results), vec![(1, 1.8)]);
+        assert!(pauses(&results[..2]).is_empty());
     }
 
     #[test]
