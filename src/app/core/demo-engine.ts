@@ -1,6 +1,19 @@
 import { Injectable } from '@angular/core';
-import { Engine, EngineError, EngineInfo } from './engine';
-import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem, WordStatus } from './models';
+import { wav } from './clips';
+import { Engine, EngineError, EngineInfo, TALK_CANCELLED } from './engine';
+import {
+  Activity,
+  Attempt,
+  AttemptSummary,
+  KeptTalk,
+  Mode,
+  PartScore,
+  SoundsLike,
+  Talk,
+  TalkProgress,
+  TextItem,
+  WordStatus,
+} from './models';
 import { nameKey } from './names';
 import { bare, partKey, sentences } from './split';
 
@@ -16,7 +29,14 @@ interface DemoText {
   tries: Map<string, Attempt[]>;
   /** the tries of each word said alone, by the word in lower case without its punctuation (oldest first) */
   wordTries: Map<string, Attempt[]>;
+  /** it began as a talk */
+  spoken?: boolean;
 }
+
+/** What the demo engine "hears" in any talk: one word sounded off, and a long pause after "ago". */
+const DEMO_TALK = "Hi, I'm Alex. I moved to Berlin three years ago for a job at a small startup, and I really like it here.";
+const DEMO_UNCLEAR = 19; // "really"
+const DEMO_PAUSE_AFTER = 9; // "ago"
 
 const DAY = 86_400_000;
 
@@ -59,6 +79,9 @@ export class DemoEngine extends Engine {
   private readonly ready = this.seed();
   private takes = 0;
   private nameList: string[] = [];
+  /** the talk under way: what was fed in, and what was heard once written down */
+  private talk: { rate: number; blocks: Int16Array[]; samples: number; written: Talk | null } | null = null;
+  private cancelled = false;
 
   private async seed() {
     for (const sample of SAMPLES) {
@@ -192,6 +215,84 @@ export class DemoEngine extends Engine {
     throw new EngineError('Opening the data folder needs the desktop app');
   }
 
+  async talkStart(rate: number) {
+    this.talk = { rate, blocks: [], samples: 0, written: null };
+  }
+
+  async talkFeed(samples: Int16Array) {
+    const talk = this.talk;
+    if (!talk || talk.written) throw new EngineError('no talk is being recorded');
+    if (talk.samples + samples.length > 605 * talk.rate) throw new EngineError('a talk can be at most 10 minutes');
+    talk.blocks.push(samples.slice());
+    talk.samples += samples.length;
+  }
+
+  /** Writes down the same few sentences whatever was said, a quarter of the talk every quarter second. */
+  async talkStop(onProgress: (progress: TalkProgress) => void): Promise<Talk> {
+    const talk = this.talk;
+    if (!talk) throw new EngineError('there is no talk to write down');
+    if (!talk.samples) throw new EngineError('Nothing was heard in the recording. Is the microphone on?');
+    this.cancelled = false;
+    const total = Math.round((talk.samples / talk.rate) * 100) / 100;
+    for (let quarter = 1; quarter <= 4; quarter++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (this.cancelled) throw new EngineError(TALK_CANCELLED);
+      onProgress({ done: (total * quarter) / 4, total });
+    }
+    const attempt = judged(DEMO_TALK, 0, { [DEMO_UNCLEAR]: 'unclear' }, '', new Date());
+    for (const word of attempt.words.slice(DEMO_PAUSE_AFTER + 1)) word.t = word.t && [word.t[0] + 1.4, word.t[1] + 1.4];
+    const words = attempt.words;
+    const duration = words.at(-1)!.t![1] + 0.3;
+    talk.written = {
+      heard: DEMO_TALK,
+      words,
+      duration,
+      wpm: Math.round((words.length / duration) * 60),
+      score: Math.round((100 * (words.length - 1)) / words.length),
+      pauses: [[DEMO_PAUSE_AFTER, 1.4]],
+    };
+    return talk.written;
+  }
+
+  async talkCancel() {
+    this.cancelled = true;
+  }
+
+  /** A word that isn't the one heard at its place is misheard, as that word; the recording plays back as made. */
+  async talkKeep(said: string, title: string): Promise<KeptTalk> {
+    await this.ready;
+    const talk = this.talk;
+    if (!talk?.written) throw new EngineError('write the talk down first');
+    const text = await this.store(said, title, 'whole');
+    text.spoken = true;
+    const heard = talk.written.heard.split(' ');
+    const verdicts: Record<number, WordStatus> = {};
+    text.text.split(' ').forEach((word, wordIndex) => {
+      const same = bare(word).toLowerCase() === bare(heard[wordIndex] ?? '').toLowerCase();
+      if (!same && !this.nameList.includes(nameKey(word))) verdicts[wordIndex] = 'wrong';
+      else if (talk.written!.words[wordIndex]?.status === 'unclear') verdicts[wordIndex] = 'unclear';
+    });
+    const pcm = new Int16Array(talk.samples);
+    let at = 0;
+    for (const block of talk.blocks) {
+      pcm.set(block, at);
+      at += block.length;
+    }
+    const words = text.text.split(' ').length;
+    const score = Math.round((100 * (words - Object.keys(verdicts).length)) / words);
+    const attempt = judged(text.text, score, verdicts, URL.createObjectURL(wav(pcm, talk.rate)), new Date(), ++this.takes);
+    attempt.words.forEach((word, wordIndex) => word.status === 'wrong' && (word.heard = bare(heard[wordIndex] ?? '').toLowerCase()));
+    attempt.heard = talk.written.heard;
+    listOf(text.tries, text.text).push(attempt);
+    this.talk = null;
+    return { text: await item(text), attempt };
+  }
+
+  async talkDiscard() {
+    this.cancelled = true;
+    this.talk = null;
+  }
+
   async activity(): Promise<Activity> {
     await this.ready;
     const days = Array.from({ length: 7 }, (_, daysAgo) => ({ date: stamp(new Date(Date.now() - (6 - daysAgo) * DAY)).date, tries: 0 }));
@@ -292,9 +393,21 @@ async function scores(text: DemoText) {
 async function item(text: DemoText): Promise<TextItem> {
   const partScores = await scores(text);
   const last = Object.values(partScores).map((part) => part.last);
-  const { id, title, created, opened, mode } = text;
+  const { id, title, created, opened, mode, spoken = false } = text;
   const words = text.text.split(' ').length;
-  return { id, title, text: text.text, words, created, opened, mode, practised: last.length, average: mean(last), scores: partScores };
+  return {
+    id,
+    title,
+    text: text.text,
+    words,
+    created,
+    opened,
+    mode,
+    practised: last.length,
+    average: mean(last),
+    scores: partScores,
+    spoken,
+  };
 }
 
 function summaries(tries: Attempt[] = []): AttemptSummary[] {

@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { convertFileSrc, invoke, InvokeArgs, InvokeOptions } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Engine, EngineError, EngineInfo, ModelProgress } from './engine';
-import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem } from './models';
+import { Activity, Attempt, AttemptSummary, KeptTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** The engine built into the desktop app (src-tauri), called through Tauri commands. */
 @Injectable()
@@ -88,6 +88,36 @@ export class TauriEngine extends Engine {
 
   activity() {
     return this.call<Activity>('activity');
+  }
+
+  talkStart(rate: number) {
+    return this.call<void>('talk_start', { rate });
+  }
+
+  /** the samples as the raw body: little-endian, as typed arrays are on every system Parrot runs on */
+  talkFeed(samples: Int16Array) {
+    return this.call<void>('talk_feed', new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
+  }
+
+  async talkStop(onProgress: (progress: TalkProgress) => void) {
+    const stop = await listen<TalkProgress>('talk-progress', (event) => onProgress(event.payload));
+    try {
+      return await this.call<Talk>('talk_stop');
+    } finally {
+      stop();
+    }
+  }
+
+  talkCancel() {
+    return this.call<void>('talk_cancel');
+  }
+
+  talkKeep(text: string, title: string) {
+    return this.call<KeptTalk>('talk_keep', { text, title: title.trim() || null });
+  }
+
+  talkDiscard() {
+    return this.call<void>('talk_discard');
   }
 
   trashSize() {

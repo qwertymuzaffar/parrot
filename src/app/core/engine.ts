@@ -1,10 +1,13 @@
-import { Activity, Attempt, AttemptSummary, Mode, PartScore, SoundsLike, TextItem } from './models';
+import { Activity, Attempt, AttemptSummary, KeptTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** True inside the desktop app: the engine is built in. In a plain browser (development, screenshots) the
  * interface runs on a demo engine kept in memory instead. */
 export const IN_APP = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export class EngineError extends Error {}
+
+/** What the engine says when writing down a talk was cancelled (src-tauri/src/talk.rs). */
+export const TALK_CANCELLED = 'the writing-down was cancelled';
 
 export interface EngineInfo {
   data: string;
@@ -58,6 +61,24 @@ export abstract class Engine {
   abstract wordAttempt(textId: string, word: string, id: string): Promise<Attempt>;
 
   abstract deleteWordAttempt(textId: string, word: string, id: string): Promise<void>;
+
+  /** Start a talk recorded at `rate` (Hz): speech with no text in front of it. One at a time; a talk not kept is dropped. */
+  abstract talkStart(rate: number): Promise<void>;
+
+  /** More of the talk under way, as recorded. It is at most 10 minutes. */
+  abstract talkFeed(samples: Int16Array): Promise<void>;
+
+  /** Stop the talk and write down what was said, reporting progress; rejects with TALK_CANCELLED when cancelled. */
+  abstract talkStop(onProgress: (progress: TalkProgress) => void): Promise<Talk>;
+
+  /** Stop writing down the talk; its recording is kept, to write down again or discard. */
+  abstract talkCancel(): Promise<void>;
+
+  /** Keep the talk as a text: `text` is what was said, as the user corrected it; the recording is its first take. */
+  abstract talkKeep(text: string, title: string): Promise<KeptTalk>;
+
+  /** Drop the talk and its recording. */
+  abstract talkDiscard(): Promise<void>;
 
   abstract activity(): Promise<Activity>;
 

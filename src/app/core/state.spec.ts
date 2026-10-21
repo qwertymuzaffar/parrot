@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Clips } from './clips';
 import { Engine, EngineError } from './engine';
 import { Library } from './library';
-import { Activity, Attempt, Mode, PartScore, TextItem, WordStatus } from './models';
+import { Activity, Attempt, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
 import { Recorder, TakeFor } from './recorder';
 import { Session } from './session';
@@ -179,6 +179,55 @@ class FakeEngine extends Engine {
   }
   async soundsLike() {
     return {};
+  }
+  /** the talk under way: the samples fed in, and what writing it down gives (or why it fails) */
+  talk: { rate: number; samples: number; written: boolean } | null = null;
+  nextTalk: Talk | string | null = null;
+  /** why the next block of a talk is refused, if it is */
+  refuseFeed: string | null = null;
+  kept: { text: string; title: string } | null = null;
+  async talkStart(rate: number) {
+    this.calls.push(`talkStart ${rate}`);
+    this.answer();
+    this.talk = { rate, samples: 0, written: false };
+  }
+  async talkFeed(samples: Int16Array) {
+    this.answer();
+    if (this.refuseFeed) throw new EngineError(this.refuseFeed);
+    if (!this.talk) throw new EngineError('no talk is being recorded');
+    this.talk.samples += samples.length;
+  }
+  async talkStop(onProgress: (progress: TalkProgress) => void) {
+    await this.pass('talkStop');
+    this.answer();
+    if (!this.talk) throw new EngineError('there is no talk to write down');
+    onProgress({ done: 1, total: 2 });
+    await this.pass('talkStop done');
+    const next = this.nextTalk;
+    if (next == null || typeof next === 'string')
+      throw new EngineError(next ?? 'Nothing was heard in the recording. Is the microphone on?');
+    onProgress({ done: 2, total: 2 });
+    this.talk.written = true;
+    return next;
+  }
+  async talkCancel() {
+    this.calls.push('talkCancel');
+  }
+  async talkKeep(text: string, title: string) {
+    await this.pass('talkKeep');
+    this.answer();
+    if (!this.talk?.written) throw new EngineError('write the talk down first');
+    this.kept = { text, title };
+    this.talk = null;
+    const added = this.item({ id: 'abcdef0123', text, title: title || 'Spoken', mode: 'whole', spoken: true });
+    this.library.unshift(added);
+    const kept = attempt('20261021-100000', text, 80);
+    this.tries[text] = [kept];
+    return { text: added, attempt: kept };
+  }
+  async talkDiscard() {
+    this.calls.push('talkDiscard');
+    this.talk = null;
   }
   nameList: string[] = [];
   async names() {

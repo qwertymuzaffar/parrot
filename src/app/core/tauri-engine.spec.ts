@@ -68,6 +68,32 @@ describe('TauriEngine', () => {
     ]);
   });
 
+  it('runs a talk through the talk commands, the sound as the raw body', async () => {
+    const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (...args: unknown[]) => unknown } }).__TAURI_INTERNALS__;
+    const invoke = vi.spyOn(internals, 'invoke');
+    const engine = new TauriEngine();
+    await engine.talkStart(48000);
+    // two samples, 1 and -2, as 16-bit little-endian bytes; a block cut from a longer buffer sends only its own
+    await engine.talkFeed(new Int16Array([7, 1, -2]).subarray(1));
+    await engine.talkStop(() => {});
+    await engine.talkCancel();
+    await engine.talkKeep('Hello there.', '  ');
+    await engine.talkKeep('Hello there.', 'Greeting');
+    await engine.talkDiscard();
+    const sent = invoke.mock.calls
+      .filter(([cmd]) => String(cmd).startsWith('talk_'))
+      .map(([cmd, body]) => [cmd, body instanceof Uint8Array || ArrayBuffer.isView(body) ? Array.from(body as Uint8Array) : body]);
+    expect(sent).toEqual([
+      ['talk_start', { rate: 48000 }],
+      ['talk_feed', [1, 0, 254, 255]],
+      ['talk_stop', {}],
+      ['talk_cancel', {}],
+      ['talk_keep', { text: 'Hello there.', title: null }],
+      ['talk_keep', { text: 'Hello there.', title: 'Greeting' }],
+      ['talk_discard', {}],
+    ]);
+  });
+
   it('turns a failed command into an EngineError with its message', async () => {
     const failed = new TauriEngine().attempt('95e3ac5665', 'Hello there.', '20260101-120000');
     await expect(failed).rejects.toBeInstanceOf(EngineError);

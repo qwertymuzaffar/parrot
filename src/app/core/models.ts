@@ -67,6 +67,29 @@ export interface AttemptSummary {
   duration: number;
 }
 
+/** A talk written down: what was heard, word by word. Nothing is misheard yet: the verdicts are the sound scores. */
+export interface Talk {
+  heard: string;
+  words: WordResult[];
+  duration: number;
+  wpm: number;
+  score: number;
+  /** the long pauses: the word each comes after, and how long it is (seconds) */
+  pauses: [number, number][];
+}
+
+/** A talk kept: the text it became, and its recording as the text's first take. */
+export interface KeptTalk {
+  text: TextItem;
+  attempt: Attempt;
+}
+
+/** How far writing down a talk has got: seconds of it done, of its length. */
+export interface TalkProgress {
+  done: number;
+  total: number;
+}
+
 export interface PartScore {
   last: number;
   best: number;

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { appConfig } from '../app.config';
 import { DemoEngine } from './demo-engine';
-import { Engine, EngineError } from './engine';
+import { Engine, EngineError, TALK_CANCELLED } from './engine';
 import { partKey, sentences } from './split';
 
 describe('DemoEngine', () => {
@@ -55,5 +55,53 @@ describe('DemoEngine', () => {
     const word = await engine.checkWord(id, 'there,', new Blob(['take']));
     expect((await engine.wordAttempts(id, 'There')).map((each) => each.id)).toEqual([word.id]);
     await expect(engine.check(id, 'Goodbye.', new Blob())).rejects.toBeInstanceOf(EngineError);
+  });
+
+  it('writes down any talk as the same few sentences, and keeps it as a text with the recording as its take', async () => {
+    const engine = new DemoEngine();
+    await expect(engine.talkKeep('Hi.', '')).rejects.toThrow('write the talk down first');
+    await engine.talkStart(8000);
+    await engine.talkFeed(new Int16Array(8000).fill(1000));
+    await engine.talkFeed(new Int16Array(4000).fill(-1000));
+    const progress: number[] = [];
+    const talk = await engine.talkStop(({ done, total }) => progress.push(done / total));
+    expect(progress).toEqual([0.25, 0.5, 0.75, 1]);
+    expect(talk.words.filter((word) => word.status !== 'good').map((word) => word.w)).toEqual(['really']);
+    expect(talk.pauses).toEqual([[9, 1.4]]);
+    expect(talk.words.every((word) => word.heard === null)).toBe(true);
+
+    // "Berlin" was "Bern", and "Alex" is a name
+    await engine.setName('Alex', true);
+    const meant = talk.heard.replace('Berlin', 'Bern');
+    const kept = await engine.talkKeep(meant, 'About me');
+    expect([kept.text.title, kept.text.mode, kept.text.spoken, kept.text.text]).toEqual(['About me', 'whole', true, meant]);
+    const bern = kept.attempt.words[6];
+    expect([bern.w, bern.status, bern.heard]).toEqual(['Bern', 'wrong', 'berlin']);
+    expect(kept.attempt.words.filter((word) => word.status === 'unclear').map((word) => word.w)).toEqual(['really']);
+    expect(engine.audioUrl(kept.attempt.audio)).toMatch(/^blob:/);
+    expect((await engine.attempts(kept.text.id, meant)).map((each) => each.id)).toEqual([kept.attempt.id]);
+    await expect(engine.talkKeep(meant, '')).rejects.toBeInstanceOf(EngineError);
+  });
+
+  it('cancels writing down a talk, keeping it, and discards it', async () => {
+    const engine = new DemoEngine();
+    await expect(engine.talkStop(() => {})).rejects.toThrow('there is no talk');
+    await engine.talkStart(8000);
+    await expect(engine.talkStop(() => {})).rejects.toThrow('Nothing was heard');
+    await engine.talkFeed(new Int16Array(800));
+    const stopping = engine.talkStop(() => {});
+    await engine.talkCancel();
+    await expect(stopping).rejects.toThrow(TALK_CANCELLED);
+    expect((await engine.talkStop(() => {})).heard).toContain('Berlin');
+    await engine.talkDiscard();
+    await expect(engine.talkStop(() => {})).rejects.toThrow('there is no talk');
+    await expect(engine.talkFeed(new Int16Array(1))).rejects.toThrow('no talk is being recorded');
+  });
+
+  it('refuses a talk over ten minutes', async () => {
+    const engine = new DemoEngine();
+    await engine.talkStart(100);
+    await engine.talkFeed(new Int16Array(100 * 600));
+    await expect(engine.talkFeed(new Int16Array(100 * 10))).rejects.toThrow('at most 10 minutes');
   });
 });
