@@ -31,7 +31,7 @@ describe('Settings: check for updates', () => {
       providers: [
         { provide: Updates, useValue: updates },
         { provide: Engine, useValue: { info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }) } },
-        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), setVoice() {}, speak() {} } },
+        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
       ],
     });
     const fixture = TestBed.createComponent(Settings);
