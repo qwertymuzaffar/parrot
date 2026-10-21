@@ -28,6 +28,16 @@ pub struct Engine {
 
 type Shared = Arc<Engine>;
 
+/// What to say of a take of nothing but exact zeros. A microphone always picks up some noise, even in a quiet room:
+/// exact zeros are the system keeping it from Parrot, and on macOS the webview then records silence instead of failing.
+const MICROPHONE_WITHHELD: &str = if cfg!(target_os = "macos") {
+    "Parrot got only silence from the microphone: macOS may not be letting it listen. Allow Parrot in System Settings → Privacy & Security → Microphone, then quit and reopen it."
+} else if cfg!(windows) {
+    "Parrot got only silence from the microphone: Windows may not be letting it listen. Allow it in Settings → Privacy & security → Microphone, then quit and reopen Parrot."
+} else {
+    "Parrot got only silence from the microphone. Check that it isn't muted and that Parrot may use it, then quit and reopen Parrot."
+};
+
 impl Engine {
     fn with_aligner<T>(&self, work: impl FnOnce(&mut align::Aligner) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.aligner.lock().unwrap_or_else(PoisonError::into_inner);
@@ -93,6 +103,9 @@ impl Engine {
     /// what was heard and scored.
     fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: fn(&Self, &[f32], f64, &str) -> Result<Scored, String>) -> Result<Attempt, String> {
         let raw = audio::read_wav(wav)?;
+        if audio::blank(&raw) {
+            return Err(MICROPHONE_WITHHELD.into());
+        }
         let take = audio::clean(raw)
             .filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE)
             .ok_or("Nothing was heard in the recording. Is the microphone on?")?;
@@ -563,7 +576,9 @@ mod tests {
         assert!(attempt.words.iter().any(|word| word.w == "things" && word.status == WordStatus::Wrong && word.heard.as_deref() == Some("sinks")));
         let silent = {
             let silence_path = data.join("silence.wav");
-            audio::write_wav(&silence_path, &audio::Pcm { samples: vec![0.0; 48000], rate: 48000 }).unwrap();
+            // a quiet room: some noise, far under any voice (exact zeros are a withheld microphone)
+            let room = (0..48000).map(|sample_index| 0.0003 * (sample_index as f32 * 0.37).sin()).collect();
+            audio::write_wav(&silence_path, &audio::Pcm { samples: room, rate: 48000 }).unwrap();
             std::fs::read(silence_path).unwrap()
         };
         assert!(engine.check(&id, text, &silent).unwrap_err().contains("Nothing was heard"));
@@ -606,6 +621,27 @@ mod tests {
         let error = engine.keep_take(&part, "Hello there.", &wav, delete_while_scoring).unwrap_err();
         assert_eq!(error, "the text was deleted");
         assert!(!data.join("texts").join(&id).exists(), "no folder of the text comes back");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn a_take_of_exact_zeros_says_the_microphone_was_withheld() {
+        let data = std::env::temp_dir().join(format!("parrot-withheld-{}", std::process::id()));
+        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let id = engine.store.add("Hello there.", None, None).unwrap().id;
+        let part = engine.store.part_dir(&id, "Hello there.").unwrap();
+        let take = |name: &str, samples: Vec<f32>| {
+            let wav_path = data.join(name);
+            audio::write_wav(&wav_path, &audio::Pcm { samples, rate: 48000 }).unwrap();
+            std::fs::read(&wav_path).unwrap()
+        };
+        let unscored = |_: &Engine, _: &[f32], _: f64, _: &str| -> Result<Scored, String> { panic!("a take of no sound is never scored") };
+        let zeros = take("zeros.wav", vec![0.0; 48000]);
+        assert_eq!(engine.keep_take(&part, "Hello there.", &zeros, unscored).unwrap_err(), MICROPHONE_WITHHELD);
+        // a quiet room is a microphone that works, with no one speaking
+        let room = take("room.wav", (0..48000).map(|sample_index| 0.0003 * (sample_index as f32 * 0.37).sin()).collect());
+        assert!(engine.keep_take(&part, "Hello there.", &room, unscored).unwrap_err().contains("Nothing was heard"));
+        assert!(engine.store.attempts(&id, "Hello there.").unwrap().is_empty(), "neither is kept");
         let _ = std::fs::remove_dir_all(data);
     }
 

@@ -86,6 +86,11 @@ The engine (`src-tauri/src`): `store.rs` keeps texts and tries, `audio.rs` clean
 `sounds.rs` respells a word. Opened in a plain browser (`npx ng serve`), the interface runs on a demo engine kept in
 memory (`src/app/core/demo-engine.ts`): sample texts and tries, and made-up scores, for working on it and for screenshots.
 
+On macOS the `tauri dev` build can be refused the microphone without a prompt (it logs `Could not create a
+'com.apple.webkit.microphone' sandbox extension`, and every take is "only silence"). Reset the decision with
+`tccutil reset Microphone io.github.qwertymuzaffar.parrot` and restart it, or record in a built app
+(`npx tauri build --bundles app`).
+
 ### Intel Macs
 
 ONNX Runtime publishes no Intel Mac build after 1.23, so Parrot asks only for the 1.23 API and the Intel build links

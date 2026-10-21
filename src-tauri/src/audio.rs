@@ -78,6 +78,11 @@ fn db(rms: f32) -> f32 {
     20.0 * rms.max(1e-9).log10()
 }
 
+/// Whether a take is nothing but exact zeros: not a quiet room, which always has some noise, but no sound at all.
+pub fn blank(pcm: &Pcm) -> bool {
+    pcm.samples.iter().all(|&sample| sample == 0.0)
+}
+
 /// The shortest cleaned take that is kept: a short word said alone, with the lead-in kept before it and a take
 /// stopped right after it, is about this long. Shorter is a breath or a click, not speech.
 pub const SHORTEST_TAKE: f64 = 0.3;
