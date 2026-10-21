@@ -30,7 +30,13 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
   grouped into the sounds they spell (*th·i·ng·s*), each green, amber or red (half green when it was right but not
   sure), with the weakest one named and a tip on how to make it. You can also record just that word, as often as you
   like: each try gets its own sound match and history, without touching the sentence's score. Every try is kept, so
-  you can watch your score go up.
+  you can watch your score go up. A long pause (over a second) between two words is marked with its length.
+- **Just talk.** Tell a story or answer an interview question with nothing to read, for up to 10 minutes. Parrot
+  writes down what it heard and shows how each word came out. Where it wrote a word other than the one you meant, fix
+  it: that word then shows as misheard, with what was heard, which is the word to work on. Save it, and the talk
+  becomes a text with your recording as its first take, to practise by reading.
+- **Names.** Speech recognition writes a name it doesn't know as some other word, every time. Mark a word as a name
+  from its card and it is never counted as misheard, in any text; Settings lists them.
 
 ## Download
 
