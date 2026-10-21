@@ -1,4 +1,5 @@
-//! The two speech models Parrot needs, downloaded into the app's data folder the first time it opens.
+//! The two speech models Parrot needs, downloaded into the app's data folder the first time it opens (on Windows,
+//! the local one: see lib.rs).
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
@@ -65,6 +66,33 @@ pub fn set_aside(dir: &Path, model: &Model, error: String) -> String {
         }
         Err(_) => error,
     }
+}
+
+/// Move the models (whole or half downloaded) from `old` to `new`, where Parrot keeps them now. A file `new` already
+/// has is left in `old` as it is: the one in `new` may be newer, and nothing is overwritten. Running it again moves
+/// nothing more. Only the models' own files are touched, never anything else in either folder. Only Windows calls it,
+/// but it is built everywhere so its tests run everywhere.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn migrate(old: &Path, new: &Path) -> std::io::Result<()> {
+    let names = ALL.iter().flat_map(|model| [model.file.to_string(), format!("{}.part", model.file)]);
+    for name in names {
+        let (from, to) = (old.join(&name), new.join(&name));
+        if !std::fs::symlink_metadata(&from).is_ok_and(|metadata| metadata.is_file()) || to.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(new)?;
+        if std::fs::rename(&from, &to).is_err() {
+            // another volume (a redirected profile): copy under a name the app ignores, then put it in place, so a
+            // copy cut short never passes for a model
+            let moving = new.join(format!("{name}.moving"));
+            std::fs::copy(&from, &moving)?;
+            std::fs::rename(&moving, &to)?;
+            std::fs::remove_file(&from)?;
+        }
+    }
+    // gone once it is empty; a folder with anything else left in it stays
+    let _ = std::fs::remove_dir(old);
+    Ok(())
 }
 
 #[derive(Serialize, Clone)]
@@ -183,6 +211,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_resumed_download_continues_only_from_the_byte_asked_for() {
@@ -216,5 +245,53 @@ mod tests {
             assert!(model.sha256.chars().all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()), "{}", model.file);
             assert!(!model.url.contains("/resolve/main/"), "{} follows a moving branch", model.file);
         }
+    }
+
+    fn folders(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("parrot-migrate-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        (root.join("roaming/models"), root.join("local/models"), root)
+    }
+
+    #[test]
+    fn models_move_to_the_new_folder() {
+        let (old, new, root) = folders("move");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join(WHISPER.file), "whisper").unwrap();
+        fs::write(old.join(format!("{}.part", ALIGNER.file)), "half").unwrap();
+        migrate(&old, &new).unwrap();
+        assert_eq!(fs::read_to_string(new.join(WHISPER.file)).unwrap(), "whisper");
+        assert_eq!(fs::read_to_string(new.join(format!("{}.part", ALIGNER.file))).unwrap(), "half");
+        assert!(!old.exists(), "the emptied old folder is gone");
+        // again: nothing to move, nothing changes
+        migrate(&old, &new).unwrap();
+        assert_eq!(fs::read_dir(&new).unwrap().count(), 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_model_already_in_the_new_folder_is_not_overwritten() {
+        let (old, new, root) = folders("keep");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&new).unwrap();
+        fs::write(old.join(WHISPER.file), "old").unwrap();
+        fs::write(new.join(WHISPER.file), "new").unwrap();
+        fs::write(old.join(ALIGNER.file), "aligner").unwrap();
+        fs::write(old.join("notes.txt"), "mine").unwrap();
+        migrate(&old, &new).unwrap();
+        assert_eq!(fs::read_to_string(new.join(WHISPER.file)).unwrap(), "new");
+        assert_eq!(fs::read_to_string(old.join(WHISPER.file)).unwrap(), "old", "the old copy is left alone");
+        assert_eq!(fs::read_to_string(new.join(ALIGNER.file)).unwrap(), "aligner");
+        assert!(!old.join(ALIGNER.file).exists());
+        assert!(old.join("notes.txt").exists() && !new.join("notes.txt").exists(), "only the models' files move");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_old_folder_is_nothing_to_do() {
+        let (old, new, root) = folders("none");
+        migrate(&old, &new).unwrap();
+        assert!(!new.exists(), "no empty folder made for nothing");
+        let _ = fs::remove_dir_all(root);
     }
 }

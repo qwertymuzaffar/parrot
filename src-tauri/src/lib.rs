@@ -345,8 +345,19 @@ pub fn run() {
             // macOS: ~/Library/Application Support/io.github.qwertymuzaffar.parrot (the first engine's folder too)
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(data.join("texts"))?;
-            let engine =
-                Arc::new(Engine { models: data.join("models"), store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
+            // Windows: app_data_dir is the roaming profile, which domain machines copy to a server at every sign-in, so
+            // the 800 MB of models go to the local one (%LOCALAPPDATA%) and the ones an older Parrot put there move over
+            #[cfg(target_os = "windows")]
+            let models = {
+                let local = app.path().app_local_data_dir()?.join("models");
+                if let Err(error) = models::migrate(&data.join("models"), &local) {
+                    log::warn!("could not move the models to {}: {error}", local.display());
+                }
+                local
+            };
+            #[cfg(not(target_os = "windows"))]
+            let models = data.join("models");
+            let engine = Arc::new(Engine { models, store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
             let warm = engine.clone();
             std::thread::spawn(move || warm.warm());
             app.manage(engine);
