@@ -19,12 +19,13 @@ type Tone = 'idle' | 'plain' | 'wrong' | 'unclear' | 'now' | 'live';
       height: 56px;
       display: flex;
       align-items: center;
-      gap: 3px;
+      // in a narrow window the gaps narrow too, so every bar still fits
+      gap: min(3px, 0.6%);
       padding: 0 2px;
     }
     span {
       flex: 1;
-      min-width: 2px;
+      min-width: 1px;
       border-radius: 3px;
       background: var(--bar);
       transition: height 0.12s;
