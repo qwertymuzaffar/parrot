@@ -65,7 +65,7 @@ export abstract class Engine {
   /** Start a talk recorded at `rate` (Hz): speech with no text in front of it. One at a time; a talk not kept is dropped. */
   abstract talkStart(rate: number): Promise<void>;
 
-  /** More of the talk under way, as recorded. It is at most 10 minutes. */
+  /** More of the talk under way, as recorded. It is at most 30 minutes. */
   abstract talkFeed(samples: Int16Array): Promise<void>;
 
   /** Stop the talk and write down what was said, reporting progress; rejects with TALK_CANCELLED when cancelled. */
@@ -104,6 +104,14 @@ export abstract class Engine {
 
   /** URL of a saved recording (paths from the first engine start with /files/). */
   abstract audioUrl(path: string): string;
+
+  /** The waveform of a recording (a try's or a talk's audio): the loudest moment of each of `slices` equal slices,
+   * the loudest being 1; null when the interface is to decode the recording itself. */
+  abstract peaks(audio: string, slices: number): Promise<number[] | null>;
+
+  /** A stretch of a recording, from `from` to `to` seconds, as 16-bit mono; null when the interface is to decode
+   * the recording itself. */
+  abstract clip(audio: string, from: number, to: number): Promise<{ rate: number; samples: Int16Array } | null>;
 
   /** A saved recording's path inside the data folder. */
   protected relative(path: string) {

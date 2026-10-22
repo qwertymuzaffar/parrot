@@ -9,7 +9,7 @@ import { Session } from './session';
 import { readSetting, writeSetting } from './settings';
 
 /** The longest talk (seconds): it stops itself then. The engine refuses much more. */
-export const LONGEST_TALK = 600;
+export const LONGEST_TALK = 1800;
 /** A talk stops itself after this long without sound (ms): its speaker walked away, or forgot to stop it. */
 export const QUIET_STOP_MS = 120_000;
 

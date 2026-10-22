@@ -169,7 +169,7 @@ export class Session {
     this.result.set(attempt);
     this.peaks.set(null);
     this.clips
-      .peaks(this.engine.audioUrl(attempt.audio), this.bars)
+      .peaks(attempt.audio, this.bars)
       .then((peaks) => this.result() === attempt && this.peaks.set(peaks))
       .catch(() => {});
   }

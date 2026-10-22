@@ -157,6 +157,18 @@ impl Store {
         Ok(dir.join(format!("p-{}", sha(part))))
     }
 
+    /// A recording in the data folder, by its path as a try or a talk gives it (texts/.../<try>.wav, talks/<stamp>.wav;
+    /// the first engine's tries say /files/texts/...): never anything outside the folder, nor anything but a WAV.
+    pub fn recording(&self, path: &str) -> Result<PathBuf, String> {
+        let relative = path.trim_start_matches('/').trim_start_matches("files/");
+        let safe = Path::new(relative).components().all(|part| matches!(part, std::path::Component::Normal(_)));
+        let file = self.data.join(relative);
+        if !safe || !relative.ends_with(".wav") || !file.is_file() {
+            return Err(format!("no recording at {path}"));
+        }
+        Ok(file)
+    }
+
     /// The folder of one word's tries said alone, checked to really be a word of the text; every place the word is
     /// in the text ("The", "the,") shares it.
     pub fn word_dir(&self, id: &str, word: &str) -> Result<PathBuf, String> {
@@ -521,6 +533,22 @@ fn size_of(path: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_recording_is_found_only_in_the_data_folder() {
+        let dir = std::env::temp_dir().join(format!("parrot-recording-{}", std::process::id()));
+        fs::create_dir_all(dir.join("texts/abc/p-1")).unwrap();
+        fs::write(dir.join("texts/abc/p-1/20261020-101010.wav"), b"RIFF").unwrap();
+        fs::write(dir.join("texts/abc/p-1/20261020-101010.json"), b"{}").unwrap();
+        let store = Store { data: dir.clone() };
+        let found = dir.join("texts/abc/p-1/20261020-101010.wav");
+        assert_eq!(store.recording("texts/abc/p-1/20261020-101010.wav").unwrap(), found);
+        assert_eq!(store.recording("/files/texts/abc/p-1/20261020-101010.wav").unwrap(), found, "the first engine's paths");
+        for bad in ["texts/abc/p-1/20261020-101010.json", "texts/abc/../abc/p-1/20261020-101010.wav", "../secret.wav", "texts/abc/p-1/none.wav", ""] {
+            assert!(store.recording(bad).is_err(), "{bad}");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn ids_match_the_python_engine() {

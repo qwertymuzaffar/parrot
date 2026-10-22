@@ -11,6 +11,9 @@ describe('TauriEngine', () => {
       calls.push({ cmd, args });
       if (cmd === 'info') return { data: '/data', models: { whisper: true, aligner: true }, sizes: { whisper: 1, aligner: 2 } };
       if (cmd === 'attempt') throw 'not found: 20260101-120000';
+      // a clip: its rate, then two samples, 1 and -2
+      if (cmd === 'clip') return new Uint8Array([0x80, 0xbb, 0, 0, 1, 0, 254, 255]).buffer;
+      if (cmd === 'peaks') return [0.5, 1];
       return [];
     });
   });
@@ -93,6 +96,17 @@ describe('TauriEngine', () => {
       ['talk_keep', { text: 'Hello there.', title: 'Greeting' }],
       ['talk_discard', {}],
       ['talk_left', {}],
+    ]);
+  });
+
+  it('has the engine draw a recording and cut a word from it', async () => {
+    const engine = new TauriEngine();
+    expect(await engine.peaks('talks/20261021-100000.wav', 92)).toEqual([0.5, 1]);
+    const clip = (await engine.clip('texts/95e3ac5665/p-1/t.wav', 1.25, 1.5))!;
+    expect([clip.rate, [...clip.samples]]).toEqual([48000, [1, -2]]);
+    expect(calls).toEqual([
+      { cmd: 'peaks', args: { audio: 'talks/20261021-100000.wav', slices: 92 } },
+      { cmd: 'clip', args: { audio: 'texts/95e3ac5665/p-1/t.wav', from: 1.25, to: 1.5 } },
     ]);
   });
 

@@ -31,8 +31,9 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
   sure), with the weakest one named and a tip on how to make it. You can also record just that word, as often as you
   like: each try gets its own sound match and history, without touching the sentence's score. Every try is kept, so
   you can watch your score go up. A long pause (over a second) between two words is marked with its length.
-- **Just talk.** Tell a story or answer an interview question with nothing to read, for up to 10 minutes; for something
-  to talk about, pick a set of prompts (interview, small talk, presentations). Parrot writes down what it heard and shows how each word came out. Where it wrote a word other than the one you meant, fix
+- **Just talk.** Tell a story or answer an interview question with nothing to read, for up to 30 minutes; for something
+  to talk about, pick a set of prompts (interview, small talk, presentations). Parrot writes down what it heard and
+  shows how each word came out. Where it wrote a word other than the one you meant, fix
   it: that word then shows as misheard, with what was heard, which is the word to work on. Save it, and the talk
   becomes a text with your recording as its first take, to practise by reading: whole, or sentence by sentence,
   each sentence with its first try cut from the talk. A talk not saved when Parrot quits or crashes is offered again

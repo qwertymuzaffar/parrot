@@ -316,7 +316,7 @@ export class DemoEngine extends Engine {
   async talkFeed(samples: Int16Array) {
     const talk = this.talk;
     if (!talk || talk.written) throw new EngineError('no talk is being recorded');
-    if (talk.samples + samples.length > 605 * talk.rate) throw new EngineError('a talk can be at most 10 minutes');
+    if (talk.samples + samples.length > 1805 * talk.rate) throw new EngineError('a talk can be at most 30 minutes');
     talk.blocks.push(samples.slice());
     talk.samples += samples.length;
   }
@@ -415,6 +415,15 @@ export class DemoEngine extends Engine {
   async soundsLike(word: string): Promise<SoundsLike> {
     const key = bare(word).toLowerCase();
     return Object.hasOwn(SOUNDS, key) ? SOUNDS[key] : {};
+  }
+
+  // the recordings are object URLs in the page: the interface decodes them itself
+  async peaks() {
+    return null;
+  }
+
+  async clip() {
+    return null;
   }
 
   /** The tries made here keep their recording as an object URL; the sample tries have none (""), so their

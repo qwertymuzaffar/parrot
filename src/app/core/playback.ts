@@ -123,7 +123,7 @@ export class Playback {
     const from = Math.max(before?.t ? before.t[1] : 0, word.t[0] - 0.03);
     const to = Math.min(after?.t ? after.t[0] : word.t[1] + 0.12, word.t[1] + 0.04);
     this.nowMine.set(wordIndex);
-    return this.clips.cut(this.engine.audioUrl(attempt.audio), from, to).then(async (url) => {
+    return this.clips.cut(attempt.audio, from, to).then(async (url) => {
       this.wordClip = url;
       // the clip ends when it plays out, or when anything else is played or stopped
       await this.sound.playClip(url);

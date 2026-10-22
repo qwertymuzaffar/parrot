@@ -431,6 +431,24 @@ fn talk_left(talks: State<'_, Arc<talk::Talks>>) -> Option<talk::Left> {
     talks.left()
 }
 
+/// The waveform of a recording: the loudest moment of each of `slices` equal slices, the loudest being 1.
+#[tauri::command]
+async fn peaks(engine: State<'_, Shared>, audio: String, slices: usize) -> Result<Vec<f32>, String> {
+    let engine = engine.inner().clone();
+    blocking(move || audio::peaks_file(&engine.store.recording(&audio)?, slices)).await
+}
+
+/// A stretch of a recording (a word to play), from `from` to `to` seconds: its rate (4 bytes) and its samples
+/// (16-bit), little-endian, as raw bytes.
+#[tauri::command]
+async fn clip(engine: State<'_, Shared>, audio: String, from: f64, to: f64) -> Result<tauri::ipc::Response, String> {
+    let engine = engine.inner().clone();
+    let (rate, samples) = blocking(move || audio::clip_file(&engine.store.recording(&audio)?, from, to)).await?;
+    let mut bytes = rate.to_le_bytes().to_vec();
+    bytes.extend(samples.iter().flat_map(|sample| sample.to_le_bytes()));
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Drop the talk and its recording.
 #[tauri::command]
 async fn talk_discard(talks: State<'_, Arc<talk::Talks>>) -> Result<(), String> {
@@ -522,6 +540,8 @@ pub fn run() {
             talk_keep,
             talk_discard,
             talk_left,
+            peaks,
+            clip,
             download_models,
             latest_release,
             open_url
@@ -688,11 +708,14 @@ mod tests {
         let engine = Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
         engine.warm();
         let talks = talk::Talks::open(data.join("talks"));
-        let recording = audio::read_wav(&std::fs::read(std::env::var("PARROT_TALK").unwrap()).unwrap()).unwrap();
-        talks.start(recording.rate).unwrap();
-        let bytes: Vec<u8> = recording.samples.iter().flat_map(|sample| ((sample * 32767.0) as i16).to_le_bytes()).collect();
-        for block in bytes.chunks(recording.rate as usize) {
-            talks.feed(block).unwrap();
+        {
+            // fed as the interface sends it, then let go: what the engine holds is what is measured
+            let recording = audio::read_wav_file(std::path::Path::new(&std::env::var("PARROT_TALK").unwrap())).unwrap();
+            talks.start(recording.rate).unwrap();
+            for block in recording.samples.chunks(recording.rate as usize) {
+                let bytes: Vec<u8> = block.iter().flat_map(|sample| ((sample * 32767.0) as i16).to_le_bytes()).collect();
+                talks.feed(&bytes).unwrap();
+            }
         }
         let started = std::time::Instant::now();
         let heard = talks.write_down(&engine, |done, total| eprintln!("  {done:.0} of {total:.0} s")).unwrap();

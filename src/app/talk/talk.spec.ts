@@ -15,7 +15,7 @@ function standIn() {
     state: signal<TalkState>('idle'),
     preparing: signal(false),
     recording: signal(false),
-    left: signal(600),
+    left: signal(1800),
     progress: signal(0),
     talk: signal<Talk | null>(null),
     stopReason: signal<StopReason | null>(null),
@@ -164,7 +164,7 @@ describe('Just talk', () => {
       talking.stopReason.set('longest');
       const card = await render(TalkCard);
       expect(card.text()).toContain('Writing down what you said… 40%');
-      expect(card.text()).toContain('Stopped at the 10-minute limit.');
+      expect(card.text()).toContain('Stopped at the 30-minute limit.');
       expect(card.element.querySelector('[role=progressbar]')!.getAttribute('aria-valuenow')).toBe('40');
       card.button(/Cancel/).click();
       expect(talking.cancel).toHaveBeenCalled();

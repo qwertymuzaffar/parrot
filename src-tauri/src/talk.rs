@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 /// The longest talk (seconds). The interface stops at this; the engine refuses blocks a little past it.
-pub const LONGEST: f64 = 600.0;
+pub const LONGEST: f64 = 1800.0;
 const SLACK: f64 = 5.0;
 /// Whisper hears a talk in stretches at most this long, cut at its pauses (it reads 30-second windows).
 const STRETCH: f64 = 25.0;
@@ -218,7 +218,7 @@ impl Talks {
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
         }
-        let pcm = audio::read_wav(&fs::read(&talk.path).map_err(|error| error.to_string())?)?;
+        let pcm = audio::read_wav_file(&talk.path)?;
         let pcm = if talk.cleaned {
             pcm
         } else {
@@ -328,7 +328,7 @@ impl Talks {
         let mut current = self.current();
         let talk = current.as_mut().ok_or("there is no talk to keep")?;
         let written = talk.written.as_ref().ok_or("write the talk down first")?;
-        let pcm = audio::read_wav(&fs::read(&talk.path).map_err(|error| error.to_string())?)?;
+        let pcm = audio::read_wav_file(&talk.path)?;
         let duration = pcm.seconds();
         let samples = audio::resample(&pcm, 16000);
         drop(pcm);
@@ -613,15 +613,15 @@ mod tests {
     }
 
     #[test]
-    fn a_talk_is_at_most_ten_minutes() {
+    fn a_talk_is_at_most_thirty_minutes() {
         let (talks, dir) = talks("cap");
         talks.start(8000).unwrap();
         let minute = vec![0u8; 8000 * 2 * 60];
-        for _ in 0..10 {
+        for _ in 0..30 {
             talks.feed(&minute).unwrap();
         }
-        talks.feed(&vec![0u8; 8000 * 2 * 4]).unwrap(); // the slack: blocks still on their way at 10:00
-        assert!(talks.feed(&vec![0u8; 8000 * 2 * 2]).unwrap_err().contains("at most 10 minutes"));
+        talks.feed(&vec![0u8; 8000 * 2 * 4]).unwrap(); // the slack: blocks still on their way at 30:00
+        assert!(talks.feed(&vec![0u8; 8000 * 2 * 2]).unwrap_err().contains("at most 30 minutes"));
         assert!(talks.feed(&[0u8; 3]).unwrap_err().contains("whole 16-bit samples"));
         talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);

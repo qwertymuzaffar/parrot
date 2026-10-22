@@ -115,10 +115,10 @@ describe('DemoEngine', () => {
     await expect(engine.talkFeed(new Int16Array(1))).rejects.toThrow('no talk is being recorded');
   });
 
-  it('refuses a talk over ten minutes', async () => {
+  it('refuses a talk over thirty minutes', async () => {
     const engine = new DemoEngine();
     await engine.talkStart(100);
-    await engine.talkFeed(new Int16Array(100 * 600));
-    await expect(engine.talkFeed(new Int16Array(100 * 10))).rejects.toThrow('at most 10 minutes');
+    await engine.talkFeed(new Int16Array(100 * 1800));
+    await expect(engine.talkFeed(new Int16Array(100 * 10))).rejects.toThrow('at most 30 minutes');
   });
 });

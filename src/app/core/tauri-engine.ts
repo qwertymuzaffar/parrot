@@ -148,6 +148,16 @@ export class TauriEngine extends Engine {
     return this.call<SoundsLike>('pron', { w: word });
   }
 
+  // a long talk would weigh hundreds of MB decoded in the window: the engine reads only what is needed
+  peaks(audio: string, slices: number) {
+    return this.call<number[]>('peaks', { audio, slices });
+  }
+
+  async clip(audio: string, from: number, to: number) {
+    const bytes = await this.call<ArrayBuffer>('clip', { audio, from, to });
+    return { rate: new DataView(bytes).getUint32(0, true), samples: new Int16Array(bytes, 4) };
+  }
+
   audioUrl(path: string) {
     return convertFileSrc(`${this.dataDir}/${this.relative(path)}`);
   }

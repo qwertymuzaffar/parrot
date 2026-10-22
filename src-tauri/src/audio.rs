@@ -2,7 +2,8 @@
 //! filtered out, the silence before and after trimmed, the level evened out. Plus resampling to the 16 kHz the
 //! speech models listen at.
 
-use std::io::Cursor;
+use std::io::{BufReader, Cursor, Read};
+use std::path::Path;
 
 pub struct Pcm {
     pub samples: Vec<f32>,
@@ -20,10 +21,28 @@ const LARGEST_TAKE: usize = 256 << 20;
 
 /// Read a WAV file (any sample format, any channel count) as mono floats.
 pub fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
-    if bytes.len() > LARGEST_TAKE {
-        return Err(format!("the recording is too long ({} MB)", bytes.len() >> 20));
-    }
-    let mut reader = hound::WavReader::new(Cursor::new(bytes)).map_err(|error| format!("not a WAV recording: {error}"))?;
+    too_long(bytes.len() as u64)?;
+    read(hound::WavReader::new(Cursor::new(bytes)).map_err(|error| format!("not a WAV recording: {error}"))?, bytes.len() as u64)
+}
+
+/// Read the WAV file at `path` as mono floats, a little at a time: a long talk is never in memory twice.
+pub fn read_wav_file(path: &Path) -> Result<Pcm, String> {
+    let (reader, size) = open_wav(path)?;
+    read(reader, size)
+}
+
+fn open_wav(path: &Path) -> Result<(hound::WavReader<BufReader<std::fs::File>>, u64), String> {
+    let size = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
+    too_long(size)?;
+    Ok((hound::WavReader::open(path).map_err(|error| format!("not a WAV recording: {error}"))?, size))
+}
+
+fn too_long(size: u64) -> Result<(), String> {
+    if size > LARGEST_TAKE as u64 { Err(format!("the recording is too long ({} MB)", size >> 20)) } else { Ok(()) }
+}
+
+/// The samples of a WAV recording of `size` bytes as mono floats.
+fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, String> {
     let spec = reader.spec();
     if spec.bits_per_sample > 32 {
         return Err(format!("not a WAV recording Parrot reads: {} bits a sample", spec.bits_per_sample));
@@ -31,19 +50,73 @@ pub fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
     // hound reads (and fails on) every sample the header claims: a header claiming millions more than the body
     // holds would keep the engine busy for seconds or minutes on nothing
     let claimed_bytes = reader.len() as u64 * spec.bits_per_sample.div_ceil(8) as u64;
-    if claimed_bytes > bytes.len() as u64 {
-        return Err(format!("the recording is damaged: it says it holds {claimed_bytes} bytes of sound in {}", bytes.len()));
+    if claimed_bytes > size {
+        return Err(format!("the recording is damaged: it says it holds {claimed_bytes} bytes of sound in {size}"));
     }
     let ch = spec.channels.max(1) as usize;
-    let interleaved: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
+    // as long as the header says from the start (checked against the size above): a long talk grown a little at a
+    // time would be copied, and held twice, each time it outgrew its room
+    let mut interleaved: Vec<f32> = Vec::with_capacity(reader.len() as usize);
+    match spec.sample_format {
+        hound::SampleFormat::Float => interleaved.extend(reader.samples::<f32>().filter_map(Result::ok)),
         hound::SampleFormat::Int => {
             let scale = (1i64 << (spec.bits_per_sample - 1)) as f32;
-            reader.samples::<i32>().filter_map(Result::ok).map(|sample| sample as f32 / scale).collect()
+            interleaved.extend(reader.samples::<i32>().filter_map(Result::ok).map(|sample| sample as f32 / scale));
         }
-    };
-    let samples = interleaved.chunks(ch).map(|frame| frame.iter().sum::<f32>() / ch as f32).collect();
+    }
+    // mono (every take Parrot records) as it is: no second copy
+    let samples = if ch == 1 { interleaved } else { interleaved.chunks(ch).map(|frame| frame.iter().sum::<f32>() / ch as f32).collect() };
     Ok(Pcm { samples, rate: spec.sample_rate })
+}
+
+/// The loudest sample of each of `slices` equal slices of the WAV file at `path`, scaled so the loudest slice is 1:
+/// a waveform, read a little at a time, so even a long talk costs no memory.
+pub fn peaks_file(path: &Path, slices: usize) -> Result<Vec<f32>, String> {
+    let (mut reader, _) = open_wav(path)?;
+    let spec = reader.spec();
+    let ch = spec.channels.max(1) as usize;
+    let frames = reader.duration() as usize;
+    let slices = slices.clamp(1, 2000);
+    let size = (frames / slices).max(1);
+    let mut out = vec![0f32; slices];
+    let scale = match spec.sample_format {
+        hound::SampleFormat::Float => 1.0,
+        hound::SampleFormat::Int => (1i64 << (spec.bits_per_sample.clamp(1, 32) - 1)) as f32,
+    };
+    let mut add = |index: usize, sample: f32| {
+        let slice = (index / ch / size).min(slices - 1);
+        out[slice] = out[slice].max(sample.abs() / scale);
+    };
+    match spec.sample_format {
+        hound::SampleFormat::Float => reader.samples::<f32>().enumerate().for_each(|(index, sample)| add(index, sample.unwrap_or(0.0))),
+        hound::SampleFormat::Int => reader.samples::<i32>().enumerate().for_each(|(index, sample)| add(index, sample.unwrap_or(0) as f32)),
+    }
+    let top = out.iter().cloned().fold(0f32, f32::max);
+    Ok(out.into_iter().map(|peak| if top > 0.0 { peak / top } else { 0.0 }).collect())
+}
+
+/// The stretch of the WAV file at `path` from `from` to `to` (seconds), as 16-bit mono at the file's rate: a word
+/// cut from a long talk without reading the rest of it.
+pub fn clip_file(path: &Path, from: f64, to: f64) -> Result<(u32, Vec<i16>), String> {
+    let (mut reader, _) = open_wav(path)?;
+    let spec = reader.spec();
+    let ch = spec.channels.max(1) as usize;
+    let frames = reader.duration();
+    let first = ((from.max(0.0) * spec.sample_rate as f64) as u32).min(frames);
+    let end = ((to.max(from) * spec.sample_rate as f64).ceil() as u32).min(frames);
+    // a word is a second or two; never more than a minute
+    let count = (end - first).min(spec.sample_rate * 60) as usize;
+    reader.seek(first).map_err(|error| error.to_string())?;
+    let scale = match spec.sample_format {
+        hound::SampleFormat::Float => 1.0,
+        hound::SampleFormat::Int => (1i64 << (spec.bits_per_sample.clamp(1, 32) - 1)) as f32,
+    };
+    let floats: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader.samples::<f32>().take(count * ch).map(|sample| sample.unwrap_or(0.0)).collect(),
+        hound::SampleFormat::Int => reader.samples::<i32>().take(count * ch).map(|sample| sample.unwrap_or(0) as f32 / scale).collect(),
+    };
+    let mono = floats.chunks(ch).map(|frame| ((frame.iter().sum::<f32>() / ch as f32).clamp(-1.0, 1.0) * 32767.0) as i16).collect();
+    Ok((spec.sample_rate, mono))
 }
 
 pub fn write_wav(path: &std::path::Path, pcm: &Pcm) -> Result<(), String> {
@@ -110,14 +183,19 @@ pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
     }
     let start = (first * frame).saturating_sub(rate * 15 / 100);
     let end = ((last + 1) * frame + rate / 4).min(pcm.samples.len());
-    let mut trimmed = pcm.samples[start..end].to_vec();
-    let voiced: Vec<f32> = trimmed
-        .chunks(frame)
-        .filter(|chunk| db((chunk.iter().map(|sample| sample * sample).sum::<f32>() / chunk.len() as f32).sqrt()) > threshold)
-        .flatten()
-        .copied()
-        .collect();
-    let rms = (voiced.iter().map(|sample| sample * sample).sum::<f32>() / voiced.len().max(1) as f32).sqrt();
+    // trimmed where it is: a long talk is never copied
+    let mut trimmed = pcm.samples;
+    trimmed.truncate(end);
+    trimmed.drain(..start);
+    let (mut energy, mut voiced) = (0f32, 0usize);
+    for chunk in trimmed.chunks(frame) {
+        let chunk_energy = chunk.iter().map(|sample| sample * sample).sum::<f32>();
+        if db((chunk_energy / chunk.len() as f32).sqrt()) > threshold {
+            energy += chunk_energy;
+            voiced += chunk.len();
+        }
+    }
+    let rms = (energy / voiced.max(1) as f32).sqrt();
     let peak = trimmed.iter().fold(0f32, |running_peak, sample| running_peak.max(sample.abs()));
     let gain = (0.1 / rms.max(1e-6)).min(0.95 / peak.max(1e-6)).min(30.0);
     for sample in &mut trimmed {
@@ -157,37 +235,45 @@ pub fn stretches(samples: &[f32], rate: u32, limit: f64) -> Vec<std::ops::Range<
 
 /// Resample by linear interpolation, low-passed first when going down so nothing above the new Nyquist folds back.
 pub fn resample(pcm: &Pcm, to: u32) -> Vec<f32> {
-    if pcm.rate == to {
+    if pcm.rate == to || pcm.samples.is_empty() {
         return pcm.samples.clone();
     }
+    let samples = &pcm.samples;
     let ratio = pcm.rate as f64 / to as f64;
-    let src: Vec<f32> = if ratio > 1.0 {
-        // a moving average as wide as the step: a simple anti-alias filter, fine for speech models
-        let window = ratio.ceil() as usize;
-        let mut acc = 0f32;
-        let mut out = Vec::with_capacity(pcm.samples.len());
-        for (sample_index, sample) in pcm.samples.iter().enumerate() {
-            acc += sample;
-            if sample_index >= window {
-                acc -= pcm.samples[sample_index - window];
+    // down: a moving average as wide as the step, a simple anti-alias filter fine for speech models, worked out as
+    // the output needs it (a long talk is never copied whole)
+    let window = if ratio > 1.0 { ratio.ceil() as usize } else { 1 };
+    let (mut acc, mut at, mut before, mut now) = (0f32, usize::MAX, 0f32, 0f32);
+    let mut filtered_to = |index: usize, before: &mut f32, now: &mut f32| {
+        while at.wrapping_add(1) <= index {
+            at = at.wrapping_add(1);
+            acc += samples[at];
+            if at >= window {
+                acc -= samples[at - window];
             }
-            out.push(acc / window.min(sample_index + 1) as f32);
+            *before = *now;
+            *now = acc / window.min(at + 1) as f32;
         }
-        out
-    } else {
-        pcm.samples.clone()
     };
-    let output_len = (src.len() as f64 / ratio).floor() as usize;
-    (0..output_len)
-        .map(|output_index| {
-            let position = output_index as f64 * ratio;
-            let left_index = position.floor() as usize;
-            let fraction = (position - left_index as f64) as f32;
-            let left = src[left_index.min(src.len() - 1)];
-            let right = src[(left_index + 1).min(src.len() - 1)];
-            left + (right - left) * fraction
-        })
-        .collect()
+    let last = samples.len() - 1;
+    let output_len = (samples.len() as f64 / ratio).floor() as usize;
+    let mut out = Vec::with_capacity(output_len);
+    for output_index in 0..output_len {
+        let position = output_index as f64 * ratio;
+        let left_index = (position.floor() as usize).min(last);
+        let fraction = (position - position.floor()) as f32;
+        let right_index = (left_index + 1).min(last);
+        let (left, right) = if window == 1 {
+            // up: nothing to filter
+            (samples[left_index], samples[right_index])
+        } else {
+            filtered_to(right_index, &mut before, &mut now);
+            // the filtered sample at left_index is the one before right_index's, unless they are the same (the end)
+            if right_index == left_index { (now, now) } else { (before, now) }
+        };
+        out.push(left + (right - left) * fraction);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -198,6 +284,49 @@ mod tests {
         (0..(rate as f32 * secs) as usize)
             .map(|sample_index| amp * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / rate as f32).sin())
             .collect()
+    }
+
+    /// A WAV file of `samples` (16-bit, `channels` interleaved) at `rate`, in the temp folder.
+    fn wav_file(name: &str, rate: u32, channels: u16, samples: &[f32]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("parrot-audio-{name}-{}.wav", std::process::id()));
+        let spec = hound::WavSpec { channels, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for sample in samples {
+            writer.write_sample((sample * 32767.0) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        path
+    }
+
+    #[test]
+    fn a_long_recording_is_drawn_and_cut_from_its_file() {
+        // two seconds of quiet, then two of a tone at half the loudest
+        let mut samples = vec![0.0; 16000];
+        samples.extend(tone(8000, 2.0, 0.5));
+        let path = wav_file("peaks", 8000, 1, &samples);
+        let peaks = peaks_file(&path, 4).unwrap();
+        assert_eq!(peaks.len(), 4);
+        assert!(peaks[0] == 0.0 && peaks[1] == 0.0 && (peaks[2] - 1.0).abs() < 0.01 && peaks[3] > 0.95, "{peaks:?}");
+
+        let (rate, clip) = clip_file(&path, 2.5, 2.75).unwrap();
+        assert_eq!((rate, clip.len()), (8000, 2000));
+        assert_eq!(clip.iter().map(|sample| sample.unsigned_abs()).max().unwrap() / 1000, 16, "half the loudest");
+        assert!(clip_file(&path, 1.0, 1.5).unwrap().1.iter().all(|sample| *sample == 0));
+        // past the end: what there is
+        assert_eq!(clip_file(&path, 3.9, 9.0).unwrap().1.len(), 800);
+        assert_eq!(read_wav_file(&path).unwrap().samples.len(), 32000);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_stereo_recording_is_cut_as_mono() {
+        // left loud, right silent: the mix is half
+        let frames: Vec<f32> = (0..8000).flat_map(|_| [0.8, 0.0]).collect();
+        let path = wav_file("stereo", 8000, 2, &frames);
+        let (rate, clip) = clip_file(&path, 0.0, 0.5).unwrap();
+        assert_eq!((rate, clip.len(), clip[0] / 100), (8000, 4000, 131));
+        assert_eq!(peaks_file(&path, 2).unwrap(), vec![1.0, 1.0]);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -241,6 +370,52 @@ mod tests {
     #[test]
     fn silence_only_is_nothing() {
         assert!(clean(Pcm { samples: vec![0.0; 48000], rate: 48000 }).is_none());
+    }
+
+    /// The resampler as it was, copying the whole filtered recording first: the reference.
+    fn resample_whole(pcm: &Pcm, to: u32) -> Vec<f32> {
+        if pcm.rate == to {
+            return pcm.samples.clone();
+        }
+        let ratio = pcm.rate as f64 / to as f64;
+        let src: Vec<f32> = if ratio > 1.0 {
+            // a moving average as wide as the step: a simple anti-alias filter, fine for speech models
+            let window = ratio.ceil() as usize;
+            let mut acc = 0f32;
+            let mut out = Vec::with_capacity(pcm.samples.len());
+            for (sample_index, sample) in pcm.samples.iter().enumerate() {
+                acc += sample;
+                if sample_index >= window {
+                    acc -= pcm.samples[sample_index - window];
+                }
+                out.push(acc / window.min(sample_index + 1) as f32);
+            }
+            out
+        } else {
+            pcm.samples.clone()
+        };
+        let output_len = (src.len() as f64 / ratio).floor() as usize;
+        (0..output_len)
+            .map(|output_index| {
+                let position = output_index as f64 * ratio;
+                let left_index = position.floor() as usize;
+                let fraction = (position - left_index as f64) as f32;
+                let left = src[left_index.min(src.len() - 1)];
+                let right = src[(left_index + 1).min(src.len() - 1)];
+                left + (right - left) * fraction
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resampling_as_it_goes_gives_what_resampling_whole_did() {
+        let signal: Vec<f32> = (0..20_000).map(|index| ((index * 7919) % 2000) as f32 / 1000.0 - 1.0).collect();
+        for rate in [48_000, 44_100, 22_050, 16_000, 8_000] {
+            let pcm = Pcm { samples: signal.clone(), rate };
+            let (now, then) = (resample(&pcm, 16000), resample_whole(&pcm, 16000));
+            assert_eq!(now.len(), then.len(), "{rate}");
+            assert!(now.iter().zip(&then).all(|(a, b)| (a - b).abs() < 1e-5), "{rate}");
+        }
     }
 
     #[test]

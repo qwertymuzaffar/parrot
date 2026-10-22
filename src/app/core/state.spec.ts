@@ -181,6 +181,13 @@ class FakeEngine extends Engine {
   async soundsLike() {
     return {};
   }
+  // recordings are drawn and cut by the clips (FakeClips) here
+  async peaks() {
+    return null;
+  }
+  async clip() {
+    return null;
+  }
   /** the talk under way: the samples fed in, and what writing it down gives (or why it fails) */
   talk: { rate: number; samples: number; written: boolean } | null = null;
   nextTalk: Talk | string | null = null;
@@ -304,8 +311,8 @@ class FakeClips {
   async peaks() {
     return [0.5, 1];
   }
-  async cut(url: string, from: number, to: number) {
-    return `${url}#${from.toFixed(2)}-${to.toFixed(2)}`;
+  async cut(audio: string, from: number, to: number) {
+    return `audio:${audio}#${from.toFixed(2)}-${to.toFixed(2)}`;
   }
 }
 
