@@ -40,8 +40,82 @@ const DEMO_PAUSE_AFTER = 9; // "ago"
 
 const DAY = 86_400_000;
 
+/** The scores of the tries of a word said alone, one after another. */
+const WORD_TRIES = [64, 81, 92];
+
+/** The words the demo "mishears", and what it hears instead: the site's screenshots show a misheard word. */
+const MISHEARD: Record<string, string> = { things: 'sinks' };
+
+/** What the dictionary says of the sample texts' words, so the word card has a spelling and IPA to show. */
+const SOUNDS: Record<string, SoundsLike> = {
+  beautiful: {
+    spell: [
+      ['byoo', true],
+      ['tuh', false],
+      ['fl', false],
+    ],
+    ipa: '/ˈbju.tə.fəl/',
+  },
+  berlin: {
+    spell: [
+      ['br', false],
+      ['lin', true],
+    ],
+    ipa: '/bɚˈlɪn/',
+  },
+  engineer: {
+    spell: [
+      ['ehn', true],
+      ['juh', false],
+      ['nir', true],
+    ],
+    ipa: '/ˈɛn.dʒəˈnɪɹ/',
+  },
+  lights: { spell: [['laits', true]], ipa: '/ˈlaɪts/' },
+  northern: {
+    spell: [
+      ['nawr', true],
+      ['dhrn', false],
+    ],
+    ipa: '/ˈnɔɹ.ðɚn/',
+  },
+  really: {
+    spell: [
+      ['ri', true],
+      ['lee', false],
+    ],
+    ipa: '/ˈɹɪ.li/',
+  },
+  software: {
+    spell: [
+      ['sawf', true],
+      ['twehr', false],
+    ],
+    ipa: '/ˈsɔfˌtwɛɹ/',
+  },
+  startup: {
+    spell: [
+      ['staar', true],
+      ['tuhp', false],
+    ],
+    ipa: '/ˈstɑɹˌtʌp/',
+  },
+  things: { spell: [['thingz', true]], ipa: '/ˈθɪŋz/' },
+  three: { spell: [['three', true]], ipa: '/ˈθɹi/' },
+};
+
 /** Texts as someone might paste them, with a few tries already made, so every screen has something to show. */
 const SAMPLES: { title: string; mode: Mode; text: string; daysAgo: number; tries: [number, number, Record<number, WordStatus>][] }[] = [
+  {
+    title: 'The northern lights',
+    mode: 'whole',
+    text: 'The northern lights are one of the most beautiful things you can see in the night sky.',
+    daysAgo: 4,
+    tries: [
+      [0, 82, { 8: 'unclear', 9: 'wrong' }],
+      [0, 88, { 9: 'unclear' }],
+    ],
+  },
   {
     title: 'Introducing yourself',
     mode: 'sentences',
@@ -70,7 +144,8 @@ const SAMPLES: { title: string; mode: Mode; text: string; daysAgo: number; tries
 /**
  * An engine kept in memory, for working on the interface in a plain browser (`ng serve`) and for screenshots: a
  * couple of sample texts and tries, and whatever is added while the page is open. It hears nothing: a take is
- * given a made-up score, every word good but its longest, and keeps its recording only until the page reloads.
+ * given a made-up score, every word good but its longest and "things" (heard as "sinks"), and keeps its recording
+ * only until the page reloads.
  * Only the desktop app (TauriEngine) really scores speech.
  */
 @Injectable()
@@ -87,7 +162,8 @@ export class DemoEngine extends Engine {
     for (const sample of SAMPLES) {
       const created = new Date(Date.now() - sample.daysAgo * DAY);
       const text = await this.store(sample.text, sample.title, sample.mode, created);
-      text.opened = sample.tries.length ? stamp(new Date(Date.now() - DAY / 4)).when : null;
+      // the samples practised were opened a few hours ago, the first most recently
+      text.opened = sample.tries.length ? stamp(new Date(Date.now() - DAY / 4 - (SAMPLES.indexOf(sample) * DAY) / 24)).when : null;
       const parts = sentences(text.text);
       sample.tries.forEach(([sentenceIndex, score, verdicts], tryIndex) => {
         const part = parts[sentenceIndex];
@@ -169,8 +245,15 @@ export class DemoEngine extends Engine {
     const text = await this.find(textId);
     if (!part.trim() || !text.text.includes(norm(part))) throw new EngineError('that part is not in the text; reload');
     const words = norm(part).split(' ');
-    const longest = words.reduce((best, word, wordIndex) => (bare(word).length > bare(words[best]).length ? wordIndex : best), 0);
-    const attempt = judged(part, 86, { [longest]: 'unclear' }, URL.createObjectURL(audio), new Date(), this.takes++);
+    const verdicts: Record<number, WordStatus> = {};
+    words.forEach((word, wordIndex) => misheard(word) && (verdicts[wordIndex] = 'wrong'));
+    const longest = words.reduce(
+      (best, word, wordIndex) => (verdicts[wordIndex] || bare(word).length <= bare(words[best] ?? '').length ? best : wordIndex),
+      -1,
+    );
+    if (longest >= 0) verdicts[longest] = 'unclear';
+    const score = Math.round(100 - (100 * Object.keys(verdicts).length) / words.length / 2);
+    const attempt = judged(part, score, verdicts, URL.createObjectURL(audio), new Date(), this.takes++);
     listOf(text.tries, part).push(attempt);
     return attempt;
   }
@@ -181,8 +264,19 @@ export class DemoEngine extends Engine {
     if (!said || !text.text.split(' ').some((each) => bare(each).toLowerCase() === said)) {
       throw new EngineError('that word is not in the text; reload');
     }
-    const attempt = judged(bare(word.trim()), 90, {}, URL.createObjectURL(audio), new Date(), this.takes++);
-    listOf(text.wordTries, said).push(attempt);
+    // each try of a word alone comes out a little better: its first sound weak at first, then clear
+    const tries = listOf(text.wordTries, said);
+    const score = WORD_TRIES[Math.min(tries.length, WORD_TRIES.length - 1)];
+    const attempt = judged(
+      bare(word.trim()),
+      score,
+      tries.length ? {} : { 0: 'unclear' },
+      URL.createObjectURL(audio),
+      new Date(),
+      this.takes++,
+    );
+    attempt.words[0].score = score / 100;
+    tries.push(attempt);
     return attempt;
   }
 
@@ -313,8 +407,9 @@ export class DemoEngine extends Engine {
     return [...this.nameList];
   }
 
-  async soundsLike(): Promise<SoundsLike> {
-    return {};
+  async soundsLike(word: string): Promise<SoundsLike> {
+    const key = bare(word).toLowerCase();
+    return Object.hasOwn(SOUNDS, key) ? SOUNDS[key] : {};
   }
 
   /** The tries made here keep their recording as an object URL; the sample tries have none (""), so their
@@ -366,18 +461,23 @@ function judged(part: string, score: number, verdicts: Record<number, WordStatus
     id: take ? `${id}-${take}` : id,
     when,
     text: norm(part),
-    heard: words.filter((_, wordIndex) => verdicts[wordIndex] !== 'wrong').join(' '),
+    heard: words
+      .map((word, wordIndex) => (verdicts[wordIndex] === 'wrong' ? (misheard(word) ?? '') : word))
+      .filter(Boolean)
+      .join(' '),
     words: words.map((word, wordIndex) => {
       const status = verdicts[wordIndex] ?? 'good';
       const start = 0.2 + wordIndex * 0.38;
+      const heardAs = status === 'wrong' ? misheard(word) : undefined;
       return {
         w: word,
-        t: status === 'wrong' ? null : [start, start + 0.32],
-        score: status === 'good' ? 0.86 + (wordIndex % 3) * 0.05 : status === 'unclear' ? 0.58 : null,
+        t: status === 'wrong' && !heardAs ? null : [start, start + 0.32],
+        score: status === 'good' ? 0.86 + (wordIndex % 3) * 0.05 : status === 'unclear' ? 0.58 : heardAs ? 0.31 : null,
         ref: null,
         status,
-        heard: status === 'wrong' ? '' : null,
+        heard: status === 'wrong' ? (heardAs ?? '') : null,
         extra: '',
+        letters: status === 'wrong' && !heardAs ? undefined : letters(word, status),
       };
     }),
     duration,
@@ -385,6 +485,25 @@ function judged(part: string, score: number, verdicts: Record<number, WordStatus
     score,
     audio,
   };
+}
+
+/** What the demo hears instead of `word`, if it mishears it. */
+function misheard(word: string): string | undefined {
+  const key = bare(word).toLowerCase();
+  return Object.hasOwn(MISHEARD, key) ? MISHEARD[key] : undefined;
+}
+
+/**
+ * How surely each letter of a word was heard: a good word's all sure; one that sounded off, its first sound weak and
+ * its second only fair; a misheard one, its first sound wrong and the rest fair.
+ */
+function letters(word: string, status: WordStatus) {
+  const first = /^(th|sh|ch|ng|ph|wh)/i.test(word) ? 2 : 1;
+  return [...word].map((_, charIndex) => {
+    if (status === 'good') return 0.9;
+    if (charIndex < first) return status === 'wrong' ? 0.2 : 0.35;
+    return status === 'wrong' || charIndex === first ? 0.62 : 0.88;
+  });
 }
 
 async function scores(text: DemoText) {

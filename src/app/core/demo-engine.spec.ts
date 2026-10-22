@@ -16,10 +16,10 @@ describe('DemoEngine', () => {
 
   it('serves sample texts, the last opened first, with the scores of their practised parts', async () => {
     const engine = new DemoEngine();
-    const [opened, other] = await engine.texts();
-    expect([opened.title, other.title]).toEqual(['Introducing yourself', 'A weather report']);
+    const [lights, opened, other] = await engine.texts();
+    expect([lights.title, opened.title, other.title]).toEqual(['The northern lights', 'Introducing yourself', 'A weather report']);
     expect(opened.id).toMatch(/^[0-9a-f]{10}$/);
-    expect([opened.practised, opened.average, other.practised]).toEqual([2, 91, 0]);
+    expect([lights.average, opened.practised, opened.average, other.practised]).toEqual([88, 2, 91, 0]);
     const first = sentences(opened.text)[0];
     expect(opened.scores[await partKey(first)]).toEqual({ last: 88, best: 88, tries: 2 });
 
@@ -30,7 +30,22 @@ describe('DemoEngine', () => {
 
     const activity = await engine.activity();
     expect(activity.days).toHaveLength(7);
-    expect([activity.tries, activity.average]).toEqual([3, 84]);
+    expect([activity.tries, activity.average]).toEqual([5, 85]);
+  });
+
+  it('mishears things as sinks, and has the sounds of the sample words', async () => {
+    const engine = new DemoEngine();
+    const [lights] = await engine.texts();
+    const take = await engine.check(lights.id, lights.text, new Blob());
+    const off = take.words.filter((word) => word.status !== 'good');
+    expect(off.map((word) => [word.w, word.status, word.heard])).toEqual([
+      ['beautiful', 'unclear', null],
+      ['things', 'wrong', 'sinks'],
+    ]);
+    expect([take.score, take.heard]).toEqual([94, lights.text.replace('things', 'sinks')]);
+    expect(off[1].letters!.slice(0, 3)).toEqual([0.2, 0.2, 0.62]);
+    expect((await engine.soundsLike('Things,')).ipa).toBe('/ˈθɪŋz/');
+    expect(await engine.soundsLike('constructor')).toEqual({});
   });
 
   it('keeps texts added, changed and deleted while the page is open', async () => {
@@ -54,6 +69,8 @@ describe('DemoEngine', () => {
 
     const word = await engine.checkWord(id, 'there,', new Blob(['take']));
     expect((await engine.wordAttempts(id, 'There')).map((each) => each.id)).toEqual([word.id]);
+    const again = await engine.checkWord(id, 'there', new Blob(['take']));
+    expect([word.score, word.words[0].status, again.score, again.words[0].status]).toEqual([64, 'unclear', 81, 'good']);
     await expect(engine.check(id, 'Goodbye.', new Blob())).rejects.toBeInstanceOf(EngineError);
   });
 
