@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Clips } from './clips';
 import { Engine, EngineError, TALK_CANCELLED } from './engine';
 import { Library } from './library';
-import { Activity, Attempt, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
+import { Activity, Attempt, LeftTalk, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
 import { Recorder, Sink, TakeFor } from './recorder';
 import { Session } from './session';
@@ -236,6 +236,12 @@ class FakeEngine extends Engine {
   async talkDiscard() {
     this.calls.push('talkDiscard');
     this.talk = null;
+    this.left = null;
+  }
+  /** the talk left from the last run, if any */
+  left: LeftTalk | null = null;
+  async talkLeft() {
+    return this.left;
   }
   nameList: string[] = [];
   async names() {
@@ -1109,6 +1115,49 @@ describe('the practice state', () => {
       expect([talking.state(), talking.talk()]).toEqual(['idle', null]);
       expect(app.texts()[0]).toMatchObject({ id: 'abcdef0123', spoken: true, mode: 'whole' });
       expect([app.view(), app.text()?.id, app.result()?.id]).toEqual(['practice', 'abcdef0123', '20261021-100000']);
+    });
+
+    describe('left from the last time Parrot ran', () => {
+      const left = (heard: Talk | null): LeftTalk => ({ started: '2026-10-21T14:05:00', duration: 180, heard });
+
+      /** A new run of Parrot with `leftTalk` left from the one before: the talk flow asks the engine as it starts. */
+      async function startWith(leftTalk: LeftTalk) {
+        engine.left = leftTalk;
+        engine.talk = { rate: 16000, samples: 180 * 16000, written: !!leftTalk.heard };
+        TestBed.resetTestingModule();
+        TestBed.configureTestingModule({
+          providers: [
+            { provide: Engine, useValue: engine },
+            { provide: Sound, useValue: sound },
+            { provide: Clips, useValue: new FakeClips() },
+            { provide: Recorder, useValue: recorder },
+          ],
+        });
+        const fresh = TestBed.inject(Talking);
+        await settle();
+        return fresh;
+      }
+
+      it('is offered, waits for Start talking, and is written down', async () => {
+        const fresh = await startWith(left(null));
+        expect(fresh.unfinished()).toEqual(left(null));
+        await fresh.start();
+        expect([fresh.state(), engine.calls.filter((call) => call.startsWith('talkStart'))]).toEqual(['idle', []]);
+        await fresh.writeDown();
+        expect([fresh.state(), fresh.talk(), fresh.unfinished()]).toEqual(['preview', written, null]);
+      });
+
+      it('comes back to be checked if it was written down, or is discarded', async () => {
+        const fresh = await startWith(left(written));
+        fresh.checkUnfinished();
+        expect([fresh.state(), fresh.talk(), fresh.unfinished()]).toEqual(['preview', written, null]);
+        await fresh.discard();
+        expect(engine.calls).toContain('talkDiscard');
+
+        const again = await startWith(left(written));
+        await again.discard();
+        expect([again.state(), again.unfinished(), engine.left]).toEqual(['idle', null, null]);
+      });
     });
 
     it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {

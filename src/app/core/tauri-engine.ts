@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { convertFileSrc, invoke, InvokeArgs, InvokeOptions } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Engine, EngineError, EngineInfo, ModelProgress } from './engine';
-import { Activity, Attempt, AttemptSummary, KeptTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
+import { Activity, Attempt, AttemptSummary, KeptTalk, LeftTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** The engine built into the desktop app (src-tauri), called through Tauri commands. */
 @Injectable()
@@ -118,6 +118,10 @@ export class TauriEngine extends Engine {
 
   talkDiscard() {
     return this.call<void>('talk_discard');
+  }
+
+  talkLeft() {
+    return this.call<LeftTalk | null>('talk_left');
   }
 
   trashSize() {

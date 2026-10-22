@@ -382,6 +382,11 @@ export class DemoEngine extends Engine {
     this.talk = null;
   }
 
+  // the demo forgets everything on reload: no talk is ever left
+  async talkLeft() {
+    return null;
+  }
+
   async activity(): Promise<Activity> {
     await this.ready;
     const days = Array.from({ length: 7 }, (_, daysAgo) => ({ date: stamp(new Date(Date.now() - (6 - daysAgo) * DAY)).date, tries: 0 }));

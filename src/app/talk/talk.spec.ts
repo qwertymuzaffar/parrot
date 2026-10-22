@@ -1,12 +1,12 @@
 import { signal, Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Engine } from '../core/engine';
-import { Talk, WordResult, WordStatus } from '../core/models';
+import { LeftTalk, Talk, WordResult, WordStatus } from '../core/models';
 import { Names } from '../core/names';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { StopReason, Talking, TalkState } from '../core/talking';
-import { clock, TalkCard } from './talk-card';
+import { clock, length, since, TalkCard } from './talk-card';
 import { TalkPreview } from './talk-preview';
 
 /** The talk's state, stood in for: the screens only show it and pass on clicks. */
@@ -20,7 +20,9 @@ function standIn() {
     talk: signal<Talk | null>(null),
     stopReason: signal<StopReason | null>(null),
     failure: signal<string | null>(null),
+    unfinished: signal<LeftTalk | null>(null),
     start: vi.fn(),
+    checkUnfinished: vi.fn(),
     stop: vi.fn(),
     cancel: vi.fn(),
     writeDown: vi.fn(),
@@ -159,6 +161,37 @@ describe('Just talk', () => {
       expect(card.element.querySelector('[role=alert]')!.textContent!.trim()).toBe(
         'Stopped after 2 quiet minutes. Nothing was heard in the recording. Is the microphone on?',
       );
+    });
+
+    it('offers a talk left from last time, to write down or discard, before a new one', async () => {
+      talking.unfinished.set({ started: '2026-10-21T14:05:00', duration: 185, heard: null });
+      const card = await render(TalkCard);
+      expect(card.text()).toMatch(/You have an unfinished talk from .+, 3 min\. It was not written down yet\./);
+      expect(card.text()).not.toContain('Start talking');
+      card.button(/Write it down/).click();
+      expect(talking.writeDown).toHaveBeenCalled();
+      // discarding asks first
+      card.button(/^\s*Discard\s*$/).click();
+      await card.update();
+      expect(card.text()).toContain('Discard this talk and its recording?');
+      card.element.querySelector<HTMLButtonElement>('.btn.danger')!.click();
+      expect(talking.discard).toHaveBeenCalled();
+    });
+
+    it('offers to check a talk left written down', async () => {
+      talking.unfinished.set({ started: '2026-10-21T14:05:00', duration: 40, heard: TALK });
+      const card = await render(TalkCard);
+      expect(card.text()).toContain('40 s. It was written down, but not saved.');
+      card.button(/Check it/).click();
+      expect(talking.checkUnfinished).toHaveBeenCalled();
+    });
+
+    it('says when a talk was left, and how long it is', () => {
+      const now = new Date(2026, 9, 22, 9, 0);
+      expect(since('2026-10-22T08:05:00', now)).toBe('today at 08:05');
+      expect(since('2026-10-21T23:59:00', now)).toBe('yesterday');
+      expect(since('2026-10-19T10:00:00', now)).toBe('on 19 October');
+      expect([length(0.2), length(45), length(185)]).toEqual(['1 s', '45 s', '3 min']);
     });
 
     it('counts minutes and seconds', () => {

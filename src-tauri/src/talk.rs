@@ -2,12 +2,16 @@
 //! blocks while it is made, into a file under talks/, so a long talk never sits in memory or crosses to the engine in
 //! one piece. When it stops, Whisper writes down what was said and the aligner scores every word of that. Kept, the
 //! talk becomes a text (what was said, as the user corrected it) with its recording as the first take.
+//!
+//! A talk not kept when Parrot quits or crashes is kept for the next start: its recording (whose header is brought up
+//! to date after every block) and, beside it, what is known of it so far (`<stamp>.json`: whether the recording is
+//! cleaned, and what was heard once it is written down).
 
 use crate::store::{self, Attempt, Store, TextItem};
 use crate::text::{self, WordResult, WordStatus};
 use crate::{Listen, MICROPHONE_WITHHELD, NOTHING_HEARD, audio, score_take};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::ops::Range;
@@ -28,7 +32,7 @@ const NO_WORDS: &str = "Parrot couldn't make out any words. Speak a little close
 static NOT_WORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*").unwrap());
 
 /// What was heard in a talk, word by word.
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Heard {
     /// what Whisper wrote down: the text the words are judged against until the user corrects it
     pub heard: String,
@@ -53,9 +57,31 @@ struct Talk {
     /// once written down: the stretches it was heard in (16 kHz samples), what was heard in each and where its words
     /// were placed in it
     written: Option<Vec<Written>>,
+    /// once written down: what was heard, as the interface was told
+    heard: Option<Heard>,
+}
+
+/// What is known of a talk beyond its recording, kept beside it so that a talk outlives a quit or a crash.
+#[derive(Serialize, Deserialize, Default)]
+struct Known {
+    cleaned: bool,
+    written: Option<Vec<Written>>,
+    heard: Option<Heard>,
+}
+
+/// A talk left from the last time Parrot ran, not kept: to write down (again) or discard.
+#[derive(Serialize, Debug)]
+pub struct Left {
+    /// when it was started (local time, 2026-10-21T14:05:00)
+    pub started: String,
+    /// its length (seconds)
+    pub duration: f64,
+    /// what was heard, if it was written down
+    pub heard: Option<Heard>,
 }
 
 /// One stretch of a talk written down.
+#[derive(Serialize, Deserialize, Clone)]
 struct Written {
     stretch: Range<usize>,
     heard: String,
@@ -96,10 +122,33 @@ pub struct Talks {
 }
 
 impl Talks {
-    /// The talks in `dir`. A talk left there when Parrot quit is gone: nothing can be done with it yet.
+    /// The talks in `dir`. The latest talk left there when Parrot quit (or crashed) is taken up again, as stopped,
+    /// if any of it was recorded; anything else there is cleared.
     pub fn open(dir: PathBuf) -> Self {
-        let _ = fs::remove_dir_all(&dir);
-        Talks { dir, current: Mutex::new(None), cancel: AtomicBool::new(false) }
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|entry| entry.path()).collect();
+        files.sort();
+        let latest = files.iter().rfind(|path| path.extension().is_some_and(|extension| extension == "wav")).cloned();
+        let left = latest.as_ref().and_then(|path| Talk::left(path));
+        for path in files {
+            let known = latest.as_ref().is_some_and(|latest| path == *latest || path == latest.with_extension("json"));
+            if !(known && left.is_some()) {
+                let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
+            }
+        }
+        Talks { dir, current: Mutex::new(left), cancel: AtomicBool::new(false) }
+    }
+
+    /// The talk left from the last time Parrot ran, if it is still here: not yet started again, kept or discarded.
+    pub fn left(&self) -> Option<Left> {
+        let current = self.current();
+        let talk = current.as_ref().filter(|talk| talk.writer.is_none())?;
+        let stem = talk.path.file_stem()?.to_string_lossy().to_string();
+        let started = chrono::NaiveDateTime::parse_from_str(&stem, "%Y%m%d-%H%M%S").ok()?;
+        Some(Left {
+            started: started.format("%Y-%m-%dT%H:%M:%S").to_string(),
+            duration: (talk.samples as f64 / talk.rate as f64 * 100.0).round() / 100.0,
+            heard: talk.heard.clone(),
+        })
     }
 
     fn current(&self) -> MutexGuard<'_, Option<Talk>> {
@@ -116,7 +165,7 @@ impl Talks {
         let path = self.dir.join(format!("{}.wav", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let spec = hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
         let writer = hound::WavWriter::create(&path, spec).map_err(|error| error.to_string())?;
-        *self.current() = Some(Talk { path, writer: Some(writer), rate, samples: 0, cleaned: false, written: None });
+        *self.current() = Some(Talk { path, writer: Some(writer), rate, samples: 0, cleaned: false, written: None, heard: None });
         Ok(())
     }
 
@@ -136,6 +185,8 @@ impl Talks {
         for sample in samples {
             writer.write_sample(i16::from_le_bytes(*sample)).map_err(|error| error.to_string())?;
         }
+        // the header brought up to date: a crash loses no more than this block
+        writer.flush().map_err(|error| error.to_string())?;
         talk.samples += count;
         Ok(())
     }
@@ -151,6 +202,7 @@ impl Talks {
         let mut current = self.current();
         if let Some(talk) = current.take() {
             drop(talk.writer);
+            let _ = fs::remove_file(talk.path.with_extension("json"));
             fs::remove_file(&talk.path)
                 .or_else(|error| if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error.to_string()) })?;
         }
@@ -177,12 +229,16 @@ impl Talks {
             // the recording kept from here on is the cleaned one, which the words' times are in
             audio::write_wav(&talk.path, &cleaned)?;
             talk.cleaned = true;
+            talk.samples = cleaned.samples.len() as u64;
+            talk.rate = cleaned.rate;
+            talk.save()?;
             cleaned
         };
         let duration = pcm.seconds();
         let samples = audio::resample(&pcm, 16000);
         drop(pcm);
         talk.written = None;
+        talk.heard = None;
         let mut said: Vec<String> = vec![];
         let mut times: Vec<text::WordTime> = vec![];
         let mut written = vec![];
@@ -212,14 +268,13 @@ impl Talks {
         if heard.is_empty() {
             return Err(NO_WORDS.into());
         }
-        talk.written = Some(written);
         // judged against itself: nothing is misheard until the user says what they meant, so the verdicts are the
         // sound scores
         let words = text::judge(&heard, &heard, &times, None);
         let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
         let file_name = talk.path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
         let folder = self.dir.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
-        Ok(Heard {
+        let heard = Heard {
             audio: format!("{folder}/{file_name}"),
             score: (100.0 * good as f64 / words.len() as f64).round() as i64,
             wpm: (words.len() as f64 / duration * 60.0).round() as i64,
@@ -227,7 +282,41 @@ impl Talks {
             duration: (duration * 100.0).round() / 100.0,
             heard,
             words,
+        };
+        talk.written = Some(written);
+        talk.heard = Some(heard.clone());
+        talk.save()?;
+        Ok(heard)
+    }
+}
+
+impl Talk {
+    /// The talk recorded at `path`, left from the last time Parrot ran, with what was known of it; none if nothing of
+    /// it can be read.
+    fn left(path: &std::path::Path) -> Option<Talk> {
+        let reader = hound::WavReader::open(path).ok()?;
+        let spec = reader.spec();
+        let samples = reader.len() as u64;
+        if spec.channels != 1 || spec.bits_per_sample != 16 || (samples as f64) < audio::SHORTEST_TAKE * spec.sample_rate as f64 {
+            return None;
+        }
+        let known: Known = fs::read(path.with_extension("json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        Some(Talk {
+            path: path.to_path_buf(),
+            writer: None,
+            rate: spec.sample_rate,
+            samples,
+            cleaned: known.cleaned,
+            written: known.written,
+            heard: known.heard,
         })
+    }
+
+    /// What is known of the talk, written beside its recording.
+    fn save(&self) -> Result<(), String> {
+        let known = Known { cleaned: self.cleaned, written: self.written.clone(), heard: self.heard.clone() };
+        let json = serde_json::to_vec(&known).map_err(|error| error.to_string())?;
+        fs::write(self.path.with_extension("json"), json).map_err(|error| error.to_string())
     }
 }
 
@@ -269,6 +358,7 @@ impl Talks {
         let id = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
         let file = dir.join(format!("{id}.wav"));
         fs::rename(&talk.path, &file).map_err(|error| error.to_string())?;
+        let _ = fs::remove_file(talk.path.with_extension("json"));
         let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
         let attempt = Attempt {
             id,
@@ -515,12 +605,90 @@ mod tests {
         assert_eq!(share_out(&written, ""), vec![Vec::<&str>::new(); 3]);
     }
 
+    /// Parrot quits (or crashes) without the talk being finished: nothing is cleaned up as it goes.
+    fn quit(talks: Talks) {
+        std::mem::forget(talks);
+    }
+
     #[test]
-    fn talks_left_from_last_time_are_cleared() {
+    fn a_talk_left_while_recorded_is_taken_up_again() {
+        let (talks, dir) = talks("crash");
+        talks.start(16000).unwrap();
+        assert!(talks.left().is_none(), "a talk being recorded isn't left");
+        for block in speech(16000, 30.0).chunks(64000) {
+            talks.feed(block).unwrap();
+        }
+        quit(talks);
+
+        let talks = Talks::open(dir.clone());
+        let left = talks.left().unwrap();
+        assert_eq!((left.duration, left.heard.is_none()), (30.0, true), "all of it, as of the last block");
+        assert!(chrono::NaiveDateTime::parse_from_str(&left.started, "%Y-%m-%dT%H:%M:%S").is_ok(), "{}", left.started);
+        let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        assert!(heard.duration > 25.0, "{}", heard.duration);
+        talks.discard().unwrap();
+        assert!(talks.left().is_none());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_written_down_but_not_kept_comes_back_to_be_checked() {
+        let (talks, dir) = talks("unsaved");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-unsaved-data-{}", std::process::id())) };
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        quit(talks);
+
+        let talks = Talks::open(dir.clone());
+        let left = talks.left().unwrap();
+        let again = left.heard.unwrap();
+        assert_eq!((again.heard.as_str(), again.score, again.audio.as_str()), (heard.heard.as_str(), heard.score, heard.audio.as_str()));
+        assert!((left.duration - heard.duration).abs() < 0.01, "the cleaned recording's length");
+        // kept as it is, without hearing it again
+        let deaf = Stretches { heard: "nothing like it", lengths: RefCell::new(vec![]) };
+        let kept = talks.keep(&deaf, &store, &heard.heard, None).unwrap();
+        assert_eq!(kept.attempt.heard, heard.heard);
+        assert!(deaf.lengths.borrow().is_empty());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "nothing of it left in talks/");
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn only_the_latest_talk_left_is_kept() {
         let dir = std::env::temp_dir().join(format!("parrot-talks-left-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("20261020-101010.wav"), b"half a talk").unwrap();
-        let _talks = Talks::open(dir.clone());
-        assert!(!dir.exists());
+        let wav = |name: &str, secs: f64| {
+            let spec = hound::WavSpec { channels: 1, sample_rate: 8000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+            let mut writer = hound::WavWriter::create(dir.join(name), spec).unwrap();
+            for _ in 0..(secs * 8000.0) as usize {
+                writer.write_sample(100i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        };
+        wav("20261019-090000.wav", 5.0);
+        fs::write(dir.join("20261019-090000.json"), b"{}").unwrap();
+        wav("20261020-101010.wav", 3.0);
+        fs::write(dir.join("20261020-101010.json"), b"not what was known").unwrap();
+        fs::write(dir.join("stray.txt"), b"?").unwrap();
+        let talks = Talks::open(dir.clone());
+        let left = talks.left().unwrap();
+        assert_eq!((left.started.as_str(), left.duration, left.heard.is_none()), ("2026-10-20T10:10:10", 3.0, true));
+        let mut kept: Vec<String> = fs::read_dir(&dir).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into()).collect();
+        kept.sort();
+        assert_eq!(kept, ["20261020-101010.json", "20261020-101010.wav"]);
+        drop(talks);
+
+        // a latest talk with nothing in it: everything goes
+        fs::write(dir.join("20261021-101010.wav"), b"half a talk").unwrap();
+        let talks = Talks::open(dir.clone());
+        assert!(talks.left().is_none());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(dir);
     }
 }

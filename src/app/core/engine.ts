@@ -1,4 +1,4 @@
-import { Activity, Attempt, AttemptSummary, KeptTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
+import { Activity, Attempt, AttemptSummary, KeptTalk, LeftTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** True inside the desktop app: the engine is built in. In a plain browser (development, screenshots) the
  * interface runs on a demo engine kept in memory instead. */
@@ -79,6 +79,9 @@ export abstract class Engine {
 
   /** Drop the talk and its recording. */
   abstract talkDiscard(): Promise<void>;
+
+  /** The talk left from the last time Parrot ran, if any (its writing-down follows with talkStop, or talkDiscard). */
+  abstract talkLeft(): Promise<LeftTalk | null>;
 
   abstract activity(): Promise<Activity>;
 

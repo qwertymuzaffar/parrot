@@ -80,6 +80,7 @@ describe('TauriEngine', () => {
     await engine.talkKeep('Hello there.', '  ');
     await engine.talkKeep('Hello there.', 'Greeting');
     await engine.talkDiscard();
+    await engine.talkLeft();
     const sent = invoke.mock.calls
       .filter(([cmd]) => String(cmd).startsWith('talk_'))
       .map(([cmd, body]) => [cmd, body instanceof Uint8Array || ArrayBuffer.isView(body) ? Array.from(body as Uint8Array) : body]);
@@ -91,6 +92,7 @@ describe('TauriEngine', () => {
       ['talk_keep', { text: 'Hello there.', title: null }],
       ['talk_keep', { text: 'Hello there.', title: 'Greeting' }],
       ['talk_discard', {}],
+      ['talk_left', {}],
     ]);
   });
 

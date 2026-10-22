@@ -424,6 +424,12 @@ fn talk_cancel(talks: State<'_, Arc<talk::Talks>>) {
     talks.cancel();
 }
 
+/// The talk left from the last time Parrot ran, if any: to write down (again) or discard.
+#[tauri::command]
+fn talk_left(talks: State<'_, Arc<talk::Talks>>) -> Option<talk::Left> {
+    talks.left()
+}
+
 /// Drop the talk and its recording.
 #[tauri::command]
 async fn talk_discard(talks: State<'_, Arc<talk::Talks>>) -> Result<(), String> {
@@ -514,6 +520,7 @@ pub fn run() {
             talk_cancel,
             talk_keep,
             talk_discard,
+            talk_left,
             download_models,
             latest_release,
             open_url

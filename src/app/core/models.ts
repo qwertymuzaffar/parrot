@@ -87,6 +87,16 @@ export interface KeptTalk {
 }
 
 /** How far writing down a talk has got: seconds of it done, of its length. */
+/** A talk left from the last time Parrot ran, not kept: to write down (again) or discard. */
+export interface LeftTalk {
+  /** when it was started, local time (2026-10-21T14:05:00) */
+  started: string;
+  /** seconds */
+  duration: number;
+  /** what was heard, if it was written down before Parrot quit */
+  heard: Talk | null;
+}
+
 export interface TalkProgress {
   done: number;
   total: number;

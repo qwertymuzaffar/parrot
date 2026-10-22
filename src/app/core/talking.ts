@@ -1,7 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Engine, TALK_CANCELLED } from './engine';
 import { errorMessage, Library } from './library';
-import { Talk } from './models';
+import { LeftTalk, Talk } from './models';
 import { Playback } from './playback';
 import { micError, Recorder } from './recorder';
 import { Session } from './session';
@@ -43,6 +43,8 @@ export class Talking {
   readonly stopReason = signal<StopReason | null>(null);
   /** what went wrong, said as the interface shows it */
   readonly failure = signal<string | null>(null);
+  /** a talk left from the last time Parrot ran, until it is written down, checked or discarded */
+  readonly unfinished = signal<LeftTalk | null>(null);
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
@@ -57,9 +59,18 @@ export class Talking {
   private sendFailed: string | null = null;
   private watch = 0;
 
+  constructor() {
+    // asked once, at the start: a talk can only be left by an earlier run
+    this.engine.talkLeft().then(
+      (left) => this.state() === 'idle' && this.unfinished.set(left),
+      () => {},
+    );
+  }
+
   /** Start a talk, unless the microphone is busy with a take. */
   async start() {
-    if (this.recorder.owner() || !['idle', 'preview', 'stopped'].includes(this.state())) return;
+    // a talk left from last time is dealt with first: starting another would drop it
+    if (this.recorder.owner() || this.unfinished() || !['idle', 'preview', 'stopped'].includes(this.state())) return;
     if (this.state() !== 'idle') await this.discard();
     this.playback.stop();
     this.reset();
@@ -134,8 +145,9 @@ export class Talking {
     await this.writeDown();
   }
 
-  /** Write the talk down: after it stops, or again after it was cancelled or failed. */
+  /** Write the talk down: after it stops, again after it was cancelled or failed, or the talk left from last time. */
   async writeDown() {
+    this.unfinished.set(null);
     this.state.set('writing');
     this.progress.set(0);
     this.failure.set(null);
@@ -160,6 +172,16 @@ export class Talking {
         this.failure.set(why);
       }
     }
+  }
+
+  /** Check the talk left from last time, which was written down then. */
+  checkUnfinished() {
+    const talk = this.unfinished()?.heard;
+    if (!talk || this.state() !== 'idle') return;
+    this.unfinished.set(null);
+    this.failure.set(null);
+    this.talk.set(talk);
+    this.state.set('preview');
   }
 
   /** Stop writing the talk down; the recording is kept. */
@@ -188,6 +210,7 @@ export class Talking {
   /** Drop the talk and its recording. */
   async discard() {
     clearInterval(this.watch);
+    this.unfinished.set(null);
     if (this.state() === 'recording' && this.recorder.owner() === 'free') await this.recorder.stop();
     if (this.state() === 'writing') void this.engine.talkCancel();
     this.reset();

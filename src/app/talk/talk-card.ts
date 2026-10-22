@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Recorder } from '../core/recorder';
 import { LONGEST_TALK, StopReason, Talking } from '../core/talking';
 import { Icon } from '../shared/icon';
@@ -14,6 +14,21 @@ export function stopNote(reason: StopReason | null) {
 export function clock(seconds: number) {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+/** When a talk left from last time was started, as a person says it: today at 14:05, yesterday, on 20 October. */
+export function since(started: string, now = new Date()) {
+  const then = new Date(started);
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((day(now) - day(then)) / 86_400_000);
+  if (days === 0) return `today at ${String(then.getHours()).padStart(2, '0')}:${String(then.getMinutes()).padStart(2, '0')}`;
+  if (days === 1) return 'yesterday';
+  return `on ${then.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}`;
+}
+
+/** How long a talk is, roughly: 45 s, 3 min. */
+export function length(seconds: number) {
+  return seconds < 60 ? `${Math.max(1, Math.round(seconds))} s` : `${Math.round(seconds / 60)} min`;
 }
 
 /** Just talk: the card on Home that records a talk and writes it down. Checking it is the preview's (TalkPreview). */
@@ -68,16 +83,37 @@ export function clock(seconds: number) {
           </div>
         }
         @default {
-          <p class="hint">
-            Tell a story or answer an interview question, with nothing to read. Parrot writes down what you said and shows how each word
-            came out.
-          </p>
-          <div class="go">
-            <span class="hint">Up to {{ LONGEST_TALK / 60 }} minutes</span>
-            <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()">
-              <app-icon name="mic" [size]="16" /> Start talking
-            </button>
-          </div>
+          @if (talking.unfinished(); as left) {
+            <p class="hint" role="status">
+              You have an unfinished talk from {{ since(left.started) }}, {{ length(left.duration) }}.
+              {{ left.heard ? 'It was written down, but not saved.' : 'It was not written down yet.' }}
+            </p>
+            <div class="go">
+              @if (confirming()) {
+                <span class="hint">Discard this talk and its recording?</span>
+                <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
+                <button class="btn danger small" (click)="discard()">Discard</button>
+              } @else {
+                <button class="btn ghost" (click)="confirming.set(true)">Discard</button>
+                @if (left.heard) {
+                  <button class="btn primary" (click)="talking.checkUnfinished()">Check it</button>
+                } @else {
+                  <button class="btn primary" (click)="talking.writeDown()">Write it down</button>
+                }
+              }
+            </div>
+          } @else {
+            <p class="hint">
+              Tell a story or answer an interview question, with nothing to read. Parrot writes down what you said and shows how each word
+              came out.
+            </p>
+            <div class="go">
+              <span class="hint">Up to {{ LONGEST_TALK / 60 }} minutes</span>
+              <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()">
+                <app-icon name="mic" [size]="16" /> Start talking
+              </button>
+            </div>
+          }
         }
       }
       @if (talking.failure(); as failure) {
@@ -162,6 +198,15 @@ export class TalkCard {
   protected readonly LONGEST_TALK = LONGEST_TALK;
   protected readonly clock = clock;
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
+  protected readonly since = since;
+  protected readonly length = length;
+  /** asking before the talk left from last time is discarded */
+  protected readonly confirming = signal(false);
+
+  protected discard() {
+    this.confirming.set(false);
+    void this.talking.discard();
+  }
 
   protected escape() {
     if (this.talking.recording()) void this.talking.stop();

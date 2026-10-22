@@ -39,7 +39,10 @@ describe('a new text on the home screen', () => {
         { provide: Library, useValue: library },
         { provide: Session, useValue: session },
         // the Just talk card, at rest
-        { provide: Talking, useValue: { state: signal('idle'), failure: signal(null), stopReason: signal(null) } },
+        {
+          provide: Talking,
+          useValue: { state: signal('idle'), failure: signal(null), stopReason: signal(null), unfinished: signal(null) },
+        },
         { provide: Recorder, useValue: { owner: signal(null) } },
       ],
     });
