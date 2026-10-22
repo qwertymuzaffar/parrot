@@ -371,8 +371,20 @@ impl Talks {
             duration: (duration * 100.0).round() / 100.0,
             audio: file.strip_prefix(&store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
             words,
+            cut: None,
         };
         store.save_attempt(&dir, &attempt)?;
+        // each sentence's first try, cut from the talk: practised in sentences, the text has them already
+        let sentences = text::sentences(&attempt.text);
+        if sentences.len() > 1 {
+            // read again, one recording in memory at a time
+            drop(samples);
+            let pcm = audio::read_wav(&fs::read(&file).map_err(|error| error.to_string())?)?;
+            let said: Vec<&str> = attempt.text.split_whitespace().collect();
+            for (sentence, span) in sentences.iter().zip(cuts(&attempt.words, &sentences, duration)) {
+                cut_take(store, &text.id, &said[sentence.clone()].join(" "), &attempt, sentence.clone(), &pcm, span, &now)?;
+            }
+        }
         *current = None;
         // read again: its scores now count the take
         Ok(Kept { text: store.text(&text.id)?, attempt })
@@ -404,6 +416,83 @@ fn share_out<'a>(written: &[Written], meant: &'a str) -> Vec<Vec<&'a str>> {
         }
     }
     shared
+}
+
+/// Where to cut a talk's recording (seconds) for each of its sentences (word ranges of its words): half way between
+/// one sentence's last word heard and the next one's first, but no more than CUT_PAD from either. A sentence with no
+/// word heard gets nothing ([x, x]).
+fn cuts(words: &[WordResult], sentences: &[Range<usize>], duration: f64) -> Vec<[f64; 2]> {
+    let spans: Vec<Option<[f64; 2]>> = sentences
+        .iter()
+        .map(|sentence| {
+            let times: Vec<[f64; 2]> = words[sentence.clone()].iter().filter_map(|word| word.t).collect();
+            Some([times.first()?[0], times.last()?[1]])
+        })
+        .collect();
+    (0..spans.len())
+        .map(|index| {
+            let Some([start, end]) = spans[index] else { return [0.0, 0.0] };
+            // half way to the words of the sentence before and after, if there are any
+            let before = spans[..index].iter().rev().find_map(|span| *span).map_or(f64::MIN, |[_, end]| (end + start) / 2.0);
+            let after = spans[index + 1..].iter().find_map(|span| *span).map_or(f64::MAX, |[next, _]| (end + next) / 2.0);
+            [round3((start - CUT_PAD).max(before).max(0.0)), round3((end + CUT_PAD).min(after).min(duration))]
+        })
+        .collect()
+}
+
+/// The most of the quiet around a sentence cut from a talk (seconds).
+const CUT_PAD: f64 = 0.35;
+
+/// A sentence's take cut from the talk's take `whole`: its words (`range` of the whole take's), placed in the
+/// recording from `from` to `to` (seconds), as the whole take scored them.
+#[allow(clippy::too_many_arguments)]
+fn cut_take(
+    store: &Store,
+    id: &str,
+    sentence: &str,
+    whole: &Attempt,
+    range: Range<usize>,
+    pcm: &audio::Pcm,
+    [from, to]: [f64; 2],
+    now: &chrono::DateTime<chrono::Local>,
+) -> Result<(), String> {
+    if to - from < audio::SHORTEST_TAKE {
+        return Ok(());
+    }
+    let rate = pcm.rate as f64;
+    let piece = audio::Pcm { samples: pcm.samples[(from * rate) as usize..((to * rate) as usize).min(pcm.samples.len())].to_vec(), rate: pcm.rate };
+    let duration = piece.seconds();
+    let words: Vec<WordResult> = whole.words[range]
+        .iter()
+        .cloned()
+        .map(|word| WordResult { t: word.t.map(|[start, end]| [round3((start - from).max(0.0)), round3((end - from).min(duration))]), ..word })
+        .collect();
+    let dir = store.part_dir(id, sentence)?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let take = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
+    let file = dir.join(format!("{take}.wav"));
+    audio::write_wav(&file, &piece)?;
+    let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
+    // what was heard of it: each word, or what was heard instead of a word misheard
+    let heard: Vec<&str> = words
+        .iter()
+        .filter_map(|word| if word.status == WordStatus::Wrong { word.heard.as_deref() } else { Some(word.w.as_str()) })
+        .filter(|word| !word.is_empty())
+        .collect();
+    let attempt = Attempt {
+        id: take,
+        when: whole.when.clone(),
+        text: sentence.to_string(),
+        heard: heard.join(" "),
+        score: (100.0 * good as f64 / words.len().max(1) as f64).round() as i64,
+        wpm: (words.len() as f64 / duration * 60.0).round() as i64,
+        pauses: text::pauses(&words),
+        duration: (duration * 100.0).round() / 100.0,
+        audio: file.strip_prefix(&store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
+        words,
+        cut: Some(whole.id.clone()),
+    };
+    store.save_attempt(&dir, &attempt)
 }
 
 /// What Whisper wrote, without the sounds that aren't words and with single spaces.
@@ -585,14 +674,56 @@ mod tests {
         assert!(words[8].t.unwrap()[0] > listener.lengths.borrow()[0] - 0.5);
 
         assert_eq!((kept.text.title.as_str(), kept.text.mode.as_str(), kept.text.spoken), ("Who was here", "whole", true));
-        assert_eq!(kept.text.scores.values().next().unwrap().last, kept.attempt.score);
+        assert_eq!(kept.text.scores[&format!("p-{}", store::sha(&meant))].last, kept.attempt.score);
         let saved = store.attempts(&kept.text.id, &meant).unwrap();
         assert_eq!(saved.len(), 1);
         assert!(store.data.join(&kept.attempt.audio).exists(), "the recording moved in with the try");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "and out of talks/");
         assert!(talks.keep(&listener, &store, &meant, None).is_err(), "a talk is kept once");
+
+        // each sentence has its first try, cut from the talk
+        let sentences: Vec<String> =
+            text::sentences(&meant).into_iter().map(|range| meant.split_whitespace().collect::<Vec<_>>()[range].join(" ")).collect();
+        assert_eq!(sentences.len(), 3);
+        for sentence in &sentences[..2] {
+            let tries = store.attempts(&kept.text.id, sentence).unwrap();
+            assert_eq!(tries.len(), 1, "{sentence}");
+            let cut = store.attempt(&kept.text.id, sentence, &tries[0].id).unwrap();
+            assert_eq!((cut.cut.as_deref(), cut.text.as_str()), (Some(kept.attempt.id.as_str()), sentence.as_str()));
+            assert_eq!(cut.words.len(), sentence.split_whitespace().count());
+            assert!(cut.words.iter().filter_map(|word| word.t).all(|[start, end]| start >= 0.0 && end <= cut.duration), "placed in the cut");
+            assert!(cut.duration > 2.0 && cut.duration < kept.attempt.duration / 2.0 + 1.0, "{}", cut.duration);
+            assert!(store.data.join(&cut.audio).exists());
+        }
+        let second = store.attempt(&kept.text.id, &sentences[1], &store.attempts(&kept.text.id, &sentences[1]).unwrap()[0].id).unwrap();
+        assert!(second.heard.ends_with("were the things"), "what was heard instead of thinks: {}", second.heard);
+        // the word added, which speech recognition missed: its sentence is cut where the aligner placed it, misheard
+        let really = store.attempts(&kept.text.id, "Really.").unwrap();
+        assert_eq!((really.len(), really[0].score), (1, 0));
+        assert_eq!(kept.text.scores.len(), 4, "the whole text and its three sentences");
+        assert_eq!(store.activity().tries, 1, "the cuts are no tries of their own");
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn sentences_are_cut_between_their_words() {
+        let word = |t: Option<[f64; 2]>| WordResult {
+            w: "w".into(),
+            t,
+            score: None,
+            reference: None,
+            status: WordStatus::Good,
+            heard: None,
+            extra: String::new(),
+            letters: None,
+        };
+        let words = vec![word(Some([0.5, 1.0])), word(Some([1.2, 2.0])), word(Some([2.2, 3.0])), word(None), word(Some([5.0, 5.5]))];
+        // three sentences: words 0-1, word 2-3 (the last not heard), word 4
+        let cut = cuts(&words, &[0..2, 2..4, 4..5], 6.0);
+        // at most CUT_PAD into the quiet, and never past half way to the next sentence's words
+        assert_eq!(cut, vec![[0.15, 2.1], [2.1, 3.35], [4.65, 5.85]]);
+        assert_eq!(cuts(&words, std::slice::from_ref(&(3..4)), 6.0), vec![[0.0, 0.0]], "no word of it heard");
     }
 
     #[test]

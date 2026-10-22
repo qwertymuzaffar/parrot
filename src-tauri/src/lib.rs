@@ -137,6 +137,7 @@ impl Engine {
             duration: (secs * 100.0).round() / 100.0,
             audio: file.strip_prefix(&self.store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/"),
             pauses,
+            cut: None,
         };
         self.store.save_attempt(dir, &attempt)?;
         Ok(attempt)
@@ -726,6 +727,19 @@ mod tests {
         eprintln!("kept in {:.1} s · score {}", started.elapsed().as_secs_f64(), kept.attempt.score);
         assert_eq!(kept.attempt.words.len(), meant.len());
         assert_eq!(kept.attempt.words[written].status, WordStatus::Wrong);
+        // a first try for each sentence, cut from the talk
+        let said = kept.attempt.text.clone();
+        let sentences = text::sentences(&said);
+        let words: Vec<&str> = said.split_whitespace().collect();
+        for sentence in &sentences {
+            let part = words[sentence.clone()].join(" ");
+            let tries = engine.store.attempts(&kept.text.id, &part).unwrap();
+            let cut = engine.store.attempt(&kept.text.id, &part, &tries[0].id).unwrap();
+            eprintln!("  {:5.1} s · {:3}% · {part}", cut.duration, cut.score);
+        }
+        // a sentence said twice is one part
+        let distinct: std::collections::HashSet<String> = sentences.iter().map(|sentence| words[sentence.clone()].join(" ")).collect();
+        assert_eq!(kept.text.scores.len(), distinct.len() + 1, "the whole text and each sentence");
         let _ = std::fs::remove_dir_all(data);
     }
 

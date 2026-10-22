@@ -34,8 +34,9 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
 - **Just talk.** Tell a story or answer an interview question with nothing to read, for up to 10 minutes; for something
   to talk about, pick a set of prompts (interview, small talk, presentations). Parrot writes down what it heard and shows how each word came out. Where it wrote a word other than the one you meant, fix
   it: that word then shows as misheard, with what was heard, which is the word to work on. Save it, and the talk
-  becomes a text with your recording as its first take, to practise by reading. A talk not saved when Parrot quits
-  or crashes is offered again the next time it starts, to write down or discard.
+  becomes a text with your recording as its first take, to practise by reading: whole, or sentence by sentence,
+  each sentence with its first try cut from the talk. A talk not saved when Parrot quits or crashes is offered again
+  the next time it starts, to write down or discard.
 - **Names.** Speech recognition writes a name it doesn't know as some other word, every time. Mark a word as a name
   from its card and it is never counted as misheard, in any text; Settings lists them.
 

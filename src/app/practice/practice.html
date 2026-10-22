@@ -99,7 +99,7 @@
               <span class="error">{{ session.error() }}</span>
             } @else if (take) {
               <b>Your take</b>
-              <span>· {{ take.duration.toFixed(1) }} s · try {{ session.history().length }}</span>
+              <span>· {{ take.duration.toFixed(1) }} s · try {{ session.history().length }}{{ take.cut ? ' · from your talk' : '' }}</span>
               <span class="grow"></span>
               <span class="key"><i class="k-wrong"></i>misheard</span>
               <span class="key"><i class="k-warn"></i>sounded off</span>

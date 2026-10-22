@@ -64,6 +64,9 @@ pub struct Attempt {
     /// the long pauses: the word each comes after, and how long it is (seconds); tries before 0.4 have none
     #[serde(default)]
     pub pauses: Vec<(usize, f64)>,
+    /// a sentence's take cut from a talk: the id of the talk's take (whole text) it was cut from
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<String>,
 }
 
 /// A text as the library shows it.
@@ -460,8 +463,12 @@ impl Store {
                         let stamp = name.get(..8).filter(|stamp| name.ends_with(".json") && stamp.bytes().all(|byte| byte.is_ascii_digit()));
                         let Some(Ok(day)) = stamp.map(|stamp| chrono::NaiveDate::parse_from_str(stamp, "%Y%m%d")) else { continue };
                         if let Some(tries) = days.get_mut(&day) {
-                            *tries += 1;
                             let attempt = fs::read_to_string(file.path()).ok().and_then(|contents| serde_json::from_str::<Attempt>(&contents).ok());
+                            // a sentence cut from a talk is no try of its own: the talk's take counts
+                            if attempt.as_ref().is_some_and(|attempt| attempt.cut.is_some()) {
+                                continue;
+                            }
+                            *tries += 1;
                             if let Some(attempt) = attempt {
                                 total += attempt.score;
                                 scored += 1;
@@ -588,6 +595,7 @@ mod tests {
             score,
             audio: String::new(),
             pauses: vec![],
+            cut: None,
         };
         let word = store.word_dir(&id, "there.").unwrap();
         fs::create_dir_all(&word).unwrap();
@@ -627,6 +635,7 @@ mod tests {
             score,
             audio: String::new(),
             pauses: vec![],
+            cut: None,
         };
         store.save_attempt(dir, &attempt).unwrap();
         fs::write(dir.join(format!("{id}.wav")), "RIFF").unwrap();
@@ -806,6 +815,7 @@ mod tests {
                 score,
                 audio: String::new(),
                 pauses: vec![],
+                cut: None,
             };
             store.save_attempt(&part, &attempt).unwrap();
         }

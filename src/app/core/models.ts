@@ -57,6 +57,8 @@ export interface Attempt {
   audio: string;
   /** the long pauses: the word each comes after, and how long it is (seconds); tries before 0.4 have none */
   pauses?: [number, number][];
+  /** a sentence's take cut from a talk: the id of the talk's take (of the whole text) it was cut from */
+  cut?: string;
 }
 
 export interface AttemptSummary {

@@ -470,6 +470,27 @@ fn by_sound(score: Option<f64>, reference_score: Option<f64>) -> WordStatus {
 }
 
 /// How a word is kept in the names list: lower case, without the punctuation around it or a possessive 's.
+/// The sentences of a text, as ranges of its words, cut as the interface cuts them (split.ts): after a word ending in
+/// . ! or ? (and any closing quotes) when the next starts with a capital, a digit or an opening quote before one, so
+/// "Node.js" and "e.g. the" stay whole.
+pub fn sentences(text: &str) -> Vec<std::ops::Range<usize>> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let ends = |word: &str| word.trim_end_matches(['"', '”', '’', ')']).ends_with(['.', '!', '?']);
+    let starts = |word: &str| {
+        let word = word.strip_prefix(['"', '“', '(']).unwrap_or(word);
+        word.starts_with(|character: char| character.is_ascii_uppercase() || character.is_ascii_digit())
+    };
+    let mut out = vec![];
+    let mut start = 0;
+    for index in 0..words.len() {
+        if index + 1 == words.len() || (ends(words[index]) && starts(words[index + 1])) {
+            out.push(start..index + 1);
+            start = index + 1;
+        }
+    }
+    out
+}
+
 pub fn name_key(word: &str) -> String {
     let word = word.trim_matches(|character: char| !character.is_alphanumeric()).to_lowercase();
     word.strip_suffix("'s").or_else(|| word.strip_suffix("’s")).unwrap_or(&word).to_string()
@@ -513,6 +534,24 @@ mod tests {
     fn heard(text: &str, recognized: &str) -> Vec<(String, String)> {
         let (verdicts, _) = heard_words(text, recognized);
         text.split_whitespace().zip(verdicts).filter_map(|(word, verdict)| verdict.map(|heard_as| (word.to_string(), heard_as))).collect()
+    }
+
+    #[test]
+    fn sentences_are_cut_as_the_interface_cuts_them() {
+        let cut = |text: &str| {
+            let words: Vec<&str> = text.split_whitespace().collect();
+            sentences(text).into_iter().map(|range| words[range].join(" ")).collect::<Vec<_>>()
+        };
+        // the cases of split.spec.ts
+        assert_eq!(cut("Hi, I am Sam. I build apps! Do you?"), ["Hi, I am Sam.", "I build apps!", "Do you?"]);
+        assert_eq!(cut("I used Node.js and Express, e.g. for APIs. Then Java."), ["I used Node.js and Express, e.g. for APIs.", "Then Java."]);
+        // as the interface's regex gives it (checked in node)
+        assert_eq!(
+            cut("He said “Go.” “Now?” I asked. 3 days later, (Then) more"),
+            ["He said “Go.”", "“Now?”", "I asked.", "3 days later, (Then) more"]
+        );
+        assert_eq!(cut("no ending at all"), ["no ending at all"]);
+        assert!(sentences("  ").is_empty());
     }
 
     #[test]
