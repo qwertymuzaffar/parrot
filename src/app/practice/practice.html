@@ -12,7 +12,14 @@
       <span class="meta"
         >{{ text?.words }} words · {{ progress.total }} {{ unit().toLowerCase() }}{{ progress.total === 1 ? '' : 's' }}</span
       >
-      <h1 [title]="text?.title">{{ text?.title }}</h1>
+      <div class="named">
+        <h1 [title]="text?.title">{{ text?.title }}</h1>
+        <button class="btn ghost small icon" aria-label="Edit the words" title="Edit the words" (click)="editor.open()">
+          <app-icon name="edit" [size]="15" />
+        </button>
+        <!-- a dialog: shown over the screen, not in its layout -->
+        <app-edit-words #editor />
+      </div>
     </div>
     <div class="seg" role="group" aria-label="Practise as">
       @for (mode of modes; track mode.id) {

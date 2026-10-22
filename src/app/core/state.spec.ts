@@ -243,6 +243,16 @@ class FakeEngine extends Engine {
     this.tries[text] = [kept];
     return { text: added, attempt: kept };
   }
+  /** the words a text was changed to */
+  edited: { id: string; text: string } | null = null;
+  async editText(id: string, text: string, onProgress: (progress: TalkProgress) => void) {
+    onProgress({ done: 0, total: 2 });
+    onProgress({ done: 2, total: 2 });
+    this.edited = { id, text };
+    const changed = this.item({ id, text });
+    this.library = this.library.map((each) => (each.id === id ? changed : each));
+    return changed;
+  }
   async talkDiscard() {
     this.calls.push('talkDiscard');
     this.talk = null;
@@ -363,6 +373,7 @@ function practiceApp() {
   const shown = () => session.result()!;
   return {
     loadTexts: () => library.loadTexts(),
+    editText: (id: string, words: string, onProgress: (done: number, total: number) => void) => library.editText(id, words, onProgress),
     texts: () => library.texts(),
     loaded: () => library.loaded(),
     engineState: () => library.engineState(),
@@ -442,6 +453,14 @@ describe('the practice state', () => {
   afterEach(() => vi.useRealTimers());
 
   describe('the library', () => {
+    it('changes the words of a text, saying how far the tries are scored again', async () => {
+      const progress: string[] = [];
+      await app.editText(ID, 'Hello there. How old are you?', (done, total) => progress.push(`${done}/${total}`));
+      expect(engine.edited).toEqual({ id: ID, text: 'Hello there. How old are you?' });
+      expect(progress).toEqual(['0/2', '2/2']);
+      expect(app.texts()[0].text).toBe('Hello there. How old are you?');
+    });
+
     it('loads the texts and marks the engine ready', () => {
       expect(app.texts().map((text) => text.id)).toEqual([ID]);
       expect([app.loaded(), app.engineState(), app.error()]).toEqual([true, 'ready', null]);

@@ -112,7 +112,7 @@ pub struct Activity {
 
 /// Write a file whole or not at all: to <file>.tmp first, then renamed over it, so a crash or power cut midway leaves
 /// the old file (a half-written meta.json would lose the title and mode, a half-written try would vanish).
-fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
+pub(crate) fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);
@@ -139,7 +139,7 @@ impl Store {
         self.data.join("texts")
     }
 
-    fn text_dir(&self, id: &str) -> Result<PathBuf, String> {
+    pub(crate) fn text_dir(&self, id: &str) -> Result<PathBuf, String> {
         if id.len() != 10 || !id.chars().all(|character| character.is_ascii_hexdigit()) {
             return Err("bad text id".into());
         }
@@ -199,7 +199,7 @@ impl Store {
         write_whole(&dir.join("meta.json"), serde_json::to_string_pretty(&meta).unwrap().as_bytes())
     }
 
-    fn read_attempts(dir: &Path) -> Vec<Attempt> {
+    pub(crate) fn read_attempts(dir: &Path) -> Vec<Attempt> {
         let mut files: Vec<PathBuf> = fs::read_dir(dir)
             .map(|entries| {
                 entries

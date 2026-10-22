@@ -40,6 +40,8 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
   offered again the next time it starts, to write down or discard.
 - **Names.** Speech recognition writes a name it doesn't know as some other word, every time. Mark a word as a name
   from its card and it is never counted as misheard, in any text; Settings lists them.
+- **Edit a text.** Fix its words at any time, from the pencil beside its title. The tries of each part you change
+  are scored again from their recordings, against its words now; the other parts keep theirs as they are.
 
 ## Download
 

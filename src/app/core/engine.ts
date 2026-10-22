@@ -106,6 +106,10 @@ export abstract class Engine {
   /** URL of a saved recording (paths from the first engine start with /files/). */
   abstract audioUrl(path: string): string;
 
+  /** Change a text's words; the tries of each part whose words changed are scored again against its words now
+   * (`onProgress` gets the tries scored, of how many). */
+  abstract editText(id: string, text: string, onProgress: (progress: TalkProgress) => void): Promise<TextItem>;
+
   /** The waveform of a recording (a try's or a talk's audio): the loudest moment of each of `slices` equal slices,
    * the loudest being 1; null when the interface is to decode the recording itself. */
   abstract peaks(audio: string, slices: number): Promise<number[] | null>;

@@ -55,6 +55,11 @@ export class Library {
     await this.change(async () => this.replace(await this.engine.updateText(id, { title })));
   }
 
+  /** Change a text's words (the tries of the parts that changed are scored again); throws why it couldn't. */
+  async editText(id: string, text: string, onProgress: (done: number, total: number) => void) {
+    this.replace(await this.engine.editText(id, text, ({ done, total }) => onProgress(done, total)));
+  }
+
   async setMode(id: string, mode: Mode) {
     this.replace(await this.engine.updateText(id, { mode }));
   }

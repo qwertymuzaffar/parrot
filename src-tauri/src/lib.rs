@@ -5,6 +5,7 @@
 mod align;
 mod asr;
 mod audio;
+mod edit;
 mod models;
 mod sounds;
 mod store;
@@ -437,6 +438,17 @@ fn talk_left(talks: State<'_, Arc<talk::Talks>>) -> Option<talk::Left> {
     talks.left()
 }
 
+/// Change a text's words: the tries of each part whose words changed are scored again against its words now,
+/// reporting "edit-progress" events (tries scored, of how many).
+#[tauri::command]
+async fn edit_text(app: AppHandle, engine: State<'_, Shared>, id: String, text: String) -> Result<TextItem, String> {
+    let engine = engine.inner().clone();
+    blocking(move || {
+        edit::edit_text(&*engine, &engine.store, &id, &text, |done, total| drop(app.emit("edit-progress", json!({ "done": done, "total": total }))))
+    })
+    .await
+}
+
 /// The waveform of a recording: the loudest moment of each of `slices` equal slices, the loudest being 1.
 #[tauri::command]
 async fn peaks(engine: State<'_, Shared>, audio: String, slices: usize) -> Result<Vec<f32>, String> {
@@ -548,6 +560,7 @@ pub fn run() {
             talk_left,
             peaks,
             clip,
+            edit_text,
             download_models,
             latest_release,
             open_url
@@ -776,6 +789,15 @@ mod tests {
         // a sentence said twice is one part
         let distinct: std::collections::HashSet<String> = sentences.iter().map(|sentence| words[sentence.clone()].join(" ")).collect();
         assert_eq!(kept.text.scores.len(), distinct.len() + 1, "the whole text and each sentence");
+        // a word fixed after it was saved: the whole take and its sentence's are scored again
+        let mut fixed = words.clone();
+        let last = fixed.len() - 1;
+        fixed[last] = "Goodbye.";
+        let started = std::time::Instant::now();
+        let edited = edit::edit_text(&engine, &engine.store, &kept.text.id, &fixed.join(" "), |_, _| {}).unwrap();
+        let whole = engine.store.attempts(&kept.text.id, &edited.text).unwrap();
+        eprintln!("edited in {:.1} s · the whole take now {}", started.elapsed().as_secs_f64(), whole[0].score);
+        assert_eq!(whole.len(), 1, "the whole take moved to the new words");
         let _ = std::fs::remove_dir_all(data);
     }
 

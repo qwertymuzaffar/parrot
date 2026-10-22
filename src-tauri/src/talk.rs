@@ -23,7 +23,7 @@ use std::sync::{Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
 pub const LONGEST: f64 = 1800.0;
 const SLACK: f64 = 5.0;
 /// Whisper hears a talk in stretches at most this long, cut at its pauses (it reads 30-second windows).
-const STRETCH: f64 = 25.0;
+pub const STRETCH: f64 = 25.0;
 /// While a talk is recorded, it is heard in stretches at most this long, so what was said shows soon after.
 const LIVE_STRETCH: f64 = 12.0;
 
@@ -553,19 +553,26 @@ impl Talks {
     }
 }
 
-/// The words the user meant, shared out among the stretches the talk was heard in: each word goes with the word
-/// heard that it stands for (the same, or a correction of it), and a word added goes with the word heard before it.
+/// The words the user meant, shared out among the stretches the talk was heard in (see `share`).
 fn share_out<'a>(written: &[Written], meant: &'a str) -> Vec<Vec<&'a str>> {
-    let key = |word: &str| store::bare(word).to_lowercase();
     // the stretch of each word heard
     let mut owner = vec![];
     for (stretch_index, part) in written.iter().enumerate() {
         owner.extend(part.heard.split_whitespace().map(|_| stretch_index));
     }
-    let heard: Vec<String> = written.iter().flat_map(|part| part.heard.split_whitespace().map(key)).collect();
+    let heard: Vec<&str> = written.iter().flat_map(|part| part.heard.split_whitespace()).collect();
+    share(&owner, &heard, meant, written.len())
+}
+
+/// The words `meant` shared out among `parts` stretches, by the words `heard` before (`owner` gives the stretch of
+/// each): each word goes with the word heard that it stands for (the same, or a correction of it), and a word added
+/// goes with the word heard before it.
+pub(crate) fn share<'a>(owner: &[usize], heard: &[&str], meant: &'a str, parts: usize) -> Vec<Vec<&'a str>> {
+    let key = |word: &str| store::bare(word).to_lowercase();
+    let heard: Vec<String> = heard.iter().map(|word| key(word)).collect();
     let meant: Vec<&str> = meant.split_whitespace().collect();
     let meant_keys: Vec<String> = meant.iter().map(|word| key(word)).collect();
-    let mut shared = vec![vec![]; written.len()];
+    let mut shared = vec![vec![]; parts];
     if owner.is_empty() {
         return shared;
     }

@@ -108,6 +108,15 @@ export class TauriEngine extends Engine {
     }
   }
 
+  async editText(id: string, text: string, onProgress: (progress: TalkProgress) => void) {
+    const stop = await listen<TalkProgress>('edit-progress', (event) => onProgress(event.payload));
+    try {
+      return await this.call<TextItem>('edit_text', { id, text });
+    } finally {
+      stop();
+    }
+  }
+
   talkCancel() {
     return this.call<void>('talk_cancel');
   }

@@ -23,11 +23,12 @@ import { ScoreRing } from './score-ring';
 import { Sidebar } from './sidebar';
 import { TriesChart } from './tries-chart';
 import { Waveform } from './waveform';
+import { EditWords } from './edit-words';
 import { WordCard } from './word-card';
 
 @Component({
   selector: 'app-practice',
-  imports: [Icon, ScoreRing, Sidebar, TriesChart, Waveform, WordCard],
+  imports: [EditWords, Icon, ScoreRing, Sidebar, TriesChart, Waveform, WordCard],
   templateUrl: './practice.html',
   styleUrl: './practice.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -117,6 +117,21 @@ describe('DemoEngine', () => {
     await expect(engine.talkFeed(new Int16Array(1))).rejects.toThrow('no talk is being recorded');
   });
 
+  it('changes the words of a text, a changed part taking the tries of the part it was', async () => {
+    const engine = new DemoEngine();
+    const [, intro] = await engine.texts();
+    const [first, second] = sentences(intro.text);
+    const changed = intro.text.replace('software engineer', 'web developer');
+    const progress: number[] = [];
+    const item = await engine.editText(intro.id, changed, ({ done, total }) => progress.push(done / total));
+    expect([item.text, progress]).toEqual([changed, [1]]);
+    const now = sentences(changed)[0];
+    expect((await engine.attempts(intro.id, now)).length).toBe(2);
+    expect((await engine.attempts(intro.id, first)).length).toBe(0);
+    expect((await engine.attempts(intro.id, second)).length).toBe(1);
+    await expect(engine.editText(intro.id, '  ', () => {})).rejects.toBeInstanceOf(EngineError);
+  });
+
   it('refuses a talk over thirty minutes', async () => {
     const engine = new DemoEngine();
     await engine.talkStart(100);

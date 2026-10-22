@@ -422,6 +422,29 @@ export class DemoEngine extends Engine {
     return Object.hasOwn(SOUNDS, key) ? SOUNDS[key] : {};
   }
 
+  /** The words change; a part whose words changed takes the tries of the part at the same place before it, scored
+   * as the demo scores anything. */
+  async editText(id: string, text: string, onProgress: (progress: TalkProgress) => void) {
+    const kept = await this.find(id);
+    const body = norm(text);
+    if (!body) throw new EngineError('the text is empty');
+    const before = sentences(kept.text);
+    const after = sentences(body);
+    const moved = new Map<string, Attempt[]>();
+    for (const [part, tries] of kept.tries) {
+      const now = body.includes(part) ? part : after[before.indexOf(part)];
+      if (now)
+        moved.set(now, [
+          ...(moved.get(now) ?? []),
+          ...tries.map((each) => ({ ...judged(now, each.score, {}, each.audio, new Date(each.when)), id: each.id })),
+        ]);
+    }
+    kept.text = body;
+    kept.tries = moved;
+    onProgress({ done: 1, total: 1 });
+    return item(kept);
+  }
+
   // the recordings are object URLs in the page: the interface decodes them itself
   async peaks() {
     return null;
