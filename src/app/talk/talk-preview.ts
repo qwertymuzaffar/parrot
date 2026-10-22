@@ -286,7 +286,7 @@ import { stopNote } from './talk-card';
       flex-wrap: wrap;
       gap: 8px;
     }
-    .name {
+    label.name {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -294,7 +294,7 @@ import { stopNote } from './talk-card';
       color: var(--ink-2);
       cursor: pointer;
     }
-    .name input {
+    label.name input {
       width: 16px;
       height: 16px;
       accent-color: var(--accent);

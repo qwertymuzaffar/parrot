@@ -79,7 +79,7 @@ describe('Just talk', () => {
         { provide: Talking, useValue: talking },
         { provide: Recorder, useValue: recorder },
         { provide: Playback, useValue: playback },
-        { provide: Names, useValue: { has: (each: string) => each === 'Alex', set: vi.fn() } },
+        { provide: Names, useValue: { has: (each: string) => ['Alex', 'here'].includes(each), set: vi.fn() } },
         { provide: Engine, useValue: {} },
       ],
     });
@@ -181,6 +181,13 @@ describe('Just talk', () => {
       expect(preview.element.querySelector('.pause')!.getAttribute('aria-label')).toBe('a pause of 1.5 seconds');
       expect(preview.text()).toContain('118 words a minute · 1 min 15 s');
       expect(preview.text()).toContain('1 sounded off · 1 pause over a second');
+    });
+
+    it('underlines a name in the line, which stays in it', async () => {
+      const preview = await render(TalkPreview);
+      const name = preview.element.querySelector<HTMLButtonElement>('.words .w.name')!;
+      expect(name.textContent!.trim()).toBe('here');
+      expect(getComputedStyle(name).display).not.toBe('flex');
     });
 
     it('opens a word: how it sounded, how to say its weak sound, and hearing it every way', async () => {
