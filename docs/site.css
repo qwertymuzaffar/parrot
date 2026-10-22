@@ -236,19 +236,6 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.0
 .art.mint { --tint: #d3eee4; }
 .card .art.night { background: #14201a; }
 .card .art.night::before { opacity: 0.5; }
-/* a word card drawn in HTML: the sounds of a word, a tip, and tries of the word alone */
-.mini { position: relative; width: 100%; max-width: 330px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; box-shadow: 0 -2px 28px rgba(20, 32, 26, 0.16); }
-.mini .top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.mini .top b { font-family: var(--display); font-size: 22px; letter-spacing: -0.02em; }
-.mini .top span { font-size: 13px; font-weight: 600; color: var(--green); }
-.mini .units { display: flex; gap: 4px; margin-top: 10px; }
-.mini .units span { font-size: 18px; font-weight: 600; line-height: 1; padding: 7px 9px; border-radius: 8px; background: var(--green-soft); color: var(--green); }
-.mini .units .fair { background: linear-gradient(135deg, var(--green-soft) 50%, var(--amber-soft) 50%); }
-.card .mini p { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
-.mini p b { color: var(--ink); }
-.mini .tries { display: flex; gap: 6px; margin-top: 12px; }
-.mini .tries span { flex: 1; text-align: center; font-size: 12.5px; font-weight: 600; padding: 3px 0; border-radius: 99px; background: var(--cream); color: var(--ink-2); }
-.mini .tries .last { background: var(--green); color: var(--green-ink); }
 /* the privacy card spans the rest of its row, its facts on the dark band */
 /* the privacy card closes the grid on a row of its own: text on the left, the facts on the dark band */
 .card.wide { grid-column: 1 / -1; }
