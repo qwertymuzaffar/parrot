@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { Recorder } from '../core/recorder';
 import { LONGEST_TALK, StopReason, Talking } from '../core/talking';
 import { Icon } from '../shared/icon';
+import { PROMPT_SETS } from './prompts';
 
 /** What to say of a talk that stopped by itself. */
 export function stopNote(reason: StopReason | null) {
@@ -40,6 +41,9 @@ export function length(seconds: number) {
       <h2 id="talk-title">Just talk</h2>
       @switch (talking.state()) {
         @case ('recording') {
+          @if (talking.prompt(); as prompt) {
+            <q class="prompt">{{ prompt }}</q>
+          }
           @if (talking.recording()) {
             <div class="live" role="status">
               <span class="rec-dot"></span>
@@ -107,6 +111,33 @@ export function length(seconds: number) {
               Tell a story or answer an interview question, with nothing to read. Parrot writes down what you said and shows how each word
               came out.
             </p>
+            <div class="sets" role="group" aria-label="Something to talk about">
+              @for (set of sets; track set.key) {
+                <button
+                  type="button"
+                  class="chip"
+                  [class.on]="talking.prompts() === set.key"
+                  [attr.aria-pressed]="talking.prompts() === set.key"
+                  (click)="talking.choosePrompts(talking.prompts() === set.key ? null : set.key)"
+                >
+                  {{ set.label }}
+                </button>
+              }
+            </div>
+            @if (talking.prompt(); as prompt) {
+              <div class="asked">
+                <q class="prompt">{{ prompt }}</q>
+                <button
+                  type="button"
+                  class="btn ghost small icon"
+                  aria-label="Another question"
+                  title="Another question"
+                  (click)="talking.anotherPrompt()"
+                >
+                  <app-icon name="shuffle" [size]="15" />
+                </button>
+              </div>
+            }
             <div class="go">
               <span class="hint">Up to {{ LONGEST_TALK / 60 }} minutes</span>
               <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()">
@@ -182,6 +213,38 @@ export function length(seconds: number) {
       font-size: 13px;
       color: var(--wrong-ink);
     }
+    .sets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-2);
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 4px 11px;
+      border-radius: 99px;
+    }
+    .chip.on {
+      border-color: var(--accent);
+      background: var(--good-bg);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .asked {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .prompt {
+      flex: 1;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      quotes: '“' '”';
+    }
     // on the green button: the spinner in the button's own ink
     .spinner.light {
       border-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
@@ -196,6 +259,7 @@ export class TalkCard {
   protected recorder = inject(Recorder);
   protected readonly Math = Math;
   protected readonly LONGEST_TALK = LONGEST_TALK;
+  protected readonly sets = PROMPT_SETS;
   protected readonly clock = clock;
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
   protected readonly since = since;

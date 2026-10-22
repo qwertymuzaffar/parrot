@@ -1110,7 +1110,10 @@ describe('the practice state', () => {
       expect(engine.calls).toContain('talkFeed 100');
       expect([talking.state(), talking.progress(), talking.talk(), talking.stopReason()]).toEqual(['preview', 1, written, 'you']);
 
+      talking.choosePrompts('small-talk');
+      const asked = talking.prompt();
       await talking.keep('I moved here three years ago.', 'Moving');
+      expect(talking.prompt()).not.toBe(asked);
       expect(engine.kept).toEqual({ text: 'I moved here three years ago.', title: 'Moving' });
       expect([talking.state(), talking.talk()]).toEqual(['idle', null]);
       expect(app.texts()[0]).toMatchObject({ id: 'abcdef0123', spoken: true, mode: 'whole' });
@@ -1158,6 +1161,18 @@ describe('the practice state', () => {
         await again.discard();
         expect([again.state(), again.unfinished(), engine.left]).toEqual(['idle', null, null]);
       });
+    });
+
+    it('gives a prompt from the set chosen, remembered for the next run, and another after a talk is kept', () => {
+      expect([talking.prompts(), talking.prompt()]).toEqual([null, null]);
+      talking.choosePrompts('interview');
+      const first = talking.prompt();
+      expect(first).toMatch(/\S/);
+      talking.anotherPrompt();
+      expect(talking.prompt()).not.toBe(first);
+      expect(localStorage.getItem('parrot.talkPrompts')).toBe('interview');
+      talking.choosePrompts('nonsense');
+      expect([talking.prompts(), talking.prompt(), localStorage.getItem('parrot.talkPrompts')]).toEqual([null, null, '']);
     });
 
     it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {

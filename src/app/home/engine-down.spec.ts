@@ -26,7 +26,14 @@ describe('the home screen when the texts cannot be loaded', () => {
         // the Just talk card, at rest
         {
           provide: Talking,
-          useValue: { state: signal('idle'), failure: signal(null), stopReason: signal(null), unfinished: signal(null) },
+          useValue: {
+            state: signal('idle'),
+            failure: signal(null),
+            stopReason: signal(null),
+            unfinished: signal(null),
+            prompts: signal(null),
+            prompt: signal(null),
+          },
         },
         { provide: Recorder, useValue: { owner: signal(null) } },
       ],

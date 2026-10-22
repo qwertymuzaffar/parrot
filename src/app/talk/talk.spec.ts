@@ -21,8 +21,12 @@ function standIn() {
     stopReason: signal<StopReason | null>(null),
     failure: signal<string | null>(null),
     unfinished: signal<LeftTalk | null>(null),
+    prompts: signal<string | null>(null),
+    prompt: signal<string | null>(null),
     start: vi.fn(),
     checkUnfinished: vi.fn(),
+    choosePrompts: vi.fn(),
+    anotherPrompt: vi.fn(),
     stop: vi.fn(),
     cancel: vi.fn(),
     writeDown: vi.fn(),
@@ -103,6 +107,28 @@ describe('Just talk', () => {
       expect(card.text()).toContain('Tell a story or answer an interview question');
       card.button(/Start talking/).click();
       expect(talking.start).toHaveBeenCalled();
+    });
+
+    it('offers sets of prompts to talk about, one shown at a time', async () => {
+      const card = await render(TalkCard);
+      expect(card.element.querySelector('.prompt')).toBeNull();
+      card.button(/Small talk/).click();
+      expect(talking.choosePrompts).toHaveBeenCalledWith('small-talk');
+      talking.prompts.set('small-talk');
+      talking.prompt.set('How was your weekend?');
+      await card.update();
+      expect(card.button(/Small talk/).getAttribute('aria-pressed')).toBe('true');
+      expect(card.element.querySelector('.prompt')!.textContent).toBe('How was your weekend?');
+      card.element.querySelector<HTMLButtonElement>('[aria-label="Another question"]')!.click();
+      expect(talking.anotherPrompt).toHaveBeenCalled();
+      // the set chosen, clicked again: talk about anything
+      card.button(/Small talk/).click();
+      expect(talking.choosePrompts).toHaveBeenLastCalledWith(null);
+      // and the prompt stays in view while talking
+      talking.state.set('recording');
+      talking.recording.set(true);
+      await card.update();
+      expect(card.element.querySelector('.prompt')!.textContent).toBe('How was your weekend?');
     });
 
     it('says to wait while the microphone gets ready, and lets the talk be called off', async () => {
@@ -266,6 +292,14 @@ describe('Just talk', () => {
       await preview.update();
       preview.element.querySelector<HTMLButtonElement>('.btn.danger')!.click();
       expect(talking.discard).toHaveBeenCalled();
+    });
+
+    it('titles the text by the prompt talked about', async () => {
+      talking.prompt.set('Tell me about yourself.');
+      const preview = await render(TalkPreview);
+      expect(preview.element.querySelector<HTMLInputElement>('#talk-title-field')!.value).toBe('Tell me about yourself');
+      preview.button(/Save and practise/).click();
+      expect(talking.keep).toHaveBeenCalledWith(TALK.heard, 'Tell me about yourself');
     });
 
     it('says why it could not be kept', async () => {

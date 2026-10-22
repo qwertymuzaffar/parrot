@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, sig
 import { Attempt } from '../core/models';
 import { Names } from '../core/names';
 import { Playback } from '../core/playback';
+import { asTitle } from './prompts';
 import { leastSure, SoundUnit, soundUnits } from '../core/sounds';
 import { bare } from '../core/split';
 import { Talking } from '../core/talking';
@@ -334,8 +335,14 @@ export class TalkPreview {
   protected readonly selected = signal<number | null>(null);
   /** what was said, as the user corrects it: what Parrot heard to begin with */
   protected readonly said = linkedSignal(() => this.talking.talk()?.heard ?? '');
-  /** the text's title: empty for each new talk (the text is then titled by its first words) */
-  protected readonly title = linkedSignal({ source: () => this.talking.talk(), computation: () => '' });
+  /** the text's title: the prompt talked about, or empty (the text is then titled by its first words) */
+  protected readonly title = linkedSignal({
+    source: () => this.talking.talk(),
+    computation: () => {
+      const prompt = this.talking.prompt();
+      return prompt ? asTitle(prompt) : '';
+    },
+  });
   protected readonly confirming = signal(false);
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
 

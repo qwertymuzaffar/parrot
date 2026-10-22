@@ -4,7 +4,9 @@ import { errorMessage, Library } from './library';
 import { LeftTalk, Talk } from './models';
 import { Playback } from './playback';
 import { micError, Recorder } from './recorder';
+import { pick, PROMPT_SETS } from '../talk/prompts';
 import { Session } from './session';
+import { readSetting, writeSetting } from './settings';
 
 /** The longest talk (seconds): it stops itself then. The engine refuses much more. */
 export const LONGEST_TALK = 600;
@@ -45,6 +47,10 @@ export class Talking {
   readonly failure = signal<string | null>(null);
   /** a talk left from the last time Parrot ran, until it is written down, checked or discarded */
   readonly unfinished = signal<LeftTalk | null>(null);
+  /** the set of prompts chosen to talk about (its key), remembered between runs; none to talk freely */
+  readonly prompts = signal<string | null>(readSetting<string>('talkPrompts', '') || null);
+  /** the prompt to talk about, from that set: the title of the text a talk becomes */
+  readonly prompt = signal<string | null>(null);
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
@@ -60,11 +66,26 @@ export class Talking {
   private watch = 0;
 
   constructor() {
+    this.anotherPrompt();
     // asked once, at the start: a talk can only be left by an earlier run
     this.engine.talkLeft().then(
       (left) => this.state() === 'idle' && this.unfinished.set(left),
       () => {},
     );
+  }
+
+  /** Talk about a prompt from the set with `key`, or about anything (null). */
+  choosePrompts(key: string | null) {
+    this.prompts.set(PROMPT_SETS.some((set) => set.key === key) ? key : null);
+    writeSetting('talkPrompts', this.prompts() ?? '');
+    this.prompt.set(null);
+    this.anotherPrompt();
+  }
+
+  /** Another prompt from the set chosen. */
+  anotherPrompt() {
+    const set = PROMPT_SETS.find((each) => each.key === this.prompts());
+    this.prompt.set(set ? pick(set, this.prompt()) : null);
   }
 
   /** Start a talk, unless the microphone is busy with a take. */
@@ -197,6 +218,8 @@ export class Talking {
     try {
       const kept = await this.engine.talkKeep(text, title);
       this.reset();
+      // the next talk is about something else
+      this.anotherPrompt();
       await this.library.loadTexts();
       await this.session.open(kept.text.id, 0);
       const first = kept.attempt.words.findIndex((word) => word.status !== 'good');
