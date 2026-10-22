@@ -96,7 +96,7 @@ export class TauriEngine extends Engine {
 
   /** the samples as the raw body: little-endian, as typed arrays are on every system Parrot runs on */
   talkFeed(samples: Int16Array) {
-    return this.call<void>('talk_feed', new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
+    return this.call<string[]>('talk_feed', new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
   }
 
   async talkStop(onProgress: (progress: TalkProgress) => void) {

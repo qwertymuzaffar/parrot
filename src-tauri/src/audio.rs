@@ -129,7 +129,7 @@ pub fn write_wav(path: &std::path::Path, pcm: &Pcm) -> Result<(), String> {
 }
 
 /// High-pass the take at 80 Hz (a second-order filter): desk rumble and handling noise out, the voice untouched.
-fn high_pass(samples: &mut [f32], rate: u32) {
+pub fn high_pass(samples: &mut [f32], rate: u32) {
     let w0 = 2.0 * std::f32::consts::PI * 80.0 / rate as f32;
     let alpha = w0.sin() / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
     let cos = w0.cos();
@@ -162,7 +162,12 @@ pub const SHORTEST_TAKE: f64 = 0.3;
 
 /// Clean a take: high-pass, trim the silence before (keeping 0.15 s) and after (0.25 s) the voice, and level it
 /// to about -20 dBFS of speech, never above 0.95. Returns None when nothing but silence was recorded.
-pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
+pub fn clean(pcm: Pcm) -> Option<Pcm> {
+    clean_at(pcm).map(|(cleaned, _)| cleaned)
+}
+
+/// Clean a take as `clean` does, and say where the cleaned take starts in it (samples trimmed from the start).
+pub fn clean_at(mut pcm: Pcm) -> Option<(Pcm, usize)> {
     let rate = pcm.rate as usize;
     high_pass(&mut pcm.samples, pcm.rate);
     let frame = (rate / 100).max(1); // 10 ms
@@ -201,7 +206,7 @@ pub fn clean(mut pcm: Pcm) -> Option<Pcm> {
     for sample in &mut trimmed {
         *sample *= gain;
     }
-    Some(Pcm { samples: trimmed, rate: pcm.rate })
+    Some((Pcm { samples: trimmed, rate: pcm.rate }, start))
 }
 
 /// Where to cut a long recording for speech recognition, which hears at most `limit` seconds well at a time: at the

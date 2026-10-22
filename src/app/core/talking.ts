@@ -43,6 +43,8 @@ export class Talking {
   /** the talk written down, while it is checked */
   readonly talk = signal<Talk | null>(null);
   readonly stopReason = signal<StopReason | null>(null);
+  /** what was heard of the talk while it is recorded */
+  readonly heardSoFar = signal('');
   /** what went wrong, said as the interface shows it */
   readonly failure = signal<string | null>(null);
   /** a talk left from the last time Parrot ran, until it is written down, checked or discarded */
@@ -126,7 +128,8 @@ export class Talking {
           await this.engine.talkStart(rate);
           this.started = true;
         }
-        await this.engine.talkFeed(pcm);
+        const heard = await this.engine.talkFeed(pcm);
+        if (heard.length) this.heardSoFar.update((soFar) => [soFar, ...heard].filter(Boolean).join(' '));
       })
       .catch((error) => {
         if (this.sendFailed) return;
@@ -242,6 +245,7 @@ export class Talking {
 
   private reset() {
     this.state.set('idle');
+    this.heardSoFar.set('');
     this.progress.set(0);
     this.talk.set(null);
     this.stopReason.set(null);

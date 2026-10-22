@@ -395,13 +395,19 @@ fn talk_start(talks: State<'_, Arc<talk::Talks>>, rate: u32) -> Result<(), Strin
     talks.start(rate)
 }
 
-/// More of the talk under way: 16-bit little-endian samples as the request body.
+/// More of the talk under way: 16-bit little-endian samples as the request body. Gives what was heard of the talk
+/// since the last block: it is heard a stretch at a time while it is recorded, away from this thread.
 #[tauri::command]
-fn talk_feed(talks: State<'_, Arc<talk::Talks>>, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+fn talk_feed(engine: State<'_, Shared>, talks: State<'_, Arc<talk::Talks>>, request: tauri::ipc::Request<'_>) -> Result<Vec<String>, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected the talk's sound as raw bytes".into());
     };
-    talks.feed(bytes)
+    let heard = talks.feed(bytes)?;
+    if talks.ready() {
+        let (engine, talks) = (engine.inner().clone(), talks.inner().clone());
+        std::thread::spawn(move || talks.listen(&*engine));
+    }
+    Ok(heard)
 }
 
 /// Stop the talk and write down what was said, reporting "talk-progress" events (seconds done, of the total).
@@ -712,10 +718,17 @@ mod tests {
             // fed as the interface sends it, then let go: what the engine holds is what is measured
             let recording = audio::read_wav_file(std::path::Path::new(&std::env::var("PARROT_TALK").unwrap())).unwrap();
             talks.start(recording.rate).unwrap();
+            // heard while it is fed, as the app hears it away from the interface's thread
+            let started = std::time::Instant::now();
+            let mut heard = 0;
             for block in recording.samples.chunks(recording.rate as usize) {
                 let bytes: Vec<u8> = block.iter().flat_map(|sample| ((sample * 32767.0) as i16).to_le_bytes()).collect();
-                talks.feed(&bytes).unwrap();
+                heard += talks.feed(&bytes).unwrap().len();
+                if talks.ready() {
+                    talks.listen(&engine);
+                }
             }
+            eprintln!("{heard} stretches heard while it was fed, in {:.1} s", started.elapsed().as_secs_f64());
         }
         let started = std::time::Instant::now();
         let heard = talks.write_down(&engine, |done, total| eprintln!("  {done:.0} of {total:.0} s")).unwrap();

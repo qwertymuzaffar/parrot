@@ -65,8 +65,9 @@ export abstract class Engine {
   /** Start a talk recorded at `rate` (Hz): speech with no text in front of it. One at a time; a talk not kept is dropped. */
   abstract talkStart(rate: number): Promise<void>;
 
-  /** More of the talk under way, as recorded. It is at most 30 minutes. */
-  abstract talkFeed(samples: Int16Array): Promise<void>;
+  /** More of the talk under way, as recorded. It is at most 30 minutes. Gives what was heard of the talk since the
+   * last block: it is written down a stretch at a time while it is recorded. */
+  abstract talkFeed(samples: Int16Array): Promise<string[]>;
 
   /** Stop the talk and write down what was said, reporting progress; rejects with TALK_CANCELLED when cancelled. */
   abstract talkStop(onProgress: (progress: TalkProgress) => void): Promise<Talk>;

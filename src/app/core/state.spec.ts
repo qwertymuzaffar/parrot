@@ -205,7 +205,10 @@ class FakeEngine extends Engine {
     if (this.refuseFeed) throw new EngineError(this.refuseFeed);
     if (!this.talk) throw new EngineError('no talk is being recorded');
     this.talk.samples += samples.length;
+    return this.heardNext.shift() ?? [];
   }
+  /** what is heard of the talk while it is recorded, given back block by block */
+  heardNext: string[][] = [];
   async talkStop(onProgress: (progress: TalkProgress) => void) {
     await this.pass('talkStop');
     this.answer();
@@ -1104,10 +1107,12 @@ describe('the practice state', () => {
     it('is recorded, sent on as it goes, written down with progress, and kept as a text opened with its take', async () => {
       await talking.start();
       expect([talking.state(), talking.recording(), recorder.owner()]).toEqual(['recording', true, 'free']);
+      engine.heardNext = [[], ['I moved here', 'three years']];
       recorder.say(2);
       recorder.say(2);
       await settle();
       expect(engine.calls.filter((call) => call.startsWith('talk'))).toEqual(['talkStart 100', 'talkFeed 200', 'talkFeed 200']);
+      expect(talking.heardSoFar()).toBe('I moved here three years');
       const release = engine.hold('talkStop done');
       const stopping = talking.stop();
       await settle();
@@ -1122,7 +1127,7 @@ describe('the practice state', () => {
       await talking.keep('I moved here three years ago.', 'Moving');
       expect(talking.prompt()).not.toBe(asked);
       expect(engine.kept).toEqual({ text: 'I moved here three years ago.', title: 'Moving' });
-      expect([talking.state(), talking.talk()]).toEqual(['idle', null]);
+      expect([talking.state(), talking.talk(), talking.heardSoFar()]).toEqual(['idle', null, '']);
       expect(app.texts()[0]).toMatchObject({ id: 'abcdef0123', spoken: true, mode: 'whole' });
       expect([app.view(), app.text()?.id, app.result()?.id]).toEqual(['practice', 'abcdef0123', '20261021-100000']);
     });

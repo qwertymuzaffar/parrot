@@ -319,6 +319,11 @@ export class DemoEngine extends Engine {
     if (talk.samples + samples.length > 1805 * talk.rate) throw new EngineError('a talk can be at most 30 minutes');
     talk.blocks.push(samples.slice());
     talk.samples += samples.length;
+    // what it "hears" while the talk is recorded: the next few words of the talk every few blocks
+    if (talk.blocks.length % 3) return [];
+    const words = DEMO_TALK.split(' ');
+    const heard = words.slice(talk.blocks.length * 2 - 6, talk.blocks.length * 2).join(' ');
+    return heard ? [heard] : [];
   }
 
   /** Writes down the same few sentences whatever was said, a quarter of the talk every quarter second. */

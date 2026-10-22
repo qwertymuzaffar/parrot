@@ -6,7 +6,7 @@ import { Names } from '../core/names';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { StopReason, Talking, TalkState } from '../core/talking';
-import { clock, length, since, TalkCard } from './talk-card';
+import { clock, lastWords, length, since, TalkCard } from './talk-card';
 import { TalkPreview } from './talk-preview';
 
 /** The talk's state, stood in for: the screens only show it and pass on clicks. */
@@ -20,6 +20,7 @@ function standIn() {
     talk: signal<Talk | null>(null),
     stopReason: signal<StopReason | null>(null),
     failure: signal<string | null>(null),
+    heardSoFar: signal(''),
     unfinished: signal<LeftTalk | null>(null),
     prompts: signal<string | null>(null),
     prompt: signal<string | null>(null),
@@ -151,6 +152,11 @@ describe('Just talk', () => {
       talking.left.set(45);
       await card.update();
       expect(card.text()).toContain('0:45 left');
+      // what was heard so far, as it comes
+      expect(card.element.querySelector('.so-far')).toBeNull();
+      talking.heardSoFar.set('I moved here three years ago');
+      await card.update();
+      expect(card.element.querySelector('.so-far')!.textContent!.trim()).toBe('I moved here three years ago');
       card.button(/Stop/).click();
       expect(talking.stop).toHaveBeenCalled();
       // Esc stops it too
@@ -218,6 +224,12 @@ describe('Just talk', () => {
       expect(since('2026-10-21T23:59:00', now)).toBe('yesterday');
       expect(since('2026-10-19T10:00:00', now)).toBe('on 19 October');
       expect([length(0.2), length(45), length(185)]).toEqual(['1 s', '45 s', '3 min']);
+    });
+
+    it('shows the end of what was heard so far', () => {
+      const many = Array.from({ length: 40 }, (_, index) => `w${index}`).join(' ');
+      expect(lastWords(many, 3)).toBe('…w37 w38 w39');
+      expect(lastWords('just a few', 3)).toBe('just a few');
     });
 
     it('counts minutes and seconds', () => {

@@ -16,14 +16,16 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
 
 /// The longest talk (seconds). The interface stops at this; the engine refuses blocks a little past it.
 pub const LONGEST: f64 = 1800.0;
 const SLACK: f64 = 5.0;
 /// Whisper hears a talk in stretches at most this long, cut at its pauses (it reads 30-second windows).
 const STRETCH: f64 = 25.0;
+/// While a talk is recorded, it is heard in stretches at most this long, so what was said shows soon after.
+const LIVE_STRETCH: f64 = 12.0;
 
 pub const CANCELLED: &str = "the writing-down was cancelled";
 const NO_WORDS: &str = "Parrot couldn't make out any words. Speak a little closer to the microphone, and try again.";
@@ -59,6 +61,44 @@ struct Talk {
     written: Option<Vec<Written>>,
     /// once written down: what was heard, as the interface was told
     heard: Option<Heard>,
+    /// which talk of the session it is: what is heard of a talk discarded meanwhile is dropped
+    generation: u64,
+    /// what is heard of it while it is recorded
+    live: Live,
+}
+
+/// A talk heard while it is recorded, a stretch at a time, so that once it stops only its last stretch is left.
+#[derive(Default)]
+struct Live {
+    /// the sound recorded since the last stretch taken to be heard (at the talk's rate)
+    pending: Vec<f32>,
+    /// where `pending` starts in the recording (samples at the talk's rate)
+    at: usize,
+    /// the stretches heard
+    heard: Vec<LiveStretch>,
+    /// what was heard since the interface last sent a block
+    news: Vec<String>,
+    /// a stretch is being heard
+    busy: bool,
+    /// a stretch couldn't be heard: the talk is written down whole once it stops
+    broken: bool,
+}
+
+/// A stretch of a talk heard while it was recorded: where it is in the recording as recorded (samples at the talk's
+/// rate), what was heard, and its words placed in it.
+struct LiveStretch {
+    from: usize,
+    to: usize,
+    heard: String,
+    placed: Vec<text::WordTime>,
+}
+
+/// A stretch of a talk to hear while it is recorded (16 kHz).
+pub struct LiveJob {
+    generation: u64,
+    from: usize,
+    to: usize,
+    audio: Vec<f32>,
 }
 
 /// What is known of a talk beyond its recording, kept beside it so that a talk outlives a quit or a crash.
@@ -118,7 +158,10 @@ pub struct Talks {
     /// talks/ in the data folder
     dir: PathBuf,
     current: Mutex<Option<Talk>>,
+    /// signalled when a stretch heard while recording is done
+    heard: Condvar,
     cancel: AtomicBool,
+    generation: AtomicU64,
 }
 
 impl Talks {
@@ -135,7 +178,7 @@ impl Talks {
                 let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
             }
         }
-        Talks { dir, current: Mutex::new(left), cancel: AtomicBool::new(false) }
+        Talks { dir, current: Mutex::new(left), heard: Condvar::new(), cancel: AtomicBool::new(false), generation: AtomicU64::new(0) }
     }
 
     /// The talk left from the last time Parrot ran, if it is still here: not yet started again, kept or discarded.
@@ -165,12 +208,24 @@ impl Talks {
         let path = self.dir.join(format!("{}.wav", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let spec = hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
         let writer = hound::WavWriter::create(&path, spec).map_err(|error| error.to_string())?;
-        *self.current() = Some(Talk { path, writer: Some(writer), rate, samples: 0, cleaned: false, written: None, heard: None });
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.current() = Some(Talk {
+            path,
+            writer: Some(writer),
+            rate,
+            samples: 0,
+            cleaned: false,
+            written: None,
+            heard: None,
+            generation,
+            live: Live::default(),
+        });
         Ok(())
     }
 
-    /// More of the talk: 16-bit little-endian samples, as recorded.
-    pub fn feed(&self, bytes: &[u8]) -> Result<(), String> {
+    /// More of the talk: 16-bit little-endian samples, as recorded. Gives what was heard of it since the last block
+    /// (stretches heard while it is recorded: see `listen`).
+    pub fn feed(&self, bytes: &[u8]) -> Result<Vec<String>, String> {
         let mut current = self.current();
         let talk = current.as_mut().ok_or("no talk is being recorded")?;
         let writer = talk.writer.as_mut().ok_or("the talk has stopped")?;
@@ -188,7 +243,68 @@ impl Talks {
         // the header brought up to date: a crash loses no more than this block
         writer.flush().map_err(|error| error.to_string())?;
         talk.samples += count;
-        Ok(())
+        talk.live.pending.extend(samples.iter().map(|sample| i16::from_le_bytes(*sample) as f32 / 32768.0));
+        Ok(std::mem::take(&mut talk.live.news))
+    }
+
+    /// A stretch of the talk is ready to be heard while it is recorded.
+    pub fn ready(&self) -> bool {
+        let current = self.current();
+        current.as_ref().is_some_and(|talk| {
+            talk.writer.is_some() && !talk.live.busy && !talk.live.broken && talk.live.pending.len() as f64 >= (LIVE_STRETCH + 1.0) * talk.rate as f64
+        })
+    }
+
+    /// Hear the talk being recorded, a stretch at a time, as long as stretches are ready: called after a block comes
+    /// in, away from the interface's thread. One at a time; what was heard goes back with the next block.
+    pub fn listen(&self, listener: &impl Listen) {
+        while let Some(job) = self.take_stretch() {
+            let heard = (|| {
+                let heard = tidy(&listener.transcribe(&job.audio, &[])?);
+                let placed = if heard.is_empty() { vec![] } else { listener.align(&job.audio, &heard)? };
+                Ok::<_, String>((heard, placed))
+            })();
+            self.stretch_heard(&job, heard);
+        }
+    }
+
+    /// The next stretch of the talk to hear, cut at a pause as a writing-down cuts it, once enough is recorded.
+    fn take_stretch(&self) -> Option<LiveJob> {
+        let mut current = self.current();
+        let talk = current.as_mut()?;
+        let rate = talk.rate;
+        let live = &mut talk.live;
+        if talk.writer.is_none() || live.busy || live.broken || (live.pending.len() as f64) < (LIVE_STRETCH + 1.0) * rate as f64 {
+            return None;
+        }
+        let pending = audio::resample(&audio::Pcm { samples: live.pending.clone(), rate }, 16000);
+        let stretch = audio::stretches(&pending, 16000, LIVE_STRETCH).into_iter().next()?;
+        let taken = ((stretch.end as f64 * rate as f64 / 16000.0).round() as usize).min(live.pending.len());
+        let mut audio = pending[stretch].to_vec();
+        audio::high_pass(&mut audio, 16000);
+        live.pending.drain(..taken);
+        let job = LiveJob { generation: talk.generation, from: live.at, to: live.at + taken, audio };
+        live.at += taken;
+        live.busy = true;
+        Some(job)
+    }
+
+    /// What was heard in a stretch taken while the talk is recorded (or why it couldn't be).
+    fn stretch_heard(&self, job: &LiveJob, heard: Result<(String, Vec<text::WordTime>), String>) {
+        let mut current = self.current();
+        if let Some(talk) = current.as_mut().filter(|talk| talk.generation == job.generation) {
+            let live = &mut talk.live;
+            live.busy = false;
+            match heard {
+                Ok((heard, _)) if heard.is_empty() => {}
+                Ok((heard, placed)) => {
+                    live.news.push(heard.clone());
+                    live.heard.push(LiveStretch { from: job.from, to: job.to, heard, placed });
+                }
+                Err(_) => live.broken = true,
+            }
+        }
+        self.heard.notify_all();
     }
 
     /// Stop writing down the talk at the next stretch. The recording is kept, to write down again or discard.
@@ -213,11 +329,16 @@ impl Talks {
     /// `progress` gets the seconds written down so far and the talk's length, after each stretch.
     pub fn write_down(&self, listener: &impl Listen, progress: impl Fn(f64, f64)) -> Result<Heard, String> {
         self.cancel.store(false, Ordering::SeqCst);
-        let mut current = self.current();
+        // a stretch being heard while the talk was recorded is waited for: it is part of what is written down
+        let current = self.current();
+        let mut current =
+            self.heard.wait_while(current, |current| current.as_ref().is_some_and(|talk| talk.live.busy)).unwrap_or_else(PoisonError::into_inner);
         let talk = current.as_mut().ok_or("there is no talk to write down")?;
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
         }
+        let live = std::mem::take(&mut talk.live);
+        let mut trim = None;
         let pcm = audio::read_wav_file(&talk.path)?;
         let pcm = if talk.cleaned {
             pcm
@@ -225,7 +346,8 @@ impl Talks {
             if audio::blank(&pcm) {
                 return Err(MICROPHONE_WITHHELD.into());
             }
-            let cleaned = audio::clean(pcm).filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE).ok_or(NOTHING_HEARD)?;
+            let (cleaned, start) = audio::clean_at(pcm).filter(|(cleaned, _)| cleaned.seconds() >= audio::SHORTEST_TAKE).ok_or(NOTHING_HEARD)?;
+            trim = Some(start);
             // the recording kept from here on is the cleaned one, which the words' times are in
             audio::write_wav(&talk.path, &cleaned)?;
             talk.cleaned = true;
@@ -242,7 +364,45 @@ impl Talks {
         let mut said: Vec<String> = vec![];
         let mut times: Vec<text::WordTime> = vec![];
         let mut written = vec![];
-        for stretch in audio::stretches(&samples, 16000, STRETCH) {
+        // the stretches heard while it was recorded, moved into the cleaned recording (whose start was trimmed)
+        let rate = talk.rate as f64;
+        let mut rest = 0;
+        if let Some(trim) = trim.filter(|_| !live.broken) {
+            for stretch in live.heard {
+                let start = (stretch.from as f64 - trim as f64) / rate * 16000.0;
+                let (from, to) = (
+                    start.max(0.0).round() as usize,
+                    (((stretch.to as f64 - trim as f64) / rate * 16000.0).round().max(0.0) as usize).min(samples.len()),
+                );
+                if to <= from {
+                    continue;
+                }
+                // its words, placed from its start: from the cleaned recording's, if the trim cut into it
+                let shift = (start - from as f64) / 16000.0;
+                let placed: Vec<text::WordTime> = stretch
+                    .placed
+                    .into_iter()
+                    .map(|word| text::WordTime {
+                        t: word.t.map(|[start, end]| [round3((start + shift).max(0.0)), round3((end + shift).max(0.0))]),
+                        ..word
+                    })
+                    .collect();
+                let offset = from as f64 / 16000.0;
+                times.extend(
+                    placed
+                        .iter()
+                        .cloned()
+                        .map(|word| text::WordTime { t: word.t.map(|[start, end]| [round3(start + offset), round3(end + offset)]), ..word }),
+                );
+                said.push(stretch.heard.clone());
+                written.push(Written { stretch: from..to, heard: stretch.heard, placed });
+                rest = to;
+            }
+            if rest > 0 {
+                progress(rest as f64 / 16000.0, samples.len() as f64 / 16000.0);
+            }
+        }
+        for stretch in audio::stretches(&samples[rest..], 16000, STRETCH).into_iter().map(|stretch| stretch.start + rest..stretch.end + rest) {
             if self.cancel.load(Ordering::SeqCst) {
                 return Err(CANCELLED.into());
             }
@@ -309,6 +469,8 @@ impl Talk {
             cleaned: known.cleaned,
             written: known.written,
             heard: known.heard,
+            generation: 0,
+            live: Live::default(),
         })
     }
 
@@ -582,6 +744,68 @@ mod tests {
         assert!(!dir.join("texts").exists(), "a talk written down is kept nowhere but talks/");
         talks.discard().unwrap();
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "discarding removes the recording");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_is_heard_while_it_is_recorded_and_only_the_rest_once_it_stops() {
+        let (talks, dir) = talks("live");
+        talks.start(16000).unwrap();
+        let listener = Stretches { heard: "well the beautiful things", lengths: RefCell::new(vec![]) };
+        let mut news = vec![];
+        // 60 s in blocks of two seconds, each heard as it comes in (away from the interface's thread in the app)
+        for block in speech(16000, 60.0).chunks(64000) {
+            news.extend(talks.feed(block).unwrap());
+            if talks.ready() {
+                talks.listen(&listener);
+            }
+        }
+        let live = listener.lengths.borrow().len();
+        assert!(live >= 3, "{live} stretches heard while recording");
+        assert!(listener.lengths.borrow().iter().all(|secs| *secs <= LIVE_STRETCH), "{:?}", listener.lengths.borrow());
+        // what was heard comes back with the next block: all of it, but for a stretch heard after the last block
+        assert!(news.len() == live || news.len() == live - 1, "{} of {live}", news.len());
+        assert!(news.iter().all(|piece| piece == "well the beautiful things"));
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        let rest = listener.lengths.borrow().len() - live;
+        assert!((1..=2).contains(&rest), "only what came after the last stretch heard: {rest}");
+        assert_eq!(heard.words.len(), 4 * (live + rest));
+        // the words in order, placed in the cleaned recording
+        let starts: Vec<f64> = heard.words.iter().map(|word| word.t.unwrap()[0]).collect();
+        assert!(starts.windows(2).all(|pair| pair[0] < pair[1]), "{starts:?}");
+        assert!(starts.last().unwrap() < &heard.duration);
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_stretch_heard_of_a_talk_discarded_meanwhile_is_dropped() {
+        let (talks, dir) = talks("live-dropped");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let job = talks.take_stretch().unwrap();
+        assert!(talks.take_stretch().is_none(), "one at a time");
+        talks.start(16000).unwrap();
+        talks.stretch_heard(&job, Ok(("from the talk before".into(), vec![])));
+        assert_eq!(talks.feed(&[0, 0]).unwrap(), Vec::<String>::new());
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_stretch_not_heard_while_recording_is_heard_with_the_rest() {
+        let (talks, dir) = talks("live-failed");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let job = talks.take_stretch().unwrap();
+        talks.stretch_heard(&job, Err("the speech engine is busy".into()));
+        assert!(!talks.ready(), "nothing more is heard while recording");
+        let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        let heard_in = listener.lengths.borrow();
+        assert!(heard_in.iter().sum::<f64>() > 35.0, "all of it, once it stopped: {heard_in:?}");
+        assert_eq!(heard.words.len(), 2 * heard_in.len());
+        talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);
     }
 

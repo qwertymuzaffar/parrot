@@ -11,6 +11,12 @@ export function stopNote(reason: StopReason | null) {
   return '';
 }
 
+/** The end of what was heard so far, as much as fits a few lines. */
+export function lastWords(text: string, count = 30) {
+  const words = text.split(' ');
+  return words.length > count ? '…' + words.slice(-count).join(' ') : text;
+}
+
 /** m:ss */
 export function clock(seconds: number) {
   const whole = Math.max(0, Math.floor(seconds));
@@ -53,6 +59,9 @@ export function length(seconds: number) {
               </span>
             </div>
             <div class="meter" aria-hidden="true"><i [style.width.%]="recorder.level() * 100"></i></div>
+            @if (talking.heardSoFar(); as soFar) {
+              <p class="so-far" aria-live="polite">{{ lastWords(soFar) }}</p>
+            }
             <div class="go">
               <span class="hint">Stop when you're done. Esc also stops.</span>
               <button class="btn primary stop" (click)="talking.stop()"><app-icon name="stop" [size]="14" /> Stop</button>
@@ -213,6 +222,15 @@ export function length(seconds: number) {
       font-size: 13px;
       color: var(--wrong-ink);
     }
+    .so-far {
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      color: var(--ink-2);
+      font-size: 14px;
+      line-height: 1.5;
+    }
     .sets {
       display: flex;
       flex-wrap: wrap;
@@ -261,6 +279,7 @@ export class TalkCard {
   protected readonly LONGEST_TALK = LONGEST_TALK;
   protected readonly sets = PROMPT_SETS;
   protected readonly clock = clock;
+  protected readonly lastWords = lastWords;
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
   protected readonly since = since;
   protected readonly length = length;

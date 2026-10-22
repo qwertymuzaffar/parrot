@@ -79,7 +79,9 @@ describe('DemoEngine', () => {
     await expect(engine.talkKeep('Hi.', '')).rejects.toThrow('write the talk down first');
     await engine.talkStart(8000);
     await engine.talkFeed(new Int16Array(8000).fill(1000));
-    await engine.talkFeed(new Int16Array(4000).fill(-1000));
+    expect(await engine.talkFeed(new Int16Array(4000).fill(-1000))).toEqual([]);
+    // every third block, the next few words
+    expect(await engine.talkFeed(new Int16Array(10))).toEqual(["Hi, I'm Alex. I moved to"]);
     const progress: number[] = [];
     const talk = await engine.talkStop(({ done, total }) => progress.push(done / total));
     expect(progress).toEqual([0.25, 0.5, 0.75, 1]);
