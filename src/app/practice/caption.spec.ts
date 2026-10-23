@@ -67,7 +67,7 @@ describe('the caption under the part', () => {
           },
         },
         { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0), warm() {} } },
-        { provide: WordPractice, useValue: {} },
+        { provide: WordPractice, useValue: { checking: signal(false) } },
       ],
     });
     // the screen alone: the sidebar, waveform and cards around it have their own state

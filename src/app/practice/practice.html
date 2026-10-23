@@ -14,7 +14,13 @@
       >
       <div class="named">
         <h1 [title]="text?.title">{{ text?.title }}</h1>
-        <button class="btn ghost small icon" aria-label="Edit the words" title="Edit the words" (click)="editor.open()">
+        <button
+          class="btn ghost small icon"
+          aria-label="Edit the words"
+          [title]="taking() ? 'Edit the words once the take is checked' : 'Edit the words'"
+          [disabled]="taking()"
+          (click)="editor.open()"
+        >
           <app-icon name="edit" [size]="15" />
         </button>
         <!-- a dialog: shown over the screen, not in its layout -->

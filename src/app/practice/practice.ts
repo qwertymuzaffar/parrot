@@ -60,6 +60,8 @@ export class Practice {
   protected readonly recording = this.session.recording;
   /** the try shown, unless a new one is being recorded */
   protected readonly result = computed(() => (this.recording() ? null : this.session.result()));
+  /** a take being recorded or checked: the words can't be edited until it is filed (EditWords waits for it too) */
+  protected readonly taking = computed(() => !!this.recorder.owner() || this.session.checking() || this.words.checking());
   protected readonly counts = computed(() => {
     const words = this.result()?.words ?? [];
     return {

@@ -60,6 +60,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     }
 
     // all scored: each try moves to its part's words now, and the text changes
+    let _filing = store::filing();
     for (old_dir, old_attempt, part, mut attempt) in scored {
         let new_dir = dir.join(format!("p-{}", store::sha(part)));
         fs::create_dir_all(&new_dir).map_err(|error| error.to_string())?;

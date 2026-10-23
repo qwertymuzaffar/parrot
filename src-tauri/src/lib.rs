@@ -32,6 +32,8 @@ type Shared = Arc<Engine>;
 
 /// What to say of a take with nothing in it that could be a voice.
 const NOTHING_HEARD: &str = "Nothing was heard in the recording. Is the microphone on?";
+/// A take refused because its part's words were edited while it was scored.
+const EDITED_MEANWHILE: &str = "The words were edited while the take was checked: record it again.";
 
 /// What to say of a take of nothing but exact zeros. A microphone always picks up some noise, even in a quiet room:
 /// exact zeros are the system keeping it from Parrot, and on macOS the webview then records silence instead of failing.
@@ -93,20 +95,19 @@ impl Engine {
 
     /// Save a take (a WAV file), score it against `part` and keep the result next to it.
     fn check(&self, text_id: &str, part: &str, wav: &[u8]) -> Result<Attempt, String> {
-        let dir = self.store.part_dir(text_id, part)?;
-        self.keep_take(&dir, &store::norm(part), wav, score_part)
+        self.keep_take(&|| self.store.part_dir(text_id, part), &store::norm(part), wav, score_part)
     }
 
     /// A take of one word of the text said alone, kept with that word's own tries: they never count toward the
     /// part's or the text's scores.
     fn check_word(&self, text_id: &str, word: &str, wav: &[u8]) -> Result<Attempt, String> {
-        let dir = self.store.word_dir(text_id, word)?;
-        self.keep_take(&dir, store::bare(word), wav, score_word)
+        self.keep_take(&|| self.store.word_dir(text_id, word), store::bare(word), wav, score_word)
     }
 
-    /// Clean a take, score it against `txt` (as a part or as a word alone) and save both in `dir`: the recording, and
-    /// what was heard and scored.
-    fn keep_take(&self, dir: &Path, txt: &str, wav: &[u8], score: Scorer<Self>) -> Result<Attempt, String> {
+    /// Clean a take, score it against `txt` (as a part or as a word alone) and save both in the folder `locate` gives:
+    /// the recording, and what was heard and scored.
+    fn keep_take(&self, locate: &dyn Fn() -> Result<PathBuf, String>, txt: &str, wav: &[u8], score: Scorer<Self>) -> Result<Attempt, String> {
+        let before = locate()?;
         let raw = audio::read_wav(wav)?;
         if audio::blank(&raw) {
             return Err(MICROPHONE_WITHHELD.into());
@@ -114,6 +115,16 @@ impl Engine {
         let take = audio::clean(raw).filter(|cleaned| cleaned.seconds() >= audio::SHORTEST_TAKE).ok_or(NOTHING_HEARD)?;
         let secs = take.seconds();
         let scored = score(self, &audio::resample(&take, 16000), secs, txt, &self.store.names())?;
+        let _filing = store::filing();
+        if !before.parent().is_some_and(Path::is_dir) {
+            return Err("the text was deleted".into());
+        }
+        // the words may have been edited while it was scored: a part whose words changed, or whose tries moved with
+        // them, is gone, and its take with it
+        let dir = &locate().map_err(|_| EDITED_MEANWHILE.to_string())?;
+        if before.is_dir() && !dir.is_dir() {
+            return Err(EDITED_MEANWHILE.into());
+        }
         // not create_dir_all: a text deleted while the take was scored must not come back as a folder of its tries
         match std::fs::create_dir(dir) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err("the text was deleted".into()),
@@ -937,7 +948,6 @@ mod tests {
         let data = std::env::temp_dir().join(format!("parrot-deleted-take-{}", std::process::id()));
         let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
         let id = engine.store.add("Hello there.", None, None).unwrap().id;
-        let part = engine.store.part_dir(&id, "Hello there.").unwrap();
         let tone: Vec<f32> =
             (0..16000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
         let wav_path = data.join("take.wav");
@@ -948,9 +958,43 @@ mod tests {
             engine.store.delete(&engine.store.list()[0].id).unwrap();
             Ok(Scored { heard: String::new(), words: vec![], score: 0, wpm: 0 })
         };
-        let error = engine.keep_take(&part, "Hello there.", &wav, delete_while_scoring).unwrap_err();
+        let error = engine.keep_take(&|| engine.store.part_dir(&id, "Hello there."), "Hello there.", &wav, delete_while_scoring).unwrap_err();
         assert_eq!(error, "the text was deleted");
         assert!(!data.join("texts").join(&id).exists(), "no folder of the text comes back");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn a_take_of_words_edited_while_it_was_scored_is_not_kept() {
+        let data = std::env::temp_dir().join(format!("parrot-edited-take-{}", std::process::id()));
+        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let tone: Vec<f32> =
+            (0..16000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
+        let wav_path = data.join("take.wav");
+        std::fs::create_dir_all(&data).unwrap();
+        audio::write_wav(&wav_path, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
+        let wav = std::fs::read(&wav_path).unwrap();
+        // the words are edited while the take is scored: the text changes, and the part's tries move to its words now
+        let edit_while_scoring = |engine: &Engine, _: &[f32], _: f64, _: &str, _: &[String]| {
+            let text = engine.store.text_dir(&engine.store.list()[0].id).unwrap();
+            store::write_whole(&text.join("text.txt"), b"Hello here.").unwrap();
+            let old = text.join(format!("p-{}", store::sha("Hello there.")));
+            if old.is_dir() {
+                std::fs::rename(&old, text.join(format!("p-{}", store::sha("Hello here.")))).unwrap();
+            }
+            Ok(Scored { heard: String::new(), words: vec![], score: 0, wpm: 0 })
+        };
+        for had_tries in [false, true] {
+            let id = engine.store.add("Hello there.", None, None).unwrap().id;
+            let old = engine.store.part_dir(&id, "Hello there.").unwrap();
+            if had_tries {
+                std::fs::create_dir(&old).unwrap();
+            }
+            let error = engine.keep_take(&|| engine.store.part_dir(&id, "Hello there."), "Hello there.", &wav, edit_while_scoring).unwrap_err();
+            assert_eq!(error, EDITED_MEANWHILE);
+            assert!(!old.exists(), "the part as it was doesn't come back");
+            std::fs::remove_dir_all(engine.store.text_dir(&id).unwrap()).unwrap();
+        }
         let _ = std::fs::remove_dir_all(data);
     }
 
@@ -970,7 +1014,7 @@ mod tests {
             let times = [[0.0, 0.3], [1.8, 1.9], [1.9, 2.2], [2.2, 2.5]].map(|t| text::WordTime { t: Some(t), score: Some(0.9), letters: None });
             Ok(Scored { heard: txt.into(), words: text::judge(txt, txt, &times, None), score: 100, wpm: 100 })
         };
-        let attempt = engine.keep_take(&part, "Well, I think so.", &wav, paused).unwrap();
+        let attempt = engine.keep_take(&|| Ok(part.clone()), "Well, I think so.", &wav, paused).unwrap();
         assert_eq!(attempt.pauses, vec![(0, 1.5)]);
         assert_eq!(engine.store.attempt(&id, "Well, I think so.", &attempt.id).unwrap().pauses, vec![(0, 1.5)], "saved with the try");
         let _ = std::fs::remove_dir_all(data);
@@ -990,10 +1034,10 @@ mod tests {
         let unscored =
             |_: &Engine, _: &[f32], _: f64, _: &str, _: &[String]| -> Result<Scored, String> { panic!("a take of no sound is never scored") };
         let zeros = take("zeros.wav", vec![0.0; 48000]);
-        assert_eq!(engine.keep_take(&part, "Hello there.", &zeros, unscored).unwrap_err(), MICROPHONE_WITHHELD);
+        assert_eq!(engine.keep_take(&|| Ok(part.clone()), "Hello there.", &zeros, unscored).unwrap_err(), MICROPHONE_WITHHELD);
         // a quiet room is a microphone that works, with no one speaking
         let room = take("room.wav", (0..48000).map(|sample_index| 0.0003 * (sample_index as f32 * 0.37).sin()).collect());
-        assert!(engine.keep_take(&part, "Hello there.", &room, unscored).unwrap_err().contains("Nothing was heard"));
+        assert!(engine.keep_take(&|| Ok(part.clone()), "Hello there.", &room, unscored).unwrap_err().contains("Nothing was heard"));
         assert!(engine.store.attempts(&id, "Hello there.").unwrap().is_empty(), "neither is kept");
         let _ = std::fs::remove_dir_all(data);
     }

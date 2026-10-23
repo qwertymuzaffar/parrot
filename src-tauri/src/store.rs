@@ -20,6 +20,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// Held while tries are filed: a take saved, or an edit moving tries to its parts' new words, so neither files a try
+/// under a part the other just took away.
+static FILING: Mutex<()> = Mutex::new(());
+
+pub fn filing() -> MutexGuard<'static, ()> {
+    FILING.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 pub fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")

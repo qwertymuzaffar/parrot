@@ -3,12 +3,21 @@ import { TestBed } from '@angular/core/testing';
 import { EngineError } from '../core/engine';
 import { Library } from '../core/library';
 import { Playback } from '../core/playback';
+import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { WordPractice } from '../core/word-practice';
 import { EditWords } from './edit-words';
 
 describe('editing the words of a text', () => {
-  const session = { text: signal({ id: 'abcdef0123', text: 'Hello there. How are you?' }), index: signal(1), open: vi.fn() };
+  const session = {
+    text: signal({ id: 'abcdef0123', text: 'Hello there. How are you?' }),
+    index: signal(1),
+    open: vi.fn(),
+    checking: signal(false),
+  };
   const library = { editText: vi.fn() };
+  const recorder = { owner: signal<string | null>(null) };
+  const wordPractice = { checking: signal(false) };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -24,6 +33,8 @@ describe('editing the words of a text', () => {
         { provide: Session, useValue: session },
         { provide: Library, useValue: library },
         { provide: Playback, useValue: { stop: vi.fn() } },
+        { provide: Recorder, useValue: recorder },
+        { provide: WordPractice, useValue: wordPractice },
       ],
     });
   });
@@ -71,5 +82,21 @@ describe('editing the words of a text', () => {
     await fixture.whenStable();
     expect(element.querySelector('[role=alert]')!.textContent).toContain('the speech engine is not running');
     expect([dialog.open, textarea.value, textarea.disabled]).toEqual([true, 'Hello there.', false]);
+  });
+
+  it('waits while a take is recorded or checked, which would be filed under the words as they were', async () => {
+    const { fixture, element, save } = await editor();
+    expect(fixture.componentInstance.taking()).toBe(false);
+    for (const busy of [() => session.checking.set(true), () => wordPractice.checking.set(true), () => recorder.owner.set('part')]) {
+      busy();
+      expect(fixture.componentInstance.taking()).toBe(true);
+      save();
+      await fixture.whenStable();
+      expect(library.editText).not.toHaveBeenCalled();
+      expect(element.querySelector('[role=alert]')!.textContent).toContain('A take is being checked');
+      session.checking.set(false);
+      wordPractice.checking.set(false);
+      recorder.owner.set(null);
+    }
   });
 });

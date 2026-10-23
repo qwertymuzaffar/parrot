@@ -1,7 +1,9 @@
-import { ChangeDetectionStrategy, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { errorMessage, Library } from '../core/library';
 import { Playback } from '../core/playback';
+import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { WordPractice } from '../core/word-practice';
 import { Icon } from '../shared/icon';
 
 /** Fixing the words of the text open: the tries of each part whose words change are scored again against them. */
@@ -110,6 +112,8 @@ export class EditWords {
   private library = inject(Library);
   private session = inject(Session);
   private playback = inject(Playback);
+  private recorder = inject(Recorder);
+  private wordPractice = inject(WordPractice);
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
 
   protected readonly words = signal('');
@@ -117,10 +121,12 @@ export class EditWords {
   protected readonly done = signal(0);
   protected readonly total = signal(0);
   protected readonly failure = signal<string | null>(null);
+  /** a take being recorded or checked: the words wait for it, or it would be filed under words the text no longer has */
+  readonly taking = computed(() => !!this.recorder.owner() || this.session.checking() || this.wordPractice.checking());
 
   open() {
     const text = this.session.text();
-    if (!text) return;
+    if (!text || this.taking()) return;
     this.words.set(text.text);
     this.failure.set(null);
     this.dialog().nativeElement.showModal();
@@ -137,6 +143,10 @@ export class EditWords {
   protected async save() {
     const text = this.session.text();
     if (!text) return;
+    if (this.taking()) {
+      this.failure.set('A take is being checked: save once it is done.');
+      return;
+    }
     this.playback.stop();
     this.busy.set(true);
     this.failure.set(null);
