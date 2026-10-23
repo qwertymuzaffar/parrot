@@ -1167,6 +1167,34 @@ describe('the practice state', () => {
       expect([app.view(), app.text()?.id, app.result()?.id]).toEqual(['practice', 'abcdef0123', '20261021-100000']);
     });
 
+    it('keeps its check screen until the text it was kept as is open: Home never shows between them', async () => {
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      // the screen the window shows (app.ts): the check screen while the talk is checked, else the session's view
+      const screens: string[] = [];
+      const screen = () => (talking.checking() ? 'check' : app.view());
+      for (const call of ['talkKeep', 'texts', 'updateText', 'scores', 'attempts', 'attempt'] as const) {
+        const answer = engine[call].bind(engine) as (...args: unknown[]) => unknown;
+        (engine as unknown as Record<string, unknown>)[call] = (...args: unknown[]) => {
+          screens.push(`${screen()} at ${call}`);
+          return answer(...args);
+        };
+      }
+      await talking.keep('I moved here three years ago.', 'Moving');
+      screens.push(screen());
+      expect(screens).toEqual([
+        'check at talkKeep',
+        'check at texts',
+        'check at updateText',
+        'check at scores',
+        'check at attempts',
+        'check at attempt',
+        'practice',
+      ]);
+      expect([app.text()?.id, app.result()?.id]).toEqual(['abcdef0123', '20261021-100000']);
+    });
+
     describe('left from the last time Parrot ran', () => {
       const left = (heard: Talk | null): LeftTalk => ({ started: '2026-10-21T14:05:00', duration: 180, heard });
 

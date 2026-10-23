@@ -1,7 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Engine, TALK_CANCELLED } from './engine';
 import { errorMessage, Library } from './library';
-import { LeftTalk, Talk } from './models';
+import { KeptTalk, LeftTalk, Talk } from './models';
 import { Playback } from './playback';
 import { micError, Recorder } from './recorder';
 import { pick, PROMPT_SETS } from '../talk/prompts';
@@ -258,20 +258,26 @@ export class Talking {
     if (this.state() !== 'preview') return;
     this.state.set('keeping');
     this.failure.set(null);
+    let kept: KeptTalk;
     try {
-      const kept = await this.engine.talkKeep(text, title);
-      this.reset();
-      // the next talk is about something else
-      this.anotherPrompt();
-      await this.library.loadTexts();
-      await this.session.open(kept.text.id, 0);
-      const first = kept.attempt.words.findIndex((word) => word.status !== 'good');
-      if (first >= 0) this.session.selectWord(first);
+      kept = await this.engine.talkKeep(text, title);
     } catch (error) {
       // still the talk being kept: nothing else may have taken the screen meanwhile
       if (this.state() !== 'keeping') return;
       this.state.set('preview');
       this.failure.set(errorMessage(error));
+      return;
+    }
+    // the check screen stays, saying it is saving, until the text is open: Home is not shown between the two
+    try {
+      await this.library.loadTexts();
+      await this.session.open(kept.text.id, 0);
+      const first = kept.attempt.words.findIndex((word) => word.status !== 'good');
+      if (first >= 0) this.session.selectWord(first);
+    } finally {
+      this.reset();
+      // the next talk is about something else
+      this.anotherPrompt();
     }
   }
 
