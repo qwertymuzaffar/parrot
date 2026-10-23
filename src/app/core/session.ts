@@ -82,12 +82,10 @@ export class Session {
     this.playback.stop();
     await this.dropTake();
     this.recorder.warm();
-    this.failure.set(null);
-    this.openId.set(id);
-    this.view.set('practice');
     writeSetting('text', id);
     this.engine.updateText(id, { opened: true }).catch(() => {});
-    await this.build(text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
+    // the text shows (and the practice screen, from Home) once its parts and scores are in
+    await this.build(text, text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
   }
 
   /** Add a text and open it; null if the engine would not add it (library.error() says why). */
@@ -119,16 +117,16 @@ export class Session {
     }
     // another text opened while the mode was saved
     if (this.text()?.id !== text.id) return;
-    await this.build(mode, null, w0);
+    await this.build(text, mode, null, w0);
   }
 
-  /** Split the open text and go to a part: the saved one, or the one holding word w0. */
-  private async build(mode: Mode, savedIndex: string | null, w0?: number) {
-    const text = this.text()!;
+  /** Split a text and go to a part: the saved one, or the one holding word w0. The text, its parts, their scores and
+   * the part go on screen together once all are in, so the new words never show with the try of the part left, nor
+   * a part number past the end of the new parts (no part at all). */
+  private async build(text: TextItem, mode: Mode, savedIndex: string | null, w0?: number) {
     const build = ++this.builds;
     const parts = await splitText(text.text, mode);
     if (build !== this.builds) return;
-    this.parts.set(parts);
     // scores that can't be loaded are not "nothing practised yet": say so
     let scores: Record<string, PartScore> = {};
     let failed: string | null = null;
@@ -138,12 +136,17 @@ export class Session {
       failed = errorMessage(error);
     }
     if (build !== this.builds) return;
-    this.scores.set(scores);
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
-    await this.select(partIndex);
-    // after select, which clears the error of the part left
+    this.openId.set(text.id);
+    this.view.set('practice');
+    this.parts.set(parts);
+    this.scores.set(scores);
+    // in the same moment: the part, without the try of the part left
+    const going = this.goTo(partIndex);
+    // after goTo, which clears the error of the part left
     if (failed) this.failure.set(failed);
+    await going;
   }
 
   async select(partIndex: number) {
@@ -152,6 +155,13 @@ export class Session {
     // a take of the part under way stays on its part: moving on would record one part as another
     if (!text || partIndex < 0 || partIndex >= parts.length || this.takeUnderWay()) return;
     this.playback.stop();
+    await this.goTo(partIndex);
+  }
+
+  /** Show part `partIndex` of the open text without a try, and load its last one. */
+  private async goTo(partIndex: number) {
+    const text = this.text()!;
+    const parts = this.parts();
     this.index.set(partIndex);
     this.result.set(null);
     this.history.set([]);
