@@ -207,6 +207,13 @@ describe('Just talk', () => {
       expect(spoken(card)).toEqual(['Writing down what you said…']);
     });
 
+    it('says it is stopping, with nothing to press, until it is written down', async () => {
+      talking.state.set('stopping');
+      const card = await render(TalkCard);
+      expect(card.element.querySelector('[role=status]')!.textContent!.trim()).toBe('Stopping…');
+      expect(card.element.querySelectorAll('button').length).toBe(0);
+    });
+
     it('shows how far writing it down has got, with a Cancel', async () => {
       talking.state.set('writing');
       talking.progress.set(0.4);

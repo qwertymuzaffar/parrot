@@ -78,6 +78,12 @@ export function length(seconds: number) {
             </div>
           }
         }
+        @case ('stopping') {
+          <div class="live" role="status">
+            <span class="spinner"></span>
+            <span>Stopping…</span>
+          </div>
+        }
         @case ('writing') {
           <div class="live">
             <span class="spinner"></span>

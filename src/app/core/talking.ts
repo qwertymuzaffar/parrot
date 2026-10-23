@@ -17,7 +17,7 @@ export const QUIET_STOP_MS = 120_000;
  * Where a talk is: being recorded; being written down; stopped with its recording kept (a writing-down cancelled
  * or failed), to write down again or discard; written down and shown for checking; being kept as a text.
  */
-export type TalkState = 'idle' | 'recording' | 'writing' | 'stopped' | 'preview' | 'keeping';
+export type TalkState = 'idle' | 'recording' | 'stopping' | 'writing' | 'stopped' | 'preview' | 'keeping';
 
 /** Why a talk stopped: the speaker stopped it, it was quiet too long, or it reached the longest a talk can be. */
 export type StopReason = 'you' | 'quiet' | 'longest';
@@ -173,6 +173,8 @@ export class Talking {
     if (this.state() !== 'recording') return false;
     clearInterval(this.watch);
     const got = this.recording();
+    // the last of the sound still on its way to the engine: no longer recording, not yet written down
+    if (got) this.state.set('stopping');
     await this.recorder.stop();
     if (!got) {
       // stopped while the microphone was still getting ready: nothing was recorded

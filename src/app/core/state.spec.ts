@@ -200,7 +200,7 @@ class FakeEngine extends Engine {
     this.talk = { rate, samples: 0, written: false };
   }
   async talkFeed(samples: Int16Array) {
-    this.calls.push(`talkFeed ${samples.length}`);
+    await this.pass(`talkFeed ${samples.length}`);
     this.answer();
     if (this.refuseFeed) throw new EngineError(this.refuseFeed);
     if (!this.talk) throw new EngineError('no talk is being recorded');
@@ -1245,6 +1245,23 @@ describe('the practice state', () => {
       expect(talking.about()).toBe(asked);
       await talking.discard();
       expect(talking.about()).toBeNull();
+    });
+
+    it('says it is stopping while the last of it reaches the engine, and only then is written down', async () => {
+      await talking.start();
+      recorder.say(1);
+      await settle();
+      const release = engine.hold('talkFeed 100');
+      const stopping = talking.stop();
+      await settle();
+      expect([talking.state(), talking.recording(), engine.calls.includes('talkStop')]).toEqual(['stopping', false, false]);
+      // nothing to start or stop meanwhile
+      await talking.start();
+      await talking.stop();
+      expect(talking.state()).toBe('stopping');
+      release();
+      await stopping;
+      expect(talking.state()).toBe('preview');
     });
 
     it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {
