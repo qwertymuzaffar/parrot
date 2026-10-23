@@ -33,6 +33,15 @@ describe('shortRanges', () => {
     ]);
   });
 
+  it('cuts a pasted transcript with no punctuation, 20,000 words, without stalling the window', () => {
+    const words = Array.from({ length: 20_000 }, (_, wordIndex) => ['so', 'we', 'talked', 'about', 'the', 'plan'][wordIndex % 6]);
+    const t0 = performance.now();
+    const ranges = shortRanges(words);
+    // scanning ahead from every word took about 3 s here
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect([ranges.length, ranges.every(([start, end]) => end - start <= 22), ranges.at(-1)![1]]).toEqual([1667, true, 20_000]);
+  });
+
   it('leaves a short sentence alone', () => {
     expect(cut('Thank you for your time.')).toEqual(['Thank you for your time.']);
   });

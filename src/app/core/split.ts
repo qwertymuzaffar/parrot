@@ -21,6 +21,11 @@ const isPunct = (word: string) => /[,;:—–)]$|[.!?]["”’)]*$/.test(word);
  */
 export function shortRanges(words: string[]): [number, number][] {
   const out: [number, number][] = [];
+  // how many words from each one on until a punctuated one, counted once from the end: scanning ahead from every
+  // word took seconds on a long sentence with no punctuation (a pasted transcript)
+  const unpunctuated = new Array<number>(words.length + 1).fill(0);
+  for (let wordIndex = words.length - 1; wordIndex >= 0; wordIndex--)
+    unpunctuated[wordIndex] = isPunct(words[wordIndex]) ? 0 : unpunctuated[wordIndex + 1] + 1;
   let start = 0;
   for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
     const len = wordIndex - start + 1;
@@ -30,8 +35,7 @@ export function shortRanges(words: string[]): [number, number][] {
       break;
     }
     // not before "and TypeScript," when a comma follows a word or two later: that cut comes a moment later
-    let toPunct = 0;
-    while (wordIndex + 1 + toPunct < words.length && !isPunct(words[wordIndex + 1 + toPunct])) toPunct++;
+    const toPunct = unpunctuated[wordIndex + 1];
     const cut =
       (isPunct(words[wordIndex]) && len >= 4 && left >= 3) ||
       (len >= 10 && CONJUNCTION.test(words[wordIndex + 1]) && left >= 4 && toPunct > 2) ||
