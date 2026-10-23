@@ -1,4 +1,4 @@
-import { sentences, shortRanges } from './split';
+import { bare, sentences, shortRanges } from './split';
 
 describe('sentences', () => {
   it('splits at a full stop followed by a capital', () => {
@@ -35,5 +35,19 @@ describe('shortRanges', () => {
 
   it('leaves a short sentence alone', () => {
     expect(cut('Thank you for your time.')).toEqual(['Thank you for your time.']);
+  });
+});
+
+describe('bare', () => {
+  it('drops the punctuation around a word, as the engine does, and keeps what is inside it', () => {
+    expect(['“Hello,', '(there)', 'you?!', '2.5', 'Node.js', 'e.g.', "don't"].map(bare)).toEqual([
+      'Hello',
+      'there',
+      'you',
+      '2.5',
+      'Node.js',
+      'e.g',
+      "don't",
+    ]);
   });
 });

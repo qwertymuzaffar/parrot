@@ -73,5 +73,6 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
   return Promise.all(out.map(async (part) => ({ ...part, key: await partKey(part.text) })));
 }
 
-/** A word without the punctuation around it, for the dictionary and the voice. */
-export const bare = (word: string) => word.replace(/[.,;:!?"“”()]/g, '');
+/** A word without the punctuation around it, for the dictionary and the voice: at its ends only, as the engine trims it
+ * ("2.5" and "Node.js" keep theirs). */
+export const bare = (word: string) => word.replace(/^[.,;:!?"“”()]+|[.,;:!?"“”()]+$/g, '');
