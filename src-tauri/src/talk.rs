@@ -337,9 +337,14 @@ impl Talks {
         self.cancel.store(false, Ordering::SeqCst);
         // a stretch being heard while the talk was recorded is waited for: it is part of what is written down
         let current = self.current();
+        let generation = current.as_ref().map(|talk| talk.generation);
         let mut current =
             self.heard.wait_while(current, |current| current.as_ref().is_some_and(|talk| talk.live.busy)).unwrap_or_else(PoisonError::into_inner);
         let talk = current.as_mut().ok_or("there is no talk to write down")?;
+        // the lock is let go while waiting: a talk discarded and another started meanwhile is not this one's to write
+        if Some(talk.generation) != generation {
+            return Err("the talk was discarded while it was being written down".into());
+        }
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
         }
@@ -820,6 +825,26 @@ mod tests {
         let heard_in = listener.lengths.borrow();
         assert!(heard_in.iter().sum::<f64>() > 55.0, "all of it, once it stopped: {heard_in:?}");
         assert_eq!(heard.words.len(), 2 * heard_in.len());
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_writing_down_leaves_a_talk_started_while_it_waited() {
+        let (talks, dir) = talks("restarted");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let job = talks.take_stretch().unwrap();
+        std::thread::scope(|scope| {
+            // waits for the stretch being heard
+            let writing = scope.spawn(|| talks.write_down(&Stretches { heard: "hello there", lengths: RefCell::new(vec![]) }, |_, _| {}));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            // meanwhile the talk is discarded and another started; the stretch heard then wakes the writing-down
+            talks.start(16000).unwrap();
+            talks.stretch_heard(&job, Err("the speech engine is busy".into()));
+            assert!(writing.join().unwrap().unwrap_err().contains("discarded"));
+        });
+        talks.feed(&speech(16000, 1.0)).expect("the new talk goes on");
         talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);
     }
