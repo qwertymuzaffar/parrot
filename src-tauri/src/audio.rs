@@ -119,13 +119,28 @@ pub fn clip_file(path: &Path, from: f64, to: f64) -> Result<(u32, Vec<i16>), Str
     Ok((spec.sample_rate, mono))
 }
 
+/// Write `pcm` to `path` whole or not at all: to <path>.tmp first, then renamed over it. A recording written over
+/// (a talk's, once it is cleaned) would otherwise be cut off by a quit midway, and a WAV whose lengths were never
+/// filled in reads as empty.
 pub fn write_wav(path: &std::path::Path, pcm: &Pcm) -> Result<(), String> {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".tmp");
+    let temporary = std::path::PathBuf::from(temporary);
     let spec = hound::WavSpec { channels: 1, sample_rate: pcm.rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|error| error.to_string())?;
-    for sample in &pcm.samples {
-        writer.write_sample((sample.clamp(-1.0, 1.0) * 32767.0) as i16).map_err(|error| error.to_string())?;
-    }
-    writer.finalize().map_err(|error| error.to_string())
+    let written = (|| {
+        let mut writer = hound::WavWriter::create(&temporary, spec)?;
+        for sample in &pcm.samples {
+            writer.write_sample((sample.clamp(-1.0, 1.0) * 32767.0) as i16)?;
+        }
+        writer.finalize()?;
+        std::fs::File::open(&temporary)?.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok::<_, hound::Error>(())
+    })();
+    written.map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        error.to_string()
+    })
 }
 
 /// High-pass the take at 80 Hz (a second-order filter): desk rumble and handling noise out, the voice untouched.
@@ -465,6 +480,24 @@ mod tests {
         write_wav(&dir, &Pcm { samples: tone(16000, 0.5, 0.5), rate: 16000 }).unwrap();
         let back = read_wav(&std::fs::read(&dir).unwrap()).unwrap();
         assert_eq!((back.rate, back.samples.len()), (16000, 8000));
+    }
+
+    #[test]
+    fn a_recording_written_over_stays_as_it_was_until_the_new_one_is_whole() {
+        let dir = std::env::temp_dir().join(format!("parrot-wav-over-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("talk.wav");
+        write_wav(&path, &Pcm { samples: tone(16000, 2.0, 0.5), rate: 16000 }).unwrap();
+        // the new recording can't be written in full (its temporary file is in the way): the old one is untouched
+        std::fs::create_dir(dir.join("talk.wav.tmp")).unwrap();
+        assert!(write_wav(&path, &Pcm { samples: tone(16000, 1.0, 0.5), rate: 16000 }).is_err());
+        assert_eq!(read_wav_file(&path).unwrap().samples.len(), 32000);
+        std::fs::remove_dir(dir.join("talk.wav.tmp")).unwrap();
+        write_wav(&path, &Pcm { samples: tone(16000, 1.0, 0.5), rate: 16000 }).unwrap();
+        assert_eq!(read_wav_file(&path).unwrap().samples.len(), 16000);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|entry| entry.file_name()).collect();
+        assert_eq!(names, ["talk.wav"]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
