@@ -10,7 +10,8 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Change the words of the text `id` to `new_text`. `progress` gets the tries scored again so far, of how many.
-/// Nothing changes until every try is scored: a failure leaves the text and its tries as they were.
+/// Nothing changes until every try is scored: a failure leaves the text and its tries as they were. A try whose
+/// recording can't be read (gone, damaged, or the first engine's .mp3) can't be scored again: it stays where it was.
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
     let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?);
@@ -52,30 +53,64 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     progress(0, total);
     let names = store.names();
     let mut scored = vec![];
+    let mut done = 0;
     for (old_dir, tries, part) in &changed {
         for attempt in tries {
-            scored.push((old_dir, attempt, part, rejudge(listener, store, attempt, part, &names)?));
-            progress(scored.len(), total);
+            match rejudge(listener, store, attempt, part, &names)? {
+                Some(rejudged) => scored.push((old_dir, attempt, part, rejudged)),
+                None => log::warn!("kept try {} of {} where it was: its recording can't be read", attempt.id, old_dir.display()),
+            }
+            done += 1;
+            progress(done, total);
         }
     }
 
-    // all scored: each try moves to its part's words now, and the text changes
+    // all scored: each try is filed under its part's words now (its recording linked there), then the text changes,
+    // and only then do the tries as they were go. A failure on the way takes back what was filed, leaving the text
+    // as it was; a crash leaves at worst a try twice, once where the text doesn't look.
     let _filing = store::filing();
-    for (old_dir, old_attempt, part, mut attempt) in scored {
-        let new_dir = dir.join(format!("p-{}", store::sha(part)));
-        fs::create_dir_all(&new_dir).map_err(|error| error.to_string())?;
-        let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
-        attempt.id = Store::new_try(&new_dir, stamp)?;
-        let file = new_dir.join(format!("{}.wav", attempt.id));
-        fs::rename(store.recording(&old_attempt.audio)?, &file).map_err(|error| error.to_string())?;
-        attempt.audio = file.strip_prefix(&store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/");
-        store.save_attempt(&new_dir, &attempt)?;
-        let _ = fs::remove_file(old_dir.join(format!("{}.json", old_attempt.id)));
-        // the part's folder goes once its last try has moved out
-        let _ = fs::remove_dir(old_dir);
+    let mut filed: Vec<PathBuf> = vec![];
+    let mut moved: Vec<PathBuf> = vec![];
+    let filing = (|| {
+        for (old_dir, old_attempt, part, mut attempt) in scored {
+            let new_dir = dir.join(format!("p-{}", store::sha(part)));
+            fs::create_dir_all(&new_dir).map_err(|error| error.to_string())?;
+            let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
+            attempt.id = Store::new_try(&new_dir, stamp)?;
+            let file = new_dir.join(format!("{}.wav", attempt.id));
+            filed.extend([file.clone(), new_dir.join(format!("{}.json", attempt.id))]);
+            let recording = store.recording(&old_attempt.audio)?;
+            link(&recording, &file)?;
+            attempt.audio = file.strip_prefix(&store.data).unwrap_or(&file).to_string_lossy().replace('\\', "/");
+            store.save_attempt(&new_dir, &attempt)?;
+            moved.extend([old_dir.join(format!("{}.json", old_attempt.id)), recording]);
+        }
+        store::write_whole(&dir.join("text.txt"), new.as_bytes())
+    })();
+    if let Err(error) = filing {
+        take_back(&filed);
+        return Err(error);
     }
-    store::write_whole(&dir.join("text.txt"), new.as_bytes())?;
+    // the parts' folders go once their last try has moved out
+    take_back(&moved);
     store.text(id)
+}
+
+/// The recording `from` at `to` too, as the same file where the disk allows it (no time or room spent on a long
+/// talk), else as a copy. `to` may be the empty file that claimed its name.
+fn link(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    let _ = fs::remove_file(to);
+    fs::hard_link(from, to).or_else(|_| fs::copy(from, to).map(drop)).map_err(|error| error.to_string())
+}
+
+/// Remove `files`, then their folders left empty.
+fn take_back(files: &[PathBuf]) {
+    for file in files {
+        let _ = fs::remove_file(file);
+    }
+    for file in files {
+        let _ = file.parent().map(fs::remove_dir);
+    }
 }
 
 /// Where the words `words` are in `text` (the first place), if they are.
@@ -106,8 +141,9 @@ fn map_range(ops: &[DiffOp], old: std::ops::Range<usize>) -> std::ops::Range<usi
 
 /// A try scored again against the words `part` has now, from its recording: a stretch at a time, as a talk is, each
 /// old word's stretch giving the new words that stand for it.
-fn rejudge(listener: &impl Listen, store: &Store, attempt: &Attempt, part: &str, names: &[String]) -> Result<Attempt, String> {
-    let pcm = audio::read_wav_file(&store.recording(&attempt.audio)?)?;
+/// None when its recording can't be read.
+fn rejudge(listener: &impl Listen, store: &Store, attempt: &Attempt, part: &str, names: &[String]) -> Result<Option<Attempt>, String> {
+    let Ok(pcm) = store.recording(&attempt.audio).and_then(|file| audio::read_wav_file(&file)) else { return Ok(None) };
     let duration = pcm.seconds();
     let samples = audio::resample(&pcm, 16000);
     drop(pcm);
@@ -155,7 +191,7 @@ fn rejudge(listener: &impl Listen, store: &Store, attempt: &Attempt, part: &str,
         heard.push(scored.heard);
     }
     let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
-    Ok(Attempt {
+    Ok(Some(Attempt {
         text: part.to_string(),
         heard: heard.join(" "),
         score: (100.0 * good as f64 / words.len().max(1) as f64).round() as i64,
@@ -163,7 +199,7 @@ fn rejudge(listener: &impl Listen, store: &Store, attempt: &Attempt, part: &str,
         pauses: text::pauses(&words),
         words,
         ..attempt.clone()
-    })
+    }))
 }
 
 fn round3(value: f64) -> f64 {
@@ -265,6 +301,55 @@ mod tests {
         assert_eq!(item.scores.len(), 2);
         assert!(store.part_dir(&id, "How are you?").is_err(), "no longer a part of the text");
         let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_try_whose_recording_is_gone_stays_where_it_was_and_the_rest_move() {
+        let (store, id) = store_with("unreadable", "Hello there. How are you?", &["Hello there.", "How are you?"]);
+        // a second try of the part, its recording gone
+        let dir = store.part_dir(&id, "How are you?").unwrap();
+        let mut gone = store.attempt(&id, "How are you?", &store.attempts(&id, "How are you?").unwrap()[0].id).unwrap();
+        gone.id = Store::new_try(&dir, "20261021-101010").unwrap();
+        gone.audio = format!("texts/{id}/{}/{}.wav", dir.file_name().unwrap().to_string_lossy(), gone.id);
+        fs::remove_file(dir.join(format!("{}.wav", gone.id))).unwrap();
+        store.save_attempt(&dir, &gone).unwrap();
+        let listener = Listener { heard: "how old are you", fail: false, texts: RefCell::new(vec![]) };
+        let reported = RefCell::new(vec![]);
+        edit_text(&listener, &store, &id, "Hello there. How old are you?", |done, total| reported.borrow_mut().push((done, total))).unwrap();
+        assert_eq!(*reported.borrow(), [(0, 2), (1, 2), (2, 2)]);
+        assert_eq!(store.attempts(&id, "How old are you?").unwrap().len(), 1, "the try that could be scored again moved");
+        assert!(dir.join(format!("{}.json", gone.id)).exists(), "the other is where it was");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_failure_while_the_tries_move_leaves_the_text_as_it_was() {
+        let (store, id) = store_with("unmoved", "Hello there. How are you?", &["Hello there.", "How are you?"]);
+        let listener = Listener { heard: "hi there how old are you", fail: false, texts: RefCell::new(vec![]) };
+        // the second part's new folder can't be made: a file is in its way
+        let text = store.text_dir(&id).unwrap();
+        fs::write(text.join(format!("p-{}", store::sha("How old are you?"))), b"").unwrap();
+        let files = |folder: &std::path::Path| {
+            let mut found: Vec<String> = walk(folder).iter().map(|path| path.strip_prefix(folder).unwrap().to_string_lossy().into()).collect();
+            found.sort();
+            found
+        };
+        let before = files(&text);
+        assert!(edit_text(&listener, &store, &id, "Hi there. How old are you?", |_, _| {}).is_err());
+        assert_eq!(files(&text), before, "nothing moved, nothing left behind");
+        assert_eq!(store.text(&id).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    /// Every file under `folder`.
+    fn walk(folder: &std::path::Path) -> Vec<PathBuf> {
+        fs::read_dir(folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|entry| if entry.path().is_dir() { walk(&entry.path()) } else { vec![entry.path()] })
+            .collect()
     }
 
     #[test]
