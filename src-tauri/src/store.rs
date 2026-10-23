@@ -13,7 +13,7 @@
 
 use crate::text::WordResult;
 use chrono::{Local, NaiveDateTime};
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -99,6 +99,27 @@ pub struct Attempt {
     /// a sentence's take cut from a talk: the id of the talk's take (whole text) it was cut from
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cut: Option<String>,
+}
+
+/// What the lists need of a try, read without keeping its words (a talk's take holds megabytes of them); only a try
+/// with all that a try has, as `Attempt` reads it.
+#[derive(Deserialize)]
+struct TryHead {
+    id: String,
+    when: String,
+    score: i64,
+    wpm: i64,
+    duration: f64,
+    #[serde(default)]
+    cut: Option<String>,
+    #[allow(dead_code)]
+    text: IgnoredAny,
+    #[allow(dead_code)]
+    heard: IgnoredAny,
+    #[allow(dead_code)]
+    words: IgnoredAny,
+    #[allow(dead_code)]
+    audio: IgnoredAny,
 }
 
 /// A text as the library shows it.
@@ -229,6 +250,16 @@ impl Store {
     }
 
     pub(crate) fn read_attempts(dir: &Path) -> Vec<Attempt> {
+        Self::try_files(dir).iter().filter_map(|path| read_json(path)).collect()
+    }
+
+    /// The tries in `dir` as the lists need them, oldest first.
+    fn read_heads(dir: &Path) -> Vec<TryHead> {
+        Self::try_files(dir).iter().filter_map(|path| read_json(path)).collect()
+    }
+
+    /// The tries' files in `dir`, oldest first.
+    fn try_files(dir: &Path) -> Vec<PathBuf> {
         let mut files: Vec<PathBuf> = fs::read_dir(dir)
             .map(|entries| {
                 entries
@@ -238,7 +269,7 @@ impl Store {
             })
             .unwrap_or_default();
         files.sort_by_key(|path| try_order(path));
-        files.iter().filter_map(|path| read_json(path)).collect()
+        files
     }
 
     pub fn scores(&self, id: &str) -> Result<BTreeMap<String, PartScore>, String> {
@@ -249,7 +280,7 @@ impl Store {
             if !name.starts_with("p-") || !entry.path().is_dir() {
                 continue;
             }
-            let tries = Self::read_attempts(&entry.path());
+            let tries = Self::read_heads(&entry.path());
             if let Some(last) = tries.last() {
                 let best = tries.iter().map(|attempt| attempt.score).max().unwrap_or(0);
                 out.insert(name, PartScore { last: last.score, best, tries: tries.len() });
@@ -432,11 +463,11 @@ impl Store {
 
     /// The tries in a folder, newest first.
     fn summaries(dir: &Path) -> Vec<AttemptSummary> {
-        let mut tries = Self::read_attempts(dir);
+        let mut tries = Self::read_heads(dir);
         tries.reverse();
         tries
             .into_iter()
-            .map(|attempt| AttemptSummary { id: attempt.id, when: attempt.when, score: attempt.score, wpm: attempt.wpm, duration: attempt.duration })
+            .map(|head| AttemptSummary { id: head.id, when: head.when, score: head.score, wpm: head.wpm, duration: head.duration })
             .collect()
     }
 
@@ -510,7 +541,7 @@ impl Store {
                         let stamp = name.get(..8).filter(|stamp| name.ends_with(".json") && stamp.bytes().all(|byte| byte.is_ascii_digit()));
                         let Some(Ok(day)) = stamp.map(|stamp| chrono::NaiveDate::parse_from_str(stamp, "%Y%m%d")) else { continue };
                         if let Some(tries) = days.get_mut(&day) {
-                            let attempt = fs::read_to_string(file.path()).ok().and_then(|contents| serde_json::from_str::<Attempt>(&contents).ok());
+                            let attempt = read_json::<TryHead>(&file.path());
                             // a sentence cut from a talk is no try of its own: the talk's take counts
                             if attempt.as_ref().is_some_and(|attempt| attempt.cut.is_some()) {
                                 continue;
@@ -673,6 +704,39 @@ mod tests {
         store.set_name("Tashkent", true).unwrap();
         store.update(&id, Some("Hello".into()), None, false).unwrap();
         assert_eq!((aside(&dir, "names.json"), aside(&text, "meta.json")), (1, 1));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_lists_read_a_try_as_a_whole_try_reads() {
+        let dir = std::env::temp_dir().join(format!("parrot-heads-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", None, None).unwrap().id;
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        let attempt = |id: &str, score: i64| Attempt {
+            id: id.into(),
+            when: "2026-10-23T10:10:10".into(),
+            text: "Hello there.".into(),
+            heard: "hello there".into(),
+            words: vec![],
+            duration: 1.5,
+            wpm: 80,
+            score,
+            audio: format!("texts/{id}.wav"),
+            pauses: vec![],
+            cut: None,
+        };
+        store.save_attempt(&part, &attempt("20261023-101010", 70)).unwrap();
+        store.save_attempt(&part, &attempt("20261023-101020", 90)).unwrap();
+        // a try without its words is no try, in the lists as when it is opened
+        fs::write(part.join("20261023-101030.json"), br#"{"id": "20261023-101030", "when": "", "score": 10, "wpm": 0, "duration": 1}"#).unwrap();
+        let tries = store.attempts(&id, "Hello there.").unwrap();
+        assert_eq!(
+            tries.iter().map(|summary| (summary.id.as_str(), summary.score)).collect::<Vec<_>>(),
+            [("20261023-101020", 90), ("20261023-101010", 70)]
+        );
+        assert_eq!(store.scores(&id).unwrap().values().next().map(|part| (part.last, part.best, part.tries)), Some((90, 90, 2)));
         let _ = fs::remove_dir_all(dir);
     }
 

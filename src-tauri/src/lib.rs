@@ -312,24 +312,37 @@ fn info(engine: State<'_, Shared>) -> Value {
     })
 }
 
+// The library's commands read and write files, a text's every try for its scores: off the main thread, so the window
+// never waits on them.
+
 #[tauri::command]
-fn texts(engine: State<'_, Shared>) -> Vec<TextItem> {
-    engine.store.list()
+async fn texts(engine: State<'_, Shared>) -> Result<Vec<TextItem>, String> {
+    let engine = engine.inner().clone();
+    blocking(move || Ok(engine.store.list())).await
 }
 
 #[tauri::command]
-fn add_text(engine: State<'_, Shared>, text: String, title: Option<String>, mode: Option<String>) -> Result<TextItem, String> {
-    engine.store.add(&text, title, mode)
+async fn add_text(engine: State<'_, Shared>, text: String, title: Option<String>, mode: Option<String>) -> Result<TextItem, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.add(&text, title, mode)).await
 }
 
 #[tauri::command]
-fn update_text(engine: State<'_, Shared>, id: String, title: Option<String>, mode: Option<String>, opened: Option<bool>) -> Result<TextItem, String> {
-    engine.store.update(&id, title, mode, opened.unwrap_or(false))
+async fn update_text(
+    engine: State<'_, Shared>,
+    id: String,
+    title: Option<String>,
+    mode: Option<String>,
+    opened: Option<bool>,
+) -> Result<TextItem, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.update(&id, title, mode, opened.unwrap_or(false))).await
 }
 
 #[tauri::command]
-fn delete_text(engine: State<'_, Shared>, id: String) -> Result<(), String> {
-    engine.store.delete(&id)
+async fn delete_text(engine: State<'_, Shared>, id: String) -> Result<(), String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.delete(&id)).await
 }
 
 #[tauri::command]
@@ -374,28 +387,33 @@ fn open_data_folder(engine: State<'_, Shared>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scores(engine: State<'_, Shared>, text: String) -> Result<BTreeMap<String, PartScore>, String> {
-    engine.store.scores(&text)
+async fn scores(engine: State<'_, Shared>, text: String) -> Result<BTreeMap<String, PartScore>, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.scores(&text)).await
 }
 
 #[tauri::command]
-fn attempts(engine: State<'_, Shared>, text: String, part: String) -> Result<Vec<AttemptSummary>, String> {
-    engine.store.attempts(&text, &part)
+async fn attempts(engine: State<'_, Shared>, text: String, part: String) -> Result<Vec<AttemptSummary>, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.attempts(&text, &part)).await
 }
 
 #[tauri::command]
-fn attempt(engine: State<'_, Shared>, text: String, part: String, id: String) -> Result<Attempt, String> {
-    engine.store.attempt(&text, &part, &id)
+async fn attempt(engine: State<'_, Shared>, text: String, part: String, id: String) -> Result<Attempt, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.attempt(&text, &part, &id)).await
 }
 
 #[tauri::command]
-fn word_attempts(engine: State<'_, Shared>, text: String, word: String) -> Result<Vec<AttemptSummary>, String> {
-    engine.store.word_attempts(&text, &word)
+async fn word_attempts(engine: State<'_, Shared>, text: String, word: String) -> Result<Vec<AttemptSummary>, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.word_attempts(&text, &word)).await
 }
 
 #[tauri::command]
-fn word_attempt(engine: State<'_, Shared>, text: String, word: String, id: String) -> Result<Attempt, String> {
-    engine.store.word_attempt(&text, &word, &id)
+async fn word_attempt(engine: State<'_, Shared>, text: String, word: String, id: String) -> Result<Attempt, String> {
+    let engine = engine.inner().clone();
+    blocking(move || engine.store.word_attempt(&text, &word, &id)).await
 }
 
 /// The words never counted as misheard, in every text.
@@ -411,8 +429,9 @@ fn set_name(engine: State<'_, Shared>, word: String, name: bool) -> Result<Vec<S
 }
 
 #[tauri::command]
-fn activity(engine: State<'_, Shared>) -> Activity {
-    engine.store.activity()
+async fn activity(engine: State<'_, Shared>) -> Result<Activity, String> {
+    let engine = engine.inner().clone();
+    blocking(move || Ok(engine.store.activity())).await
 }
 
 #[tauri::command]
