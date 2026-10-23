@@ -198,7 +198,7 @@
       } @empty {
         @if (query()) {
           <li class="empty">No text matches “{{ query() }}”.</li>
-        } @else if (library.loaded() && library.engineState() !== 'down') {
+        } @else if (library.loaded() && !library.texts().length && library.engineState() !== 'down') {
           <li class="empty first">
             <app-logo [size]="56" />
             <b>Nothing to practise yet</b>
