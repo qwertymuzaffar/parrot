@@ -278,6 +278,11 @@ impl Store {
             return Err("the text is empty".into());
         }
         let dir = self.texts().join(sha(&body));
+        // a text added again is the one already here, as it is now: its words may have been fixed since, and its
+        // title and the way it is practised chosen
+        if dir.join("text.txt").is_file() {
+            return Ok(self.text_info(&dir));
+        }
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         write_whole(&dir.join("text.txt"), body.as_bytes())?;
         let created = if dir.join("meta.json").exists() { None } else { Some(json!(now())) };
@@ -570,6 +575,23 @@ mod tests {
         assert_eq!(store.update(&id, Some("Hi".into()), None, true).unwrap().title, "Hi");
         store.delete(&id).unwrap();
         assert!(store.list().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_text_added_again_is_the_one_already_there_as_it_is_now() {
+        let dir = std::env::temp_dir().join(format!("parrot-store-again-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there. How are you?", Some("Greeting".into()), Some("sentences".into())).unwrap().id;
+        // its words fixed, as editing does: the folder keeps the id of the words it was added with
+        write_whole(&store.text_dir(&id).unwrap().join("text.txt"), b"Hello there. How were you?").unwrap();
+        store.update(&id, None, Some("whole".into()), false).unwrap();
+        let again = store.add("Hello  there. How are you?", Some("Another title".into()), Some("sentences".into())).unwrap();
+        assert_eq!(
+            (again.id.as_str(), again.text.as_str(), again.title.as_str(), again.mode.as_str()),
+            (id.as_str(), "Hello there. How were you?", "Greeting", "whole")
+        );
+        assert_eq!(store.list().len(), 1);
         let _ = fs::remove_dir_all(dir);
     }
 
