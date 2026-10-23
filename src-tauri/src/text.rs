@@ -205,9 +205,53 @@ fn compose(run: &[String]) -> String {
     out
 }
 
+/// The plain letters an accented Latin letter is written with in English ("é" → "e", "ß" → "ss"), lower case; none
+/// for a letter that is plain already, or not Latin. Speech recognition writes "café" as "cafe", and the aligner and
+/// the dictionary know a to z only.
+pub fn plain(character: char) -> Option<&'static str> {
+    Some(match character.to_lowercase().next().unwrap_or(character) {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
+        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' => "c",
+        'ď' | 'đ' | 'ð' => "d",
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => "e",
+        'ĝ' | 'ğ' | 'ġ' | 'ģ' => "g",
+        'ĥ' | 'ħ' => "h",
+        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' => "i",
+        'ĵ' => "j",
+        'ķ' => "k",
+        'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => "l",
+        'ñ' | 'ń' | 'ņ' | 'ň' => "n",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' => "o",
+        'ŕ' | 'ŗ' | 'ř' => "r",
+        'ś' | 'ŝ' | 'ş' | 'š' | 'ș' => "s",
+        'ţ' | 'ť' | 'ŧ' | 'ț' => "t",
+        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => "u",
+        'ŵ' => "w",
+        'ý' | 'ÿ' | 'ŷ' => "y",
+        'ź' | 'ż' | 'ž' => "z",
+        'ß' => "ss",
+        'æ' => "ae",
+        'œ' => "oe",
+        'þ' => "th",
+        _ => return None,
+    })
+}
+
+/// `text` with its accented letters plain (see `plain`).
+pub fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match plain(character) {
+            Some(letters) => out.push_str(letters),
+            None => out.push(character),
+        }
+    }
+    out
+}
+
 /// Lower-case word tokens; runs of number words or digits become one "#digits" token.
 pub fn toks(text: &str) -> Vec<String> {
-    let lowered = text.to_lowercase().replace('\u{2019}', "'").replace(['-', ':'], " ");
+    let lowered = fold(&text.to_lowercase()).replace('\u{2019}', "'").replace(['-', ':'], " ");
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
@@ -534,6 +578,14 @@ mod tests {
     fn heard(text: &str, recognized: &str) -> Vec<(String, String)> {
         let (verdicts, _) = heard_words(text, recognized);
         text.split_whitespace().zip(verdicts).filter_map(|(word, verdict)| verdict.map(|heard_as| (word.to_string(), heard_as))).collect()
+    }
+
+    #[test]
+    fn a_word_with_an_accent_is_one_word_heard_as_it_is_written_plain() {
+        assert_eq!(toks("Café, naïve Zürich résumé; Straße Æsop"), vec!["cafe", "naive", "zurich", "resume", "strasse", "aesop"]);
+        assert!(heard("We met at the café in Zürich.", "We met at the cafe in Zurich.").is_empty());
+        assert!(heard("A naïve résumé.", "A naive résumé.").is_empty());
+        assert_eq!(heard("The café.", "The cave."), vec![("café.".to_string(), "cave".to_string())]);
     }
 
     #[test]

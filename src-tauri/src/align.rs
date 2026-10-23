@@ -35,6 +35,19 @@ fn token(character: char) -> Option<usize> {
     if character == '-' { None } else { LETTERS.find(character).map(|letter_index| letter_index + 5) }
 }
 
+/// The tokens a word is spelled with, each with which character of the word it is: an accented letter as its plain
+/// one or two ("é" as e, "ß" as s s), which are all the model knows.
+fn spelling(word: &str) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    for (char_index, character) in word.chars().enumerate() {
+        match crate::text::plain(character) {
+            Some(letters) => out.extend(letters.chars().filter_map(token).map(|token_id| (char_index, token_id))),
+            None => out.extend(token(character).map(|token_id| (char_index, token_id))),
+        }
+    }
+    out
+}
+
 /// The model's frame hop (samples at 16 kHz): its convolutional front end gives a frame per 320 samples.
 const HOP: usize = 320;
 /// A take is aligned in windows this long, with CONTEXT more on each side that is run but not kept: the model's
@@ -119,8 +132,7 @@ impl Aligner {
         let mut owner: Vec<Option<usize>> = vec![]; // the word each target token spells, None for separators
         let mut place: Vec<usize> = vec![]; // which character of its word each target token is
         for (word_index, word) in words.iter().enumerate() {
-            let letters: Vec<(usize, usize)> =
-                word.chars().enumerate().filter_map(|(char_index, character)| token(character).map(|token_id| (char_index, token_id))).collect();
+            let letters = spelling(word);
             if letters.is_empty() {
                 continue;
             }
@@ -232,6 +244,14 @@ fn viterbi(em: &[[f32; TOKENS]], targets: &[usize]) -> Option<Vec<Option<usize>>
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn an_accented_letter_is_spelled_as_its_plain_one() {
+        let tokens = |letters: &str| letters.chars().map(|letter| token(letter).unwrap()).collect::<Vec<_>>();
+        let places = |spelled: Vec<(usize, usize)>| spelled.into_iter().unzip::<usize, usize, Vec<_>, Vec<_>>();
+        assert_eq!(places(spelling("Café,")), ((0..4).collect(), tokens("cafe")));
+        assert_eq!(places(spelling("Straße")), (vec![0, 1, 2, 3, 4, 4, 5], tokens("strasse")));
+    }
 
     fn build_dir() -> PathBuf {
         PathBuf::from(std::env::var("HOME").unwrap()).join(".cache/parrot-build")

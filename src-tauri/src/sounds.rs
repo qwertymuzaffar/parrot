@@ -125,7 +125,7 @@ pub struct SoundsLike {
 }
 
 pub fn sounds_like(word: &str) -> Option<SoundsLike> {
-    let lower = word.to_lowercase().replace('\u{2019}', "'");
+    let lower = crate::text::fold(&word.to_lowercase()).replace('\u{2019}', "'");
     let mut spell = vec![];
     let mut ipas = vec![];
     for part in lower.split(['-', '–', '—', '/']).filter(|piece| !piece.is_empty()) {
@@ -194,6 +194,11 @@ mod tests {
         assert_eq!(spelled("things"), "THINGZ");
         assert_eq!(sounds_like("answer").unwrap().ipa, "/ˈæn.sɚ/");
         assert_eq!(spelled("GPS-guided"), "GEE·pee·EHS·GAI·duhd");
+    }
+
+    #[test]
+    fn an_accented_word_sounds_like_its_plain_spelling() {
+        assert_eq!(sounds_like("Café").unwrap().ipa, sounds_like("cafe").unwrap().ipa);
     }
 
     #[test]
