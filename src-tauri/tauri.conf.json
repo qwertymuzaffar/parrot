@@ -41,7 +41,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/**"
+          "$APPDATA/texts/**",
+          "$APPDATA/talks/**"
         ]
       }
     }

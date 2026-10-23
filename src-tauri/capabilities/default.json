@@ -1,12 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "what the window uses: its version, the engine's events, and dragging (and zooming) the window by its top strip",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
-    "core:window:allow-start-dragging"
+    "core:app:allow-version",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
   ]
 }
