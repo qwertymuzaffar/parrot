@@ -170,10 +170,20 @@
                 {{ when(card.t.opened ?? card.t.created) }}</span
               >
             }
-            <span class="acts" [class.asking]="confirming() === card.t.id" (click)="$event.stopPropagation()">
+            <span class="acts" [class.asking]="confirming() === card.t.id || renaming() === card.t.id" (click)="$event.stopPropagation()">
               @if (confirming() === card.t.id) {
                 <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
                 <button class="btn danger small" (click)="remove(card.t)">Delete</button>
+              } @else if (renaming() === card.t.id) {
+                <!-- keeps the field focused when pressed, so the field isn't saved on blur first -->
+                <button
+                  class="btn ghost small icon"
+                  (mousedown)="$event.preventDefault()"
+                  (click)="saveRename(card.t)"
+                  aria-label="Save the title"
+                >
+                  <app-icon name="check" [size]="15" />
+                </button>
               } @else {
                 <button class="btn ghost small icon" (click)="startRename(card.t.id)" aria-label="Rename">
                   <app-icon name="edit" [size]="15" />

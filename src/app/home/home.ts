@@ -142,6 +142,11 @@ export class Home {
     afterNextRender(() => this.renameField()?.nativeElement.select(), { injector: this.injector });
   }
 
+  protected saveRename(text: TextItem) {
+    const field = this.renameField()?.nativeElement;
+    if (field) void this.rename(text, field.value);
+  }
+
   protected async rename(text: TextItem, title: string) {
     this.renaming.set(null);
     if (title.trim() && title.trim() !== text.title) await this.library.rename(text.id, title.trim());
