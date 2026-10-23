@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
 import { Engine } from '../core/engine';
 import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
@@ -53,7 +53,7 @@ const MB = 1_000_000;
 
         <section>
           <span class="eyebrow">Speech engine</span>
-          @if (health.value(); as info) {
+          @if (info(); as info) {
             <p class="ok">
               <span class="dot"></span>
               {{ info.models.whisper && info.models.aligner ? 'Ready, on this computer' : 'Speech models not downloaded yet' }}
@@ -65,7 +65,7 @@ const MB = 1_000_000;
 
         <section>
           <span class="eyebrow">Updates</span>
-          @if (version.value(); as current) {
+          @if (current(); as current) {
             <div class="update">
               <span>Parrot {{ current }}</span>
               <button class="btn" (click)="checkForUpdates(current)" [disabled]="update().state === 'checking'">
@@ -119,28 +119,37 @@ const MB = 1_000_000;
           }
         </section>
 
-        @if (health.value(); as info) {
+        @if (!health.isLoading()) {
           <section>
             <span class="eyebrow">Texts and recordings</span>
-            <p class="hint">
-              Kept on this computer, in<br /><code>{{ info.data }}</code>
-            </p>
-            @if (trash.hasValue()) {
-              @let bytes = trash.value() ?? 0;
-              <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+            @if (info(); as info) {
+              <p class="hint">
+                Kept on this computer, in<br /><code>{{ info.data }}</code>
+              </p>
+            }
+            @if (!trash.isLoading()) {
+              @let bytes = trashBytes();
+              @if (bytes != null) {
+                <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+              }
               <div class="acts">
-                @if (emptying()) {
+                @if (emptying() && bytes) {
                   <span class="ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
                   <button class="btn ghost small" (click)="emptying.set(false)">Keep</button>
                   <button class="btn danger small" (click)="emptyTrash()">Empty</button>
                 } @else {
                   <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
-                  <button class="btn small" [disabled]="!bytes" (click)="emptying.set(true)">
-                    <app-icon name="trash" [size]="15" />
-                    {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
-                  </button>
+                  @if (bytes != null) {
+                    <button class="btn small" [disabled]="!bytes" (click)="emptying.set(true)">
+                      <app-icon name="trash" [size]="15" />
+                      {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
+                    </button>
+                  }
                 }
               </div>
+              @if (bytes == null) {
+                <p class="bad">Couldn't tell what is in the trash.</p>
+              }
             }
             @if (failure(); as failure) {
               <p class="bad">{{ failure }}</p>
@@ -277,6 +286,9 @@ export class Settings {
   protected health = resource({ params: () => this.check(), loader: () => this.engine.info() });
   /** the running version, read from the app (no network); none in a plain browser */
   protected version = resource({ loader: () => this.updates.current() });
+  // the values of the resources above, null while they load or if they failed (reading a failed resource's value throws)
+  protected readonly info = computed(() => (this.health.hasValue() ? this.health.value() : null));
+  protected readonly current = computed(() => (this.version.hasValue() ? this.version.value() : null));
   protected update = signal<UpdateCheck>({ state: 'idle' });
 
   /** Ask GitHub for the latest release: only ever on this click. */
@@ -292,6 +304,7 @@ export class Settings {
   }
   /** the bytes in the trash: only the desktop app has one */
   protected trash = resource({ params: () => this.check(), loader: () => this.engine.trashSize() });
+  protected readonly trashBytes = computed(() => (this.trash.hasValue() ? (this.trash.value() ?? 0) : null));
   /** asking whether to empty the trash */
   protected emptying = signal(false);
   protected failure = signal<string | null>(null);

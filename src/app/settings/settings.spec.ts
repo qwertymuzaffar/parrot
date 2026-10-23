@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Engine } from '../core/engine';
+import { Engine, EngineError } from '../core/engine';
 import { Sound } from '../core/sound';
 import { Release, Updates } from '../core/updates';
 import { Settings } from './settings';
@@ -106,5 +106,58 @@ describe('Settings: check for updates', () => {
     updates.answer = async () => ({ version: '0.2.0', url: '' });
     await click(button());
     expect(status()).toBe('You have the latest version (0.2.0).');
+  });
+});
+
+describe('Settings when the engine fails', () => {
+  async function settings(engine: { info: () => Promise<unknown>; trashSize: () => Promise<number> }) {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Updates, useValue: new FakeUpdates() },
+        { provide: Engine, useValue: { ...engine, names: async () => [] } },
+        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+      ],
+    });
+    const fixture = TestBed.createComponent(Settings);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    /** a section, by its heading: each of its lines and buttons */
+    const section = (heading: string) => {
+      const found = [...element.querySelectorAll('section')].find(
+        (each) => each.querySelector('.eyebrow')!.textContent!.trim() === heading,
+      );
+      return found ? [...found.querySelectorAll('p, button')].map((each) => each.textContent!.replace(/\s+/g, ' ').trim()) : null;
+    };
+    const click = async (text: string) => {
+      [...element.querySelectorAll('button')].find((each) => each.textContent!.trim() === text)!.click();
+      await fixture.whenStable();
+    };
+    return { element, section, click };
+  }
+
+  const info = async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} });
+  const fails = () => Promise.reject(new EngineError('The speech engine is not running.'));
+
+  afterEach(() => localStorage.clear());
+
+  it('says the speech engine is not answering, and the rest still works', async () => {
+    const { element, section, click } = await settings({ info: fails, trashSize: async () => 2_000_000 });
+    expect(section('Speech engine')).toEqual(['The speech engine is not answering.']);
+    expect(section('Texts and recordings')).toEqual([
+      'A deleted text stays in the trash for 30 days, then Parrot erases it for good.',
+      'Open data folder',
+      'Empty trash · 2 MB',
+    ]);
+    await click('Dark');
+    expect(element.querySelector('.seg button.on')!.textContent!.trim()).toBe('Dark');
+  });
+
+  it('keeps the data folder button when the trash cannot be measured, and says so', async () => {
+    const { section } = await settings({ info, trashSize: fails });
+    expect(section('Texts and recordings')).toEqual([
+      'Kept on this computer, in/data',
+      'Open data folder',
+      "Couldn't tell what is in the trash.",
+    ]);
   });
 });

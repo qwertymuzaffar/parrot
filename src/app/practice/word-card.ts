@@ -39,7 +39,7 @@ import { SoundUnits } from './sound-units';
 
     <div class="sounds">
       <span class="eyebrow">Sounds like</span>
-      @if (sounds.value()?.spell; as spell) {
+      @if (soundsLike()?.spell; as spell) {
         <span class="spell">
           @for (syllable of spell; track $index; let last = $last) {
             @if (syllable[1]) {
@@ -52,9 +52,11 @@ import { SoundUnits } from './sound-units';
             }
           }
         </span>
-        <span class="ipa">{{ sounds.value()?.ipa }}</span>
-      } @else if (sounds.hasValue()) {
+        <span class="ipa">{{ soundsLike()?.ipa }}</span>
+      } @else if (soundsLike()) {
         <span class="none">Not in the dictionary. Use Hear it.</span>
+      } @else if (sounds.error()) {
+        <span class="none">Couldn't look it up. Use Hear it.</span>
       }
     </div>
 
@@ -387,6 +389,8 @@ export class WordCard {
     params: () => this.word() || undefined,
     loader: ({ params }) => this.engine.soundsLike(params),
   });
+  /** how the word sounds; null while it is looked up, or if it couldn't be (reading a failed resource's value throws) */
+  protected readonly soundsLike = computed(() => (this.sounds.hasValue() ? this.sounds.value() : null));
   protected pct = (score: number | null) => Math.round((score ?? 0) * 100);
   /** the word's sounds as spelled, coloured by how surely each was heard; a word that passed both checks shows its
    * unsure sounds as fair, never off (single-letter scores are rough, and a clear word should not look wrong) */
@@ -428,7 +432,7 @@ export class WordCard {
     const focus = this.focusOf(mine, units);
     if (focus) return `The <b>${escapeHtml(focus.text)}</b> was the least sure (${this.pct(focus.score)}%).`;
     if (!leastSure(units)) return '';
-    const stress = (this.sounds.value()?.spell?.length ?? 0) > 1 ? ', with the stress on the syllable in capitals' : '';
+    const stress = (this.soundsLike()?.spell?.length ?? 0) > 1 ? ', with the stress on the syllable in capitals' : '';
     return `Every sound came through clearly, so there is nothing specific to fix. To sound closer still, listen with Slowly and match the rhythm${stress}.`;
   }
   /** a sentence or two on what happened, as safe HTML (only <b> around text we escape) */
