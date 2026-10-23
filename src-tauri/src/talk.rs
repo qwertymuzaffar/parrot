@@ -243,7 +243,10 @@ impl Talks {
         // the header brought up to date: a crash loses no more than this block
         writer.flush().map_err(|error| error.to_string())?;
         talk.samples += count;
-        talk.live.pending.extend(samples.iter().map(|sample| i16::from_le_bytes(*sample) as f32 / 32768.0));
+        // not once a stretch couldn't be heard: nothing more is, and the rest of a long talk would sit in memory
+        if !talk.live.broken {
+            talk.live.pending.extend(samples.iter().map(|sample| i16::from_le_bytes(*sample) as f32 / 32768.0));
+        }
         Ok(std::mem::take(&mut talk.live.news))
     }
 
@@ -301,7 +304,10 @@ impl Talks {
                     live.news.push(heard.clone());
                     live.heard.push(LiveStretch { from: job.from, to: job.to, heard, placed });
                 }
-                Err(_) => live.broken = true,
+                Err(_) => {
+                    live.broken = true;
+                    live.pending = vec![];
+                }
             }
         }
         self.heard.notify_all();
@@ -807,10 +813,12 @@ mod tests {
         let job = talks.take_stretch().unwrap();
         talks.stretch_heard(&job, Err("the speech engine is busy".into()));
         assert!(!talks.ready(), "nothing more is heard while recording");
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        assert_eq!(talks.current().as_ref().unwrap().live.pending.len(), 0, "nor kept in memory to be heard");
         let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
         let heard_in = listener.lengths.borrow();
-        assert!(heard_in.iter().sum::<f64>() > 35.0, "all of it, once it stopped: {heard_in:?}");
+        assert!(heard_in.iter().sum::<f64>() > 55.0, "all of it, once it stopped: {heard_in:?}");
         assert_eq!(heard.words.len(), 2 * heard_in.len());
         talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);
