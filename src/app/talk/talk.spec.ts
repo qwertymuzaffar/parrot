@@ -166,6 +166,27 @@ describe('Just talk', () => {
       expect(talking.stop).toHaveBeenCalledTimes(2);
     });
 
+    it('is not stopped by an Esc that closes a dialog or leaves a field', async () => {
+      talking.state.set('recording');
+      talking.recording.set(true);
+      await render(TalkCard);
+      const esc = (target: EventTarget) => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      // closing Settings
+      const dialog = document.body.appendChild(document.createElement('dialog'));
+      dialog.setAttribute('open', '');
+      esc(dialog);
+      dialog.remove();
+      // leaving the title being renamed, or the new text's fields
+      for (const tag of ['input', 'textarea']) {
+        const field = document.body.appendChild(document.createElement(tag));
+        esc(field);
+        field.remove();
+      }
+      expect(talking.stop).not.toHaveBeenCalled();
+      esc(document.body);
+      expect(talking.stop).toHaveBeenCalledTimes(1);
+    });
+
     it('shows how far writing it down has got, with a Cancel', async () => {
       talking.state.set('writing');
       talking.progress.set(0.4);

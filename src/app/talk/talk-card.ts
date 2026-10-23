@@ -275,7 +275,7 @@ export function length(seconds: number) {
       border-top-color: var(--accent-ink);
     }
   `,
-  host: { '(document:keydown.escape)': 'escape()' },
+  host: { '(document:keydown.escape)': 'escape($event)' },
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TalkCard {
@@ -297,7 +297,11 @@ export class TalkCard {
     void this.talking.discard();
   }
 
-  protected escape() {
+  /** Esc stops a talk, unless it is closing a dialog (Settings) or leaving a field (a title being renamed), as on the
+   * practice screen */
+  protected escape(event: Event) {
+    const el = event.target as HTMLElement;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || document.querySelector('dialog[open]')) return;
     if (this.talking.recording()) void this.talking.stop();
   }
 }
