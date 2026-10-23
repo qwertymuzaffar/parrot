@@ -24,7 +24,9 @@ function standIn() {
     unfinished: signal<LeftTalk | null>(null),
     prompts: signal<string | null>(null),
     prompt: signal<string | null>(null),
+    draft: signal<{ said: string; title: string } | null>(null),
     start: vi.fn(),
+    leave: vi.fn(),
     checkUnfinished: vi.fn(),
     choosePrompts: vi.fn(),
     anotherPrompt: vi.fn(),
@@ -182,8 +184,16 @@ describe('Just talk', () => {
       const card = await render(TalkCard);
       expect(card.element.querySelector('[role=alert]')!.textContent).toContain('speech recognition failed');
       card.button(/Write it down/).click();
-      card.button(/Discard/).click();
-      expect([talking.writeDown.mock.calls.length, talking.discard.mock.calls.length]).toEqual([1, 1]);
+      expect(talking.writeDown).toHaveBeenCalled();
+      // its recording may be long: discarding asks first
+      card.button(/^\s*Discard\s*$/).click();
+      await card.update();
+      expect([talking.discard.mock.calls.length, card.text()]).toEqual([
+        0,
+        expect.stringContaining('Discard this talk and its recording?'),
+      ]);
+      card.element.querySelector<HTMLButtonElement>('.btn.danger')!.click();
+      expect(talking.discard).toHaveBeenCalled();
     });
 
     it('says why a quiet talk had nothing in it', async () => {
@@ -292,7 +302,8 @@ describe('Just talk', () => {
       expect(talking.keep).toHaveBeenCalledWith('I moved here tree years ago.', 'Moving');
     });
 
-    it('asks before discarding a talk of over a minute', async () => {
+    it('asks before discarding a talk, however short', async () => {
+      talking.talk.set({ ...TALK, duration: 8 });
       const preview = await render(TalkPreview);
       preview.button(/^\s*Discard\s*$/).click();
       await preview.update();
@@ -310,6 +321,20 @@ describe('Just talk', () => {
       talking.state.set('keeping');
       const preview = await render(TalkPreview);
       expect([preview.button(/Home/).disabled, preview.button(/^\s*Discard\s*$/).disabled]).toEqual([true, true]);
+    });
+
+    it('goes Home leaving the talk unfinished, with what was typed, and shows that again when it comes back', async () => {
+      const preview = await render(TalkPreview);
+      const said = preview.element.querySelector<HTMLTextAreaElement>('textarea')!;
+      said.value = 'I moved here tree years ago.';
+      said.dispatchEvent(new Event('input'));
+      preview.button(/Home/).click();
+      expect([talking.leave.mock.calls[0], talking.discard.mock.calls.length]).toEqual([['I moved here tree years ago.', ''], 0]);
+
+      talking.draft.set({ said: 'I moved here tree years ago.', title: 'Moving' });
+      const again = await render(TalkPreview);
+      expect(again.element.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('I moved here tree years ago.');
+      expect(again.element.querySelector<HTMLInputElement>('#talk-title-field')!.value).toBe('Moving');
     });
 
     it('titles the text by the prompt talked about', async () => {

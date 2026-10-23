@@ -1278,6 +1278,31 @@ describe('the practice state', () => {
       expect([talking.state(), talking.failure()]).toEqual(['preview', 'The speech engine is not running.']);
     });
 
+    it('is left unfinished from its check screen, with what was typed, to check again from the card', async () => {
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      talking.leave('I moved here tree years ago.', 'Moving');
+      expect([talking.state(), talking.talk(), talking.unfinished(), talking.draft()]).toEqual([
+        'idle',
+        null,
+        { started: '2026-10-21T10:00:00', duration: 3, heard: written },
+        { said: 'I moved here tree years ago.', title: 'Moving' },
+      ]);
+      expect(engine.calls).not.toContain('talkDiscard');
+      // a new talk waits until this one is dealt with
+      await talking.start();
+      expect(talking.state()).toBe('idle');
+      talking.checkUnfinished();
+      expect([talking.state(), talking.talk(), talking.draft()?.title]).toEqual(['preview', written, 'Moving']);
+      await talking.keep('I moved here tree years ago.', 'Moving');
+      expect([talking.state(), talking.draft(), engine.kept]).toEqual([
+        'idle',
+        null,
+        { text: 'I moved here tree years ago.', title: 'Moving' },
+      ]);
+    });
+
     it("can't be discarded while it is being kept, and comes back to be checked if keeping it fails", async () => {
       await talking.start();
       recorder.say(1);

@@ -91,8 +91,14 @@ export function length(seconds: number) {
         @case ('stopped') {
           <p class="hint" role="status">The recording is kept. Write it down again, or let it go.</p>
           <div class="go">
-            <button class="btn ghost" (click)="talking.discard()">Discard</button>
-            <button class="btn primary" (click)="talking.writeDown()">Write it down</button>
+            @if (confirming()) {
+              <span class="hint">Discard this talk and its recording?</span>
+              <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
+              <button class="btn danger small" (click)="discard()">Discard</button>
+            } @else {
+              <button class="btn ghost" (click)="confirming.set(true)">Discard</button>
+              <button class="btn primary" (click)="talking.writeDown()">Write it down</button>
+            }
           </div>
         }
         @default {
@@ -283,7 +289,7 @@ export class TalkCard {
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
   protected readonly since = since;
   protected readonly length = length;
-  /** asking before the talk left from last time is discarded */
+  /** asking before a talk kept on the card (left, or stopped) is discarded */
   protected readonly confirming = signal(false);
 
   protected discard() {

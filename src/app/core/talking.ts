@@ -47,8 +47,10 @@ export class Talking {
   readonly heardSoFar = signal('');
   /** what went wrong, said as the interface shows it */
   readonly failure = signal<string | null>(null);
-  /** a talk left from the last time Parrot ran, until it is written down, checked or discarded */
+  /** a talk left from the last time Parrot ran, or left on its check screen, until it is written down, checked or discarded */
   readonly unfinished = signal<LeftTalk | null>(null);
+  /** what was typed on the check screen of a talk left there: its words as corrected, and its title */
+  readonly draft = signal<{ said: string; title: string } | null>(null);
   /** the set of prompts chosen to talk about (its key), remembered between runs; none to talk freely */
   readonly prompts = signal<string | null>(readSetting<string>('talkPrompts', '') || null);
   /** the prompt to talk about, from that set: the title of the text a talk becomes */
@@ -172,6 +174,7 @@ export class Talking {
   /** Write the talk down: after it stops, again after it was cancelled or failed, or the talk left from last time. */
   async writeDown() {
     this.unfinished.set(null);
+    this.draft.set(null);
     this.state.set('writing');
     this.progress.set(0);
     this.failure.set(null);
@@ -206,6 +209,15 @@ export class Talking {
     this.failure.set(null);
     this.talk.set(talk);
     this.state.set('preview');
+  }
+
+  /** Leave the talk being checked for later: it stays unfinished, with what was typed, to come back to from the card. */
+  leave(said: string, title: string) {
+    const talk = this.talk();
+    if (this.state() !== 'preview' || !talk) return;
+    this.reset();
+    this.draft.set({ said, title });
+    this.unfinished.set({ started: startedAt(talk.audio), duration: talk.duration, heard: talk });
   }
 
   /** Stop writing the talk down; the recording is kept. */
@@ -253,5 +265,14 @@ export class Talking {
     this.talk.set(null);
     this.stopReason.set(null);
     this.failure.set(null);
+    this.draft.set(null);
   }
+}
+
+/** When the talk recorded at `audio` (talks/20261021-140500.wav) was started, local time; now if it doesn't say. */
+function startedAt(audio: string, now = new Date()) {
+  const stamp = /(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)\.wav$/.exec(audio);
+  if (stamp) return `${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}`;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }

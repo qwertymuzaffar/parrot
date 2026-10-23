@@ -335,12 +335,14 @@ export class TalkPreview {
 
   /** the word looked at */
   protected readonly selected = signal<number | null>(null);
-  /** what was said, as the user corrects it: what Parrot heard to begin with */
-  protected readonly said = linkedSignal(() => this.talking.talk()?.heard ?? '');
-  /** the text's title: the prompt talked about, or empty (the text is then titled by its first words) */
+  /** what was said, as the user corrects it: what Parrot heard to begin with, or what was typed before it was left */
+  protected readonly said = linkedSignal(() => this.talking.draft()?.said ?? this.talking.talk()?.heard ?? '');
+  /** the text's title: as typed before it was left, else the prompt talked about, or empty (the text is then titled by its first words) */
   protected readonly title = linkedSignal({
     source: () => this.talking.talk(),
     computation: () => {
+      const draft = this.talking.draft();
+      if (draft) return draft.title;
       const prompt = this.talking.prompt();
       return prompt ? asTitle(prompt) : '';
     },
@@ -395,10 +397,9 @@ export class TalkPreview {
     void this.talking.keep(this.said(), this.title());
   }
 
-  /** A talk of over a minute is asked about first: it may be a lot to say again. */
+  /** Asked about first: the talk can't be said again the same way, and what was typed goes with it. */
   protected askDiscard() {
-    if ((this.talking.talk()?.duration ?? 0) > 60) this.confirming.set(true);
-    else this.discard();
+    this.confirming.set(true);
   }
 
   protected discard() {
@@ -407,7 +408,9 @@ export class TalkPreview {
     void this.talking.discard();
   }
 
+  /** Home, leaving the talk unfinished: the Just talk card offers it again, as it was. */
   protected leave() {
-    this.askDiscard();
+    this.playback.stop();
+    this.talking.leave(this.said(), this.title());
   }
 }

@@ -36,8 +36,9 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
   talk, so it is ready moments after you stop, and shows how each word came out. Where it wrote a word other than the
   one you meant, fix it: that word then shows as misheard, with what was heard, which is the word to work on. Save
   it, and the talk becomes a text with your recording as its first take, to practise by reading: whole, or sentence
-  by sentence, each sentence with its first try cut from the talk. A talk not saved when Parrot quits or crashes is
-  offered again the next time it starts, to write down or discard.
+  by sentence, each sentence with its first try cut from the talk. Going Home from the check leaves the talk, with
+  your fixes, on the Just talk card to come back to; a talk not saved when Parrot quits or crashes is offered again
+  the next time it starts, to write down or discard.
 - **Names.** Speech recognition writes a name it doesn't know as some other word, every time. Mark a word as a name
   from its card and it is never counted as misheard, in any text; Settings lists them.
 - **Edit a text.** Fix its words at any time, from the pencil beside its title. The tries of each part you change
