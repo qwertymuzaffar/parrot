@@ -112,8 +112,7 @@ struct TryHead {
     duration: f64,
     #[serde(default)]
     cut: Option<String>,
-    #[allow(dead_code)]
-    text: IgnoredAny,
+    text: String,
     #[allow(dead_code)]
     heard: IgnoredAny,
     #[allow(dead_code)]
@@ -274,6 +273,12 @@ impl Store {
 
     pub fn scores(&self, id: &str) -> Result<BTreeMap<String, PartScore>, String> {
         let dir = self.text_dir(id)?;
+        // only the parts of the text as it is now, whichever way it is practised: tries left under words it no longer
+        // has (as an edit before 0.5 could leave them) are not shown, so they don't count
+        let full = norm(&fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?);
+        let words: Vec<&str> = full.split_whitespace().collect();
+        let parts: std::collections::HashSet<String> =
+            crate::text::MODES.iter().flat_map(|mode| crate::text::parts(&words, mode)).map(|part| words[part].join(" ")).collect();
         let mut out = BTreeMap::new();
         for entry in fs::read_dir(&dir).map_err(|error| error.to_string())?.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -281,7 +286,7 @@ impl Store {
                 continue;
             }
             let tries = Self::read_heads(&entry.path());
-            if let Some(last) = tries.last() {
+            if let Some(last) = tries.last().filter(|last| parts.contains(&norm(&last.text))) {
                 let best = tries.iter().map(|attempt| attempt.score).max().unwrap_or(0);
                 out.insert(name, PartScore { last: last.score, best, tries: tries.len() });
             }

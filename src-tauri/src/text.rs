@@ -535,6 +535,55 @@ pub fn sentences(text: &str) -> Vec<std::ops::Range<usize>> {
     out
 }
 
+/// The short parts of a sentence of `words`, as ranges of them, cut as the interface cuts them (split.ts
+/// shortRanges): after , ; : — once a part has 4 words or more, before and, but, which... once it has 10, anywhere at
+/// 16 unless a comma or full stop is two words away, and always at 22.
+pub fn short_parts(words: &[&str]) -> Vec<std::ops::Range<usize>> {
+    const CONJUNCTIONS: [&str; 12] = ["and", "but", "or", "which", "where", "when", "while", "because", "so", "then", "that", "who"];
+    let conjunction = |word: &str| CONJUNCTIONS.iter().any(|each| each.eq_ignore_ascii_case(word));
+    let pause = |word: &str| word.ends_with([',', ';', ':', '—', '–', ')']) || word.trim_end_matches(['"', '”', '’', ')']).ends_with(['.', '!', '?']);
+    let mut out = vec![];
+    let mut start = 0;
+    for index in 0..words.len() {
+        let length = index - start + 1;
+        let left = words.len() - index - 1;
+        if left == 0 {
+            out.push(start..index + 1);
+            break;
+        }
+        // not before "and TypeScript," when a comma follows a word or two later: that cut comes a moment later
+        let to_pause = words[index + 1..].iter().take_while(|word| !pause(word)).count();
+        let cut = (pause(words[index]) && length >= 4 && left >= 3)
+            || (length >= 10 && conjunction(words[index + 1]) && left >= 4 && to_pause > 2)
+            || (length >= 16 && to_pause > 2)
+            || length >= 22;
+        if cut {
+            out.push(start..index + 1);
+            start = index + 1;
+        }
+    }
+    out
+}
+
+/// The ways a text is practised: whole, sentence by sentence, or in short parts.
+pub const MODES: [&str; 3] = ["whole", "sentences", "short"];
+
+/// The parts of a text of `words` practised `mode`, as ranges of its words, cut as the interface cuts them.
+pub fn parts(words: &[&str], mode: &str) -> Vec<std::ops::Range<usize>> {
+    let sentences = sentences(&words.join(" "));
+    match mode {
+        // the whole text, one part (none when it has no words)
+        "whole" => std::iter::once(0..words.len()).filter(|whole| !whole.is_empty()).collect(),
+        "short" => sentences
+            .into_iter()
+            .flat_map(|sentence| {
+                short_parts(&words[sentence.clone()]).into_iter().map(move |part| sentence.start + part.start..sentence.start + part.end)
+            })
+            .collect(),
+        _ => sentences,
+    }
+}
+
 pub fn name_key(word: &str) -> String {
     let word = word.trim_matches(|character: char| !character.is_alphanumeric()).to_lowercase();
     word.strip_suffix("'s").or_else(|| word.strip_suffix("’s")).unwrap_or(&word).to_string()
@@ -604,6 +653,25 @@ mod tests {
         );
         assert_eq!(cut("no ending at all"), ["no ending at all"]);
         assert!(sentences("  ").is_empty());
+    }
+
+    #[test]
+    fn short_parts_are_cut_as_the_interface_cuts_them() {
+        let cut = |sentence: &str| {
+            let words: Vec<&str> = sentence.split(' ').collect();
+            short_parts(&words).into_iter().map(|range| words[range].join(" ")).collect::<Vec<_>>()
+        };
+        // the cases of split.spec.ts
+        assert_eq!(
+            cut("I have about eleven years of professional experience in software development, since 2015, and almost all of it is front-end work."),
+            ["I have about eleven years of professional experience in software development,", "since 2015, and almost all of it is front-end work."]
+        );
+        assert_eq!(
+            cut("A group of sunspots about sixteen times as wide as the Earth had been firing flares for days."),
+            ["A group of sunspots about sixteen times as wide as the Earth had been firing flares for days."]
+        );
+        assert_eq!(cut("Thank you for your time."), ["Thank you for your time."]);
+        assert!(short_parts(&[]).is_empty());
     }
 
     #[test]

@@ -26,7 +26,12 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     let new_words: Vec<&str> = new.split_whitespace().collect();
     let ops = similar::capture_diff_slices(similar::Algorithm::Myers, &old_words, &new_words);
 
-    // the parts tried whose words changed: their tries, and the words they have now
+    // the way the text is practised now: a part that is one in more than one way (a sentence that is the whole text)
+    // is taken as one of these
+    let mode = store.text(id)?.mode;
+    let modes: Vec<&str> = std::iter::once(mode.as_str()).chain(text::MODES).collect();
+
+    // the parts tried that are no longer parts of the text: their tries, and the part they became
     let mut changed: Vec<(PathBuf, Vec<Attempt>, String)> = vec![];
     for entry in fs::read_dir(&dir).map_err(|error| error.to_string())?.flatten() {
         let path = entry.path();
@@ -37,16 +42,21 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
         let Some(first) = tries.first() else { continue };
         let part = store::norm(&first.text);
         let part_words: Vec<&str> = part.split_whitespace().collect();
-        if find(&new_words, &part_words).is_some() {
-            continue;
-        }
         let Some(start) = find(&old_words, &part_words) else { continue };
-        let now = map_range(&ops, start..start + part_words.len());
-        // a part whose words are all gone keeps its tries where they were
-        if now.is_empty() {
+        let range = start..start + part_words.len();
+        // practised whole, in sentences or in short parts: the part becomes one of the same in the new text
+        let kind = modes.iter().copied().find(|mode| text::parts(&old_words, mode).contains(&range)).unwrap_or(&mode);
+        let new_parts = text::parts(&new_words, kind);
+        if new_parts.iter().any(|part| new_words[part.clone()] == part_words[..]) {
             continue;
         }
-        changed.push((path, tries, new_words[now].join(" ")));
+        let now = map_range(&ops, range);
+        // the part of the new text its words went to, most of them: a full stop taken out joins two sentences into
+        // one, which takes the tries of both; one put in splits a sentence, whose tries go with its larger half.
+        // A part whose words are all gone keeps its tries where they were.
+        let overlap = |part: &std::ops::Range<usize>| part.end.min(now.end).saturating_sub(part.start.max(now.start));
+        let Some(became) = new_parts.iter().filter(|part| overlap(part) > 0).min_by_key(|part| std::cmp::Reverse(overlap(part))) else { continue };
+        changed.push((path, tries, new_words[became.clone()].join(" ")));
     }
 
     let total = changed.iter().map(|(_, tries, _)| tries.len()).sum();
@@ -300,6 +310,43 @@ mod tests {
         assert_eq!(store.attempt(&id, "Hello there.", &store.attempts(&id, "Hello there.").unwrap()[0].id).unwrap().score, 0);
         assert_eq!(item.scores.len(), 2);
         assert!(store.part_dir(&id, "How are you?").is_err(), "no longer a part of the text");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_full_stop_taken_out_joins_two_sentences_and_their_tries() {
+        let (store, id) = store_with("joined", "Hello there. How are you?", &["Hello there.", "How are you?"]);
+        let listener = Listener { heard: "hello there how are you", fail: false, texts: RefCell::new(vec![]) };
+        let item = edit_text(&listener, &store, &id, "Hello there, how are you?", |_, _| {}).unwrap();
+        assert_eq!(*listener.texts.borrow(), ["Hello there, how are you?"; 2]);
+        assert_eq!(store.attempts(&id, "Hello there, how are you?").unwrap().len(), 2, "the one sentence has the tries of both");
+        assert_eq!(item.scores.values().map(|part| part.tries).collect::<Vec<_>>(), [2]);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_full_stop_put_in_gives_a_sentence_tried_to_its_larger_half() {
+        let (store, id) = store_with("split", "Well, how are you today?", &["Well, how are you today?"]);
+        let listener = Listener { heard: "how are you today", fail: false, texts: RefCell::new(vec![]) };
+        let item = edit_text(&listener, &store, &id, "Well. How are you today?", |_, _| {}).unwrap();
+        assert_eq!(store.attempts(&id, "How are you today?").unwrap().len(), 1);
+        assert!(store.attempts(&id, "Well.").unwrap().is_empty());
+        assert_eq!(item.scores.len(), 1, "no try under words that are no part of the text");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn tries_under_words_that_are_no_part_of_the_text_do_not_count() {
+        let (store, id) = store_with("stranded", "Hello there. How are you?", &["How are you?"]);
+        // left by an edit before 0.5: the words of a part as it never is in this text
+        let text = store.text_dir(&id).unwrap();
+        let stranded = text.join(format!("p-{}", store::sha("Hello there How")));
+        fs::create_dir_all(&stranded).unwrap();
+        let mut attempt = store.attempt(&id, "How are you?", &store.attempts(&id, "How are you?").unwrap()[0].id).unwrap();
+        attempt.text = "Hello there How".into();
+        store.save_attempt(&stranded, &attempt).unwrap();
+        let item = store.text(&id).unwrap();
+        assert_eq!((item.scores.len(), item.practised), (1, 1));
         let _ = fs::remove_dir_all(&store.data);
     }
 
