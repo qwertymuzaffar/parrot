@@ -665,7 +665,7 @@ fn cut_take(
 }
 
 /// What Whisper wrote, without the sounds that aren't words and with single spaces.
-fn tidy(heard: &str) -> String {
+pub(crate) fn tidy(heard: &str) -> String {
     NOT_WORDS.replace_all(heard, " ").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

@@ -94,7 +94,7 @@ impl Engine {
     /// Save a take (a WAV file), score it against `part` and keep the result next to it.
     fn check(&self, text_id: &str, part: &str, wav: &[u8]) -> Result<Attempt, String> {
         let dir = self.store.part_dir(text_id, part)?;
-        self.keep_take(&dir, &store::norm(part), wav, score_take)
+        self.keep_take(&dir, &store::norm(part), wav, score_part)
     }
 
     /// A take of one word of the text said alone, kept with that word's own tries: they never count toward the
@@ -212,6 +212,71 @@ fn score_take(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str, names
         heard,
         words,
     })
+}
+
+/// A take longer than this (seconds) is judged a stretch at a time: placing its words all at once takes memory in
+/// proportion to its length times its letters, a gigabyte for 2,000 words and several for a long talk read whole.
+const WHOLE_TAKE: f64 = 60.0;
+
+/// Judge a take of a part (see `score_take`); a long one a stretch at a time, as a talk is, each stretch against the
+/// words of the text that what was heard in it stands for.
+fn score_part(listener: &impl Listen, audio: &[f32], secs: f64, txt: &str, names: &[String]) -> Result<Scored, String> {
+    let stretches = if secs > WHOLE_TAKE { audio::stretches(audio, 16000, talk::STRETCH) } else { vec![] };
+    if stretches.len() < 2 {
+        return score_take(listener, audio, secs, txt, names);
+    }
+    let mut heard = vec![];
+    for stretch in &stretches {
+        heard.push(talk::tidy(&listener.transcribe(&audio[stretch.clone()], &[])?));
+    }
+    let owner: Vec<usize> = heard.iter().enumerate().flat_map(|(index, said)| said.split_whitespace().map(move |_| index)).collect();
+    let words_heard: Vec<&str> = heard.iter().flat_map(|said| said.split_whitespace()).collect();
+    let mut shared = talk::share(&owner, &words_heard, txt, stretches.len());
+    if shared.iter().all(Vec::is_empty) {
+        // nothing heard at all: the whole text goes with the first stretch, and is missed
+        shared[0] = txt.split_whitespace().collect();
+    }
+    let mut words: Vec<text::WordResult> = vec![];
+    let mut said = vec![];
+    for ((stretch, meant), heard) in stretches.iter().zip(shared).zip(&heard) {
+        if meant.is_empty() {
+            continue;
+        }
+        let piece = &audio[stretch.clone()];
+        let scored = score_take(&HeardAlready { listener, heard }, piece, piece.len() as f64 / 16000.0, &meant.join(" "), names)?;
+        let offset = stretch.start as f64 / 16000.0;
+        let round3 = |value: f64| (value * 1000.0).round() / 1000.0;
+        words.extend(
+            scored
+                .words
+                .into_iter()
+                .map(|word| text::WordResult { t: word.t.map(|[from, to]| [round3(from + offset), round3(to + offset)]), ..word }),
+        );
+        said.push(scored.heard);
+    }
+    let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
+    Ok(Scored {
+        score: (100.0 * good as f64 / words.len().max(1) as f64).round() as i64,
+        wpm: (words.len() as f64 / secs * 60.0).round() as i64,
+        heard: said.join(" "),
+        words,
+    })
+}
+
+/// Stands in for the models when what was said in a stretch is already known: only its words are placed.
+struct HeardAlready<'a, L: Listen> {
+    listener: &'a L,
+    heard: &'a str,
+}
+
+impl<L: Listen> Listen for HeardAlready<'_, L> {
+    fn align(&self, audio: &[f32], text: &str) -> Result<Vec<text::WordTime>, String> {
+        self.listener.align(audio, text)
+    }
+
+    fn transcribe(&self, _audio: &[f32], _words: &[text::WordTime]) -> Result<String, String> {
+        Ok(self.heard.to_string())
+    }
 }
 
 /// Judge a take of one word said alone. Both checks give its verdict, but its score is the sound match: heard without
@@ -604,6 +669,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_long_take_is_judged_a_stretch_at_a_time() {
+        /// hears the next of `said` in each stretch, and places each word in the first second of it
+        struct InTurn {
+            said: RefCell<Vec<&'static str>>,
+            aligned: RefCell<Vec<(f64, String)>>,
+        }
+        impl Listen for InTurn {
+            fn align(&self, audio: &[f32], text: &str) -> Result<Vec<text::WordTime>, String> {
+                self.aligned.borrow_mut().push((audio.len() as f64 / 16000.0, text.to_string()));
+                let count = text.split_whitespace().count();
+                Ok((0..count)
+                    .map(|index| text::WordTime { t: Some([index as f64 * 0.2, index as f64 * 0.2 + 0.1]), score: Some(0.9), letters: None })
+                    .collect())
+            }
+            fn transcribe(&self, _audio: &[f32], _words: &[text::WordTime]) -> Result<String, String> {
+                let mut said = self.said.borrow_mut();
+                Ok(if said.is_empty() { String::new() } else { said.remove(0).to_string() })
+            }
+        }
+        // 63 s of speech: bursts of 6.5 s with half a second of quiet between
+        let audio: Vec<f32> = (0..63 * 16000)
+            .map(|index| {
+                let time = index as f64 / 16000.0;
+                if time % 7.0 < 6.5 { 0.3 * (2.0 * std::f64::consts::PI * 220.0 * time).sin() as f32 } else { 0.0005 }
+            })
+            .collect();
+        let listener = InTurn { said: RefCell::new(vec!["one two three", "four five six", "seven eight nine"]), aligned: RefCell::new(vec![]) };
+        let text = "One two three four five six seven eight nine.";
+        let scored = score_part(&listener, &audio, 63.0, text, &[]).unwrap();
+        let aligned = listener.aligned.borrow();
+        assert!(aligned.len() > 1 && aligned.iter().all(|(secs, _)| *secs <= talk::STRETCH), "{aligned:?}");
+        assert_eq!(aligned.iter().map(|(_, words)| words.as_str()).collect::<Vec<_>>().join(" "), text);
+        assert_eq!(listener.said.borrow().len(), 3 - aligned.len(), "each stretch heard once");
+        assert_eq!((scored.words.len(), scored.score, scored.heard.as_str()), (9, 100, "one two three four five six seven eight nine"));
+        let starts: Vec<f64> = scored.words.iter().map(|word| word.t.unwrap()[0]).collect();
+        assert!(starts.windows(2).all(|pair| pair[0] <= pair[1]) && starts[8] > 20.0, "{starts:?}");
+        // a take of a minute or less is judged whole
+        let short = FakeListener::hearing("the cat sat down");
+        score_part(&short, &[], 2.0, "the cat sat down", &[]).unwrap();
+        assert_eq!(*short.aligned.borrow(), vec!["the cat sat down"]);
+    }
+
     fn statuses(scored: &Scored) -> Vec<WordStatus> {
         scored.words.iter().map(|word| word.status).collect()
     }
@@ -789,6 +897,12 @@ mod tests {
         // a sentence said twice is one part
         let distinct: std::collections::HashSet<String> = sentences.iter().map(|sentence| words[sentence.clone()].join(" ")).collect();
         assert_eq!(kept.text.scores.len(), distinct.len() + 1, "the whole text and each sentence");
+        // the talk read again as a take of the whole text: judged a stretch at a time, much as it was kept
+        let wav = std::fs::read(data.join(&kept.attempt.audio)).unwrap();
+        let started = std::time::Instant::now();
+        let again = engine.check(&kept.text.id, &said, &wav).unwrap();
+        eprintln!("read again in {:.1} s · score {} (kept {})", started.elapsed().as_secs_f64(), again.score, kept.attempt.score);
+        assert!((again.score - kept.attempt.score).abs() <= 10 && again.words.len() == kept.attempt.words.len());
         // a word fixed after it was saved: the whole take and its sentence's are scored again
         let mut fixed = words.clone();
         let last = fixed.len() - 1;
@@ -797,7 +911,7 @@ mod tests {
         let edited = edit::edit_text(&engine, &engine.store, &kept.text.id, &fixed.join(" "), |_, _| {}).unwrap();
         let whole = engine.store.attempts(&kept.text.id, &edited.text).unwrap();
         eprintln!("edited in {:.1} s · the whole take now {}", started.elapsed().as_secs_f64(), whole[0].score);
-        assert_eq!(whole.len(), 1, "the whole take moved to the new words");
+        assert_eq!(whole.len(), 2, "both takes of the whole text moved to the new words");
         let _ = std::fs::remove_dir_all(data);
     }
 
