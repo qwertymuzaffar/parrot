@@ -268,6 +268,8 @@ export class Session {
     const blob = await this.recorder.stop();
     try {
       const attempt = await this.engine.check(text.id, part.text, blob);
+      // another text opened meanwhile: the try is kept with its own, and shows when that one opens
+      if (this.text()?.id !== text.id) return void this.library.loadTexts();
       this.scores.update((scores) => ({
         ...scores,
         [part.key]: {
@@ -284,7 +286,7 @@ export class Session {
       this.selected.set(first >= 0 ? first : null);
       this.failure.set(null);
     } catch (error) {
-      this.failure.set(errorMessage(error));
+      if (this.text()?.id === text.id) this.failure.set(errorMessage(error));
     } finally {
       this.checking.set(false);
     }

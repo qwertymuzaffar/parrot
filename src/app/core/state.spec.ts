@@ -140,7 +140,7 @@ class FakeEngine extends Engine {
     this.tries[part] = (this.tries[part] ?? []).filter((each) => each.id !== id);
   }
   async check(_textId: string, part: string) {
-    this.calls.push(`check ${part}`);
+    await this.pass(`check ${part}`);
     if (!this.nextCheck) throw new EngineError('Nothing was heard in the recording. Is the microphone on?');
     (this.tries[part] ??= []).push(this.nextCheck);
     return this.nextCheck;
@@ -847,6 +847,22 @@ describe('the practice state', () => {
       await app.toggleRecord();
       const key = app.part()!.key;
       expect(app.scores()[key]).toEqual({ last: 50, best: 80, tries: 2 });
+    });
+
+    it('drops a take finished after another text with the same sentence was opened', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Copy', text: TEXT }));
+      await app.loadTexts();
+      engine.nextCheck = attempt('t1', 'How are you?', 80);
+      await app.toggleRecord();
+      const release = engine.hold('check How are you?');
+      const stopping = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('check How are you?'));
+      await app.open('b0b0b0b0b0', 1);
+      release();
+      await stopping;
+      await settle();
+      // the try is the first text's, shown when it is opened: none of it in this one
+      expect([app.text()?.id, app.scores(), app.result(), app.error()]).toEqual(['b0b0b0b0b0', {}, null, null]);
     });
 
     it('reports a take that could not be scored', async () => {
