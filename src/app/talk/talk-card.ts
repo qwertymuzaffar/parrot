@@ -47,7 +47,7 @@ export function length(seconds: number) {
       <h2 id="talk-title">Just talk</h2>
       @switch (talking.state()) {
         @case ('recording') {
-          @if (talking.prompt(); as prompt) {
+          @if (talking.about(); as prompt) {
             <q class="prompt">{{ prompt }}</q>
           }
           @if (talking.recording()) {

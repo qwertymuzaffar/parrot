@@ -343,7 +343,7 @@ export class TalkPreview {
     computation: () => {
       const draft = this.talking.draft();
       if (draft) return draft.title;
-      const prompt = this.talking.prompt();
+      const prompt = this.talking.about();
       return prompt ? asTitle(prompt) : '';
     },
   });

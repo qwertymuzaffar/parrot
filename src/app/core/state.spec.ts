@@ -1181,6 +1181,15 @@ describe('the practice state', () => {
         expect([fresh.state(), fresh.talk(), fresh.unfinished()]).toEqual(['preview', written, null]);
       });
 
+      it('is about no prompt: the one showing now was picked for this run', async () => {
+        localStorage.setItem('parrot.talkPrompts', 'interview');
+        const fresh = await startWith(left(written));
+        expect(fresh.prompt()).toMatch(/\S/);
+        fresh.checkUnfinished();
+        expect(fresh.about()).toBeNull();
+        localStorage.removeItem('parrot.talkPrompts');
+      });
+
       it('comes back to be checked if it was written down, or is discarded', async () => {
         const fresh = await startWith(left(written));
         fresh.checkUnfinished();
@@ -1204,6 +1213,22 @@ describe('the practice state', () => {
       expect(localStorage.getItem('parrot.talkPrompts')).toBe('interview');
       talking.choosePrompts('nonsense');
       expect([talking.prompts(), talking.prompt(), localStorage.getItem('parrot.talkPrompts')]).toEqual([null, null, '']);
+    });
+
+    it('is about the prompt showing when it started, whatever is asked for after', async () => {
+      talking.choosePrompts('interview');
+      const asked = talking.prompt();
+      await talking.start();
+      recorder.say(1);
+      talking.anotherPrompt();
+      await talking.stop();
+      expect([talking.about(), talking.prompt() !== asked]).toEqual([asked, true]);
+      // left on the card, and checked again
+      talking.leave(written.heard, '');
+      talking.checkUnfinished();
+      expect(talking.about()).toBe(asked);
+      await talking.discard();
+      expect(talking.about()).toBeNull();
     });
 
     it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {

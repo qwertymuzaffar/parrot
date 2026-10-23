@@ -24,6 +24,7 @@ function standIn() {
     unfinished: signal<LeftTalk | null>(null),
     prompts: signal<string | null>(null),
     prompt: signal<string | null>(null),
+    about: signal<string | null>(null),
     draft: signal<{ said: string; title: string } | null>(null),
     start: vi.fn(),
     leave: vi.fn(),
@@ -127,7 +128,8 @@ describe('Just talk', () => {
       // the set chosen, clicked again: talk about anything
       card.button(/Small talk/).click();
       expect(talking.choosePrompts).toHaveBeenLastCalledWith(null);
-      // and the prompt stays in view while talking
+      // and the prompt talked about stays in view while talking
+      talking.about.set('How was your weekend?');
       talking.state.set('recording');
       talking.recording.set(true);
       await card.update();
@@ -359,7 +361,9 @@ describe('Just talk', () => {
     });
 
     it('titles the text by the prompt talked about', async () => {
-      talking.prompt.set('Tell me about yourself.');
+      // not the one showing now, after another one was asked for
+      talking.about.set('Tell me about yourself.');
+      talking.prompt.set('Why should we hire you?');
       const preview = await render(TalkPreview);
       expect(preview.element.querySelector<HTMLInputElement>('#talk-title-field')!.value).toBe('Tell me about yourself');
       preview.button(/Save and practise/).click();

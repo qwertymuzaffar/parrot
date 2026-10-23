@@ -53,8 +53,11 @@ export class Talking {
   readonly draft = signal<{ said: string; title: string } | null>(null);
   /** the set of prompts chosen to talk about (its key), remembered between runs; none to talk freely */
   readonly prompts = signal<string | null>(readSetting<string>('talkPrompts', '') || null);
-  /** the prompt to talk about, from that set: the title of the text a talk becomes */
+  /** the prompt to talk about, from that set */
   readonly prompt = signal<string | null>(null);
+  /** the prompt the talk was about, as it started: the title of the text it becomes. A talk left from an earlier run
+   * has none, as that run's prompt isn't known. */
+  readonly about = signal<string | null>(null);
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
@@ -100,6 +103,7 @@ export class Talking {
     if (this.state() !== 'idle') await this.discard();
     this.playback.stop();
     this.reset();
+    this.about.set(this.prompt());
     this.state.set('recording');
     this.sending = Promise.resolve();
     this.started = false;
@@ -235,7 +239,9 @@ export class Talking {
   }
 
   private putAside(talk: Talk, draft: { said: string; title: string } | null) {
+    const about = this.about();
     this.reset();
+    this.about.set(about);
     this.draft.set(draft);
     this.unfinished.set({ started: startedAt(talk.audio), duration: talk.duration, heard: talk });
   }
@@ -286,6 +292,7 @@ export class Talking {
     this.stopReason.set(null);
     this.failure.set(null);
     this.draft.set(null);
+    this.about.set(null);
   }
 }
 
