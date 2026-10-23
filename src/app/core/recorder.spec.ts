@@ -1,4 +1,4 @@
-import { Recorder, Sink, TakeFor } from './recorder';
+import { audioContext, Recorder, Sink, TakeFor } from './recorder';
 import { Settling } from './settling';
 
 /** The recorder with the microphone stood in for: open at once, settled when the test says, sound when it says. */
@@ -36,6 +36,19 @@ function microphone() {
 describe('Recorder', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+
+  it('records at 48 kHz whatever the microphone runs at, or at its rate where none can be asked for', () => {
+    const made: (AudioContextOptions | undefined)[] = [];
+    const context = {} as AudioContext;
+    expect(audioContext((options) => (made.push(options), context))).toBe(context);
+    const refusing = (options?: AudioContextOptions) => {
+      made.push(options);
+      if (options) throw new DOMException('not supported', 'NotSupportedError');
+      return context;
+    };
+    expect(audioContext(refusing)).toBe(context);
+    expect(made).toEqual([{ sampleRate: 48000 }, { sampleRate: 48000 }, undefined]);
+  });
 
   it('a take stopped while the microphone is still preparing gives up quietly and keeps the microphone', async () => {
     const mic = microphone();

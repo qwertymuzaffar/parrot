@@ -16,12 +16,15 @@ impl Pcm {
     }
 }
 
-/// The largest take read: some 45 minutes of the interface's 48 kHz 16-bit mono, far more than any take.
-const LARGEST_TAKE: usize = 256 << 20;
+/// The longest recording read (seconds), at any rate: far more than a take, or a talk (30 minutes).
+const LONGEST_READ: f64 = 45.0 * 60.0;
+/// The largest recording file read: a 30-minute talk is 165 MB at the interface's 48 kHz 16-bit mono, but 660 MB
+/// from a microphone that would only record at 192 kHz.
+const LARGEST_FILE: usize = 1 << 30;
 
 /// Read a WAV file (any sample format, any channel count) as mono floats.
 pub fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
-    too_long(bytes.len() as u64)?;
+    too_big(bytes.len() as u64)?;
     read(hound::WavReader::new(Cursor::new(bytes)).map_err(|error| format!("not a WAV recording: {error}"))?, bytes.len() as u64)
 }
 
@@ -33,12 +36,12 @@ pub fn read_wav_file(path: &Path) -> Result<Pcm, String> {
 
 fn open_wav(path: &Path) -> Result<(hound::WavReader<BufReader<std::fs::File>>, u64), String> {
     let size = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
-    too_long(size)?;
+    too_big(size)?;
     Ok((hound::WavReader::open(path).map_err(|error| format!("not a WAV recording: {error}"))?, size))
 }
 
-fn too_long(size: u64) -> Result<(), String> {
-    if size > LARGEST_TAKE as u64 { Err(format!("the recording is too long ({} MB)", size >> 20)) } else { Ok(()) }
+fn too_big(size: u64) -> Result<(), String> {
+    if size > LARGEST_FILE as u64 { Err(format!("the recording is too long ({} MB)", size >> 20)) } else { Ok(()) }
 }
 
 /// The samples of a WAV recording of `size` bytes as mono floats.
@@ -46,6 +49,11 @@ fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, Stri
     let spec = reader.spec();
     if spec.bits_per_sample > 32 {
         return Err(format!("not a WAV recording Parrot reads: {} bits a sample", spec.bits_per_sample));
+    }
+    // by its length, not its size: the same talk is twice the bytes from a microphone at 96 kHz
+    let secs = reader.duration() as f64 / spec.sample_rate.max(1) as f64;
+    if secs > LONGEST_READ {
+        return Err(format!("the recording is too long ({} minutes)", (secs / 60.0).round()));
     }
     // hound reads (and fails on) every sample the header claims: a header claiming millions more than the body
     // holds would keep the engine busy for seconds or minutes on nothing
@@ -466,12 +474,22 @@ mod tests {
     #[test]
     fn a_header_claiming_more_than_the_body_is_turned_away() {
         assert_eq!(read_wav(&wav_claiming(2000, 2000)).unwrap().samples.len(), 1000);
-        // 50 million samples claimed, a thousand there: refused before reading any
+        // 20 million samples claimed, a thousand there: refused before reading any
         let started = std::time::Instant::now();
-        let error = read_wav(&wav_claiming(100_000_000, 2000)).err().unwrap();
+        let error = read_wav(&wav_claiming(40_000_000, 2000)).err().unwrap();
         assert!(error.contains("damaged"), "{error}");
         assert!(started.elapsed().as_secs_f64() < 0.1, "{:?}", started.elapsed());
-        assert!(read_wav(&vec![0; LARGEST_TAKE + 1]).err().unwrap().contains("too long"));
+        assert!(read_wav(&vec![0; LARGEST_FILE + 1]).err().unwrap().contains("too long"));
+    }
+
+    #[test]
+    fn a_recording_is_too_long_by_its_length_at_any_rate() {
+        // 46 minutes at 16 kHz
+        let error = read_wav(&wav_claiming(2 * 16000 * 46 * 60, 2000)).err().unwrap();
+        assert_eq!(error, "the recording is too long (46 minutes)");
+        // the longest talk fits, whatever rate the microphone records at
+        let longest = (crate::talk::LONGEST + 5.0) * 192_000.0 * 2.0;
+        assert!(longest + 44.0 < LARGEST_FILE as f64 && crate::talk::LONGEST < LONGEST_READ, "{longest}");
     }
 
     #[test]

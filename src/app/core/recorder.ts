@@ -35,6 +35,19 @@ const SINK_MS = 2000;
 /** a sample at least this loud (about -30 dBFS) is sound, not a quiet room */
 const SOUND_PEAK = 0.03;
 
+/** The rate a take is recorded at, as the engine keeps it: never the 96 or 192 kHz a microphone may run at, which
+ * would make a long talk two or four times the size. */
+export const RECORD_RATE = 48000;
+
+/** An audio context at RECORD_RATE, or at the device's own rate where a rate can't be asked for. */
+export function audioContext(make = (options?: AudioContextOptions) => new AudioContext(options)) {
+  try {
+    return make({ sampleRate: RECORD_RATE });
+  } catch {
+    return make();
+  }
+}
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Float samples as 16-bit ones. */
@@ -106,7 +119,7 @@ export class Recorder {
   private async openNow(): Promise<void> {
     // made and resumed while the click still counts: after waiting for the microphone (a second or more, longer with
     // the permission prompt) WebKit keeps a new audio context suspended, and nothing would be recorded
-    const ctx = new AudioContext();
+    let ctx = audioContext();
     // not awaited: a resume that isn't allowed may never settle, and start() gives up when no sound arrives
     ctx.resume().catch(() => {});
     try {
@@ -123,10 +136,19 @@ export class Recorder {
     writeSetting('mic', 'granted');
     const stream = this.stream;
     try {
+      let source: MediaStreamAudioSourceNode;
+      try {
+        source = ctx.createMediaStreamSource(stream);
+      } catch {
+        // a browser that can't connect a microphone to a context at another rate (Firefox): the device's own, then
+        void ctx.close();
+        ctx = new AudioContext();
+        ctx.resume().catch(() => {});
+        source = ctx.createMediaStreamSource(stream);
+      }
       const url = URL.createObjectURL(new Blob([CAPTURE], { type: 'text/javascript' }));
       await ctx.audioWorklet.addModule(url);
       URL.revokeObjectURL(url);
-      const source = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'parrot-capture', { numberOfInputs: 1, numberOfOutputs: 0 });
       this.settling = new Settling();
       node.port.onmessage = (event: MessageEvent<Float32Array>) => this.capture(event.data, ctx.sampleRate);
