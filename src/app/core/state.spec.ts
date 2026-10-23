@@ -1278,6 +1278,20 @@ describe('the practice state', () => {
       expect([talking.state(), talking.failure()]).toEqual(['preview', 'The speech engine is not running.']);
     });
 
+    it('stops when a text is opened, and is written down out of sight to wait on the card', async () => {
+      await talking.start();
+      recorder.say(2);
+      await settle();
+      const release = engine.hold('talkStop done');
+      await app.open(ID);
+      expect([recorder.owner(), app.view(), talking.state()]).toEqual([null, 'practice', 'writing']);
+      release();
+      await settle();
+      expect([talking.state(), talking.checking(), talking.unfinished()?.heard]).toEqual(['idle', false, written]);
+      await app.toggleRecord();
+      expect(recorder.owner()).toBe('part');
+    });
+
     it('is left unfinished from its check screen, with what was typed, to check again from the card', async () => {
       await talking.start();
       recorder.say(1);

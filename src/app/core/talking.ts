@@ -70,6 +70,7 @@ export class Talking {
   private watch = 0;
 
   constructor() {
+    this.session.whenOpening(() => this.away());
     this.anotherPrompt();
     // asked once, at the start: a talk can only be left by an earlier run
     this.engine.talkLeft().then(
@@ -151,24 +152,37 @@ export class Talking {
 
   /** Stop recording and write the talk down. */
   async stop(reason: StopReason = 'you') {
-    if (this.state() !== 'recording') return;
+    if (!(await this.endRecording())) return;
+    this.stopReason.set(reason);
+    await this.writeDown();
+  }
+
+  /** A text is opening: a talk being recorded stops, and is written down out of sight, to wait on the card. */
+  private async away() {
+    if (!(await this.endRecording())) return;
+    this.stopReason.set('you');
+    void this.writeDown();
+  }
+
+  /** Stop recording the talk, once all of it has reached the engine; whether there is anything to write down. */
+  private async endRecording() {
+    if (this.state() !== 'recording') return false;
     clearInterval(this.watch);
     const got = this.recording();
     await this.recorder.stop();
     if (!got) {
       // stopped while the microphone was still getting ready: nothing was recorded
       this.state.set('idle');
-      return;
+      return false;
     }
     await this.sending;
-    if (this.sendFailed) return;
+    if (this.sendFailed) return false;
     if (!this.started) {
       this.reset();
       this.failure.set('Nothing was recorded. Is the microphone on?');
-      return;
+      return false;
     }
-    this.stopReason.set(reason);
-    await this.writeDown();
+    return true;
   }
 
   /** Write the talk down: after it stops, again after it was cancelled or failed, or the talk left from last time. */
@@ -181,6 +195,8 @@ export class Talking {
     try {
       const talk = await this.engine.talkStop(({ done, total }) => this.progress.set(total ? done / total : 0));
       if (this.state() !== 'writing') return;
+      // a text was opened meanwhile: the talk waits on the card rather than taking the screen from it
+      if (this.session.view() === 'practice') return this.putAside(talk, null);
       this.talk.set(talk);
       this.state.set('preview');
     } catch (error) {
@@ -215,8 +231,12 @@ export class Talking {
   leave(said: string, title: string) {
     const talk = this.talk();
     if (this.state() !== 'preview' || !talk) return;
+    this.putAside(talk, { said, title });
+  }
+
+  private putAside(talk: Talk, draft: { said: string; title: string } | null) {
     this.reset();
-    this.draft.set({ said, title });
+    this.draft.set(draft);
     this.unfinished.set({ started: startedAt(talk.audio), duration: talk.duration, heard: talk });
   }
 

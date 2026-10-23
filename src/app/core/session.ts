@@ -66,10 +66,19 @@ export class Session {
     (this.result()?.words ?? []).filter((word) => word.status === 'wrong').map((word) => bare(word.w)),
   );
 
+  /** what is waited for before a text opens: a talk being recorded stops (Talking, which needs this service) */
+  private beforeOpen: (() => Promise<void>)[] = [];
+
+  /** Run `hook`, and wait for it, before a text opens. */
+  whenOpening(hook: () => Promise<void>) {
+    this.beforeOpen.push(hook);
+  }
+
   /** Open a text at a part: the given one, else where it was left. */
   async open(id: string, index?: number) {
     const text = this.library.texts().find((item) => item.id === id);
     if (!text) return;
+    for (const hook of this.beforeOpen) await hook();
     this.playback.stop();
     await this.dropTake();
     this.recorder.warm();
