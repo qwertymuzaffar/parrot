@@ -40,6 +40,16 @@ fn open_wav(path: &Path) -> Result<(hound::WavReader<BufReader<std::fs::File>>, 
     Ok((hound::WavReader::open(path).map_err(|error| format!("not a WAV recording: {error}"))?, size))
 }
 
+/// hound reads (and fails on) every sample the header claims: a header claiming millions more than the body holds
+/// would keep the engine busy for seconds or minutes on nothing.
+fn whole<R: Read>(reader: &hound::WavReader<R>, size: u64) -> Result<(), String> {
+    let claimed_bytes = reader.len() as u64 * reader.spec().bits_per_sample.div_ceil(8) as u64;
+    if claimed_bytes > size {
+        return Err(format!("the recording is damaged: it says it holds {claimed_bytes} bytes of sound in {size}"));
+    }
+    Ok(())
+}
+
 fn too_big(size: u64) -> Result<(), String> {
     if size > LARGEST_FILE as u64 { Err(format!("the recording is too long ({} MB)", size >> 20)) } else { Ok(()) }
 }
@@ -55,12 +65,7 @@ fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, Stri
     if secs > LONGEST_READ {
         return Err(format!("the recording is too long ({} minutes)", (secs / 60.0).round()));
     }
-    // hound reads (and fails on) every sample the header claims: a header claiming millions more than the body
-    // holds would keep the engine busy for seconds or minutes on nothing
-    let claimed_bytes = reader.len() as u64 * spec.bits_per_sample.div_ceil(8) as u64;
-    if claimed_bytes > size {
-        return Err(format!("the recording is damaged: it says it holds {claimed_bytes} bytes of sound in {size}"));
-    }
+    whole(&reader, size)?;
     let ch = spec.channels.max(1) as usize;
     // as long as the header says from the start (checked against the size above): a long talk grown a little at a
     // time would be copied, and held twice, each time it outgrew its room
@@ -80,7 +85,8 @@ fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, Stri
 /// The loudest sample of each of `slices` equal slices of the WAV file at `path`, scaled so the loudest slice is 1:
 /// a waveform, read a little at a time, so even a long talk costs no memory.
 pub fn peaks_file(path: &Path, slices: usize) -> Result<Vec<f32>, String> {
-    let (mut reader, _) = open_wav(path)?;
+    let (mut reader, size) = open_wav(path)?;
+    whole(&reader, size)?;
     let spec = reader.spec();
     let ch = spec.channels.max(1) as usize;
     let frames = reader.duration() as usize;
@@ -480,6 +486,21 @@ mod tests {
         assert!(error.contains("damaged"), "{error}");
         assert!(started.elapsed().as_secs_f64() < 0.1, "{:?}", started.elapsed());
         assert!(read_wav(&vec![0; LARGEST_FILE + 1]).err().unwrap().contains("too long"));
+    }
+
+    #[test]
+    fn the_waveform_of_a_header_claiming_more_than_the_body_is_turned_away() {
+        let dir = std::env::temp_dir().join(format!("parrot-peaks-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("damaged.wav");
+        std::fs::write(&path, wav_claiming(40_000_000, 2000)).unwrap();
+        let started = std::time::Instant::now();
+        let error = peaks_file(&path, 92).unwrap_err();
+        assert!(error.contains("damaged"), "{error}");
+        assert!(started.elapsed().as_secs_f64() < 0.1, "{:?}", started.elapsed());
+        std::fs::write(&path, wav_claiming(2000, 2000)).unwrap();
+        assert_eq!(peaks_file(&path, 92).unwrap().len(), 92);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
