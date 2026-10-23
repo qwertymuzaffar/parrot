@@ -19,7 +19,9 @@ import { stopNote } from './talk-card';
   template: `
     @if (talking.talk(); as talk) {
       <header class="top">
-        <button class="btn ghost" (click)="leave()"><app-icon name="back" [size]="16" /> Home</button>
+        <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="leave()">
+          <app-icon name="back" [size]="16" /> Home
+        </button>
         <h1>Check what you said</h1>
       </header>
 
@@ -143,7 +145,7 @@ import { stopNote } from './talk-card';
                 <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
                 <button class="btn danger small" (click)="discard()">Discard</button>
               } @else {
-                <button class="btn ghost" (click)="askDiscard()">Discard</button>
+                <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="askDiscard()">Discard</button>
                 <button class="btn primary" [disabled]="!said().trim() || talking.state() === 'keeping'" (click)="keep()">
                   @if (talking.state() === 'keeping') {
                     <span class="spinner"></span> Saving…

@@ -306,6 +306,12 @@ describe('Just talk', () => {
       expect(talking.discard).toHaveBeenCalled();
     });
 
+    it("can't be left or discarded while it is being saved", async () => {
+      talking.state.set('keeping');
+      const preview = await render(TalkPreview);
+      expect([preview.button(/Home/).disabled, preview.button(/^\s*Discard\s*$/).disabled]).toEqual([true, true]);
+    });
+
     it('titles the text by the prompt talked about', async () => {
       talking.prompt.set('Tell me about yourself.');
       const preview = await render(TalkPreview);

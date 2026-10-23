@@ -228,13 +228,16 @@ export class Talking {
       const first = kept.attempt.words.findIndex((word) => word.status !== 'good');
       if (first >= 0) this.session.selectWord(first);
     } catch (error) {
+      // still the talk being kept: nothing else may have taken the screen meanwhile
+      if (this.state() !== 'keeping') return;
       this.state.set('preview');
       this.failure.set(errorMessage(error));
     }
   }
 
-  /** Drop the talk and its recording. */
+  /** Drop the talk and its recording; not while it is being kept, which may still fail and come back to be checked. */
   async discard() {
+    if (this.state() === 'keeping') return;
     clearInterval(this.watch);
     this.unfinished.set(null);
     if (this.state() === 'recording' && this.recorder.owner() === 'free') await this.recorder.stop();

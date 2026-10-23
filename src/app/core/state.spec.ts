@@ -1278,6 +1278,21 @@ describe('the practice state', () => {
       expect([talking.state(), talking.failure()]).toEqual(['preview', 'The speech engine is not running.']);
     });
 
+    it("can't be discarded while it is being kept, and comes back to be checked if keeping it fails", async () => {
+      await talking.start();
+      recorder.say(1);
+      await talking.stop();
+      const release = engine.hold('talkKeep');
+      const keeping = talking.keep('I moved here.', '');
+      await settle();
+      await talking.discard();
+      expect([talking.state(), talking.talk(), engine.calls.includes('talkDiscard')]).toEqual(['keeping', written, false]);
+      engine.down = true;
+      release();
+      await keeping;
+      expect([talking.state(), talking.talk(), talking.failure()]).toEqual(['preview', written, 'The speech engine is not running.']);
+    });
+
     it('waits for a take under way, and says when the microphone is not allowed', async () => {
       await app.open(ID);
       await app.toggleRecord();
