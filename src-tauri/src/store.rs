@@ -13,6 +13,7 @@
 
 use crate::text::WordResult;
 use chrono::{Local, NaiveDateTime};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -28,6 +29,28 @@ static FILING: Mutex<()> = Mutex::new(());
 
 pub fn filing() -> MutexGuard<'static, ()> {
     FILING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The JSON file at `path` as a `T`, if there is one. A file that can't be read as one (synced half-way, edited by
+/// hand) is said in the log, rather than left out without a word.
+fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    let contents = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).inspect_err(|error| log::warn!("left out {}, which is damaged: {error}", path.display())).ok()
+}
+
+/// About to be written over: a JSON file that can't be read as a `T` is set aside first (as <name>.damaged-<time>),
+/// so that what can't be read in it is not lost, but can be put right by hand.
+fn set_aside_if_damaged<T: DeserializeOwned>(path: &Path) {
+    let Ok(contents) = fs::read_to_string(path) else { return };
+    if serde_json::from_str::<T>(&contents).is_ok() {
+        return;
+    }
+    let aside =
+        path.with_file_name(format!("{}.damaged-{}", path.file_name().unwrap_or_default().to_string_lossy(), Local::now().format("%Y%m%d-%H%M%S")));
+    match fs::rename(path, &aside) {
+        Ok(()) => log::warn!("set aside {}, which is damaged, as {}", path.display(), aside.display()),
+        Err(error) => log::warn!("could not set aside {}, which is damaged: {error}", path.display()),
+    }
 }
 
 pub fn norm(text: &str) -> String {
@@ -191,14 +214,11 @@ impl Store {
     }
 
     fn meta(dir: &Path) -> serde_json::Map<String, Value> {
-        fs::read_to_string(dir.join("meta.json"))
-            .ok()
-            .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default()
+        read_json(&dir.join("meta.json")).unwrap_or_default()
     }
 
     fn save_meta(dir: &Path, change: &[(&str, Option<Value>)]) -> Result<(), String> {
+        set_aside_if_damaged::<serde_json::Map<String, Value>>(&dir.join("meta.json"));
         let mut meta = Self::meta(dir);
         for (key, value) in change {
             if let Some(value) = value {
@@ -218,7 +238,7 @@ impl Store {
             })
             .unwrap_or_default();
         files.sort_by_key(|path| try_order(path));
-        files.iter().filter_map(|path| fs::read_to_string(path).ok().and_then(|contents| serde_json::from_str(&contents).ok())).collect()
+        files.iter().filter_map(|path| read_json(path)).collect()
     }
 
     pub fn scores(&self, id: &str) -> Result<BTreeMap<String, PartScore>, String> {
@@ -310,7 +330,7 @@ impl Store {
 
     /// The words never counted as misheard, in every text (text::name_key), sorted.
     pub fn names(&self) -> Vec<String> {
-        fs::read_to_string(self.data.join("names.json")).ok().and_then(|contents| serde_json::from_str(&contents).ok()).unwrap_or_default()
+        read_json(&self.data.join("names.json")).unwrap_or_default()
     }
 
     /// Mark a word as a name or not; the names after.
@@ -319,6 +339,7 @@ impl Store {
         if key.is_empty() || key.chars().count() > 40 || key.chars().any(char::is_whitespace) {
             return Err(format!("“{word}” can't be a name"));
         }
+        set_aside_if_damaged::<Vec<String>>(&self.data.join("names.json"));
         let mut names = self.names();
         names.retain(|kept| *kept != key);
         if name {
@@ -617,6 +638,41 @@ mod tests {
         assert_eq!(store.names(), vec!["muzaffar"], "saved");
         assert!(store.set_name("...", true).is_err());
         assert!(store.set_name("New York", true).is_err(), "one word at a time");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_file_is_left_out_and_set_aside_before_it_is_written_over() {
+        let dir = std::env::temp_dir().join(format!("parrot-damaged-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", Some("Greeting".into()), Some("whole".into())).unwrap().id;
+        let text = store.text_dir(&id).unwrap();
+        let aside = |folder: &Path, name: &str| {
+            fs::read_dir(folder)
+                .unwrap()
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(&format!("{name}.damaged-")))
+                .count()
+        };
+        // a try that doesn't read is left out, and stays where it is
+        let part = store.part_dir(&id, "Hello there.").unwrap();
+        fs::create_dir_all(&part).unwrap();
+        fs::write(part.join("20261023-101010.json"), b"{ half a try").unwrap();
+        assert!(store.attempts(&id, "Hello there.").unwrap().is_empty());
+        assert!(part.join("20261023-101010.json").exists());
+        // a meta.json that doesn't read is set aside, not written over, when the title changes
+        fs::write(text.join("meta.json"), br#"{"title": "Greeting", "created": "2026-10-20T10:00:00""#).unwrap();
+        assert_eq!(store.update(&id, Some("Hi".into()), None, false).unwrap().title, "Hi");
+        assert_eq!(aside(&text, "meta.json"), 1);
+        // and names.json, when a name is marked
+        fs::write(dir.join("names.json"), b"[\"tashkent\",").unwrap();
+        assert!(store.names().is_empty());
+        assert_eq!(store.set_name("Muzaffar", true).unwrap(), vec!["muzaffar"]);
+        assert_eq!(aside(&dir, "names.json"), 1);
+        // a file that reads is never set aside
+        store.set_name("Tashkent", true).unwrap();
+        store.update(&id, Some("Hello".into()), None, false).unwrap();
+        assert_eq!((aside(&dir, "names.json"), aside(&text, "meta.json")), (1, 1));
         let _ = fs::remove_dir_all(dir);
     }
 
