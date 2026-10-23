@@ -11,3 +11,8 @@
   height: var(--titlebar);
   z-index: 100;
 }
+
+// only where the window buttons float over the app
+:host-context(.mac-app) .titlebar {
+  border-bottom: 1px solid var(--line);
+}

@@ -97,7 +97,8 @@
 }
 
 :root.mac-app {
-  --titlebar: 28px;
+  // the buttons' 28px, a little room under them, and the line that ends the strip
+  --titlebar: 37px;
 }
 
 html,
