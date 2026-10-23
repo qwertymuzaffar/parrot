@@ -51,16 +51,19 @@ export function length(seconds: number) {
             <q class="prompt">{{ prompt }}</q>
           }
           @if (talking.recording()) {
-            <div class="live" role="status">
+            <!-- a screen reader is told what changes, not the clock every second over the talk -->
+            <div class="live">
               <span class="rec-dot"></span>
-              <b>Listening…</b>
+              <b role="status">Listening…</b>
               <span class="time" [class.ending]="talking.left() <= 60">
                 {{ talking.left() <= 60 ? clock(talking.left()) + ' left' : clock(recorder.elapsed()) }}
               </span>
+              <span class="sr-only" role="status">{{ talking.left() <= 60 ? 'One minute left.' : '' }}</span>
             </div>
             <div class="meter" aria-hidden="true"><i [style.width.%]="recorder.level() * 100"></i></div>
             @if (talking.heardSoFar(); as soFar) {
-              <p class="so-far" aria-live="polite">{{ lastWords(soFar) }}</p>
+              <!-- not read out: it would talk over the speaker, and into the microphone -->
+              <p class="so-far">{{ lastWords(soFar) }}</p>
             }
             <div class="go">
               <span class="hint">Stop when you're done. Esc also stops.</span>
@@ -76,9 +79,13 @@ export function length(seconds: number) {
           }
         }
         @case ('writing') {
-          <div class="live" role="status">
+          <div class="live">
             <span class="spinner"></span>
-            <span>Writing down what you said… {{ Math.round(talking.progress() * 100) }}%</span>
+            <!-- how far it has got is the progress bar's, there to ask for, not read out at every step -->
+            <span
+              ><span role="status">Writing down what you said…</span>
+              <span aria-hidden="true">&ngsp;{{ Math.round(talking.progress() * 100) }}%</span></span
+            >
           </div>
           <div class="progress" role="progressbar" aria-label="Writing it down" [attr.aria-valuenow]="Math.round(talking.progress() * 100)">
             <i [style.width.%]="talking.progress() * 100"></i>

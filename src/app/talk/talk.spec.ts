@@ -189,6 +189,24 @@ describe('Just talk', () => {
       expect(talking.stop).toHaveBeenCalledTimes(1);
     });
 
+    it('tells a screen reader what changes, not the clock, the words heard or each step written down', async () => {
+      const spoken = (card: { element: HTMLElement }) =>
+        [...card.element.querySelectorAll('[role=status], [aria-live]')].map((region) => region.textContent!.trim());
+      talking.state.set('recording');
+      talking.recording.set(true);
+      recorder.elapsed.set(83);
+      talking.heardSoFar.set('I moved here three years ago');
+      const card = await render(TalkCard);
+      expect(spoken(card)).toEqual(['Listening…', '']);
+      talking.left.set(45);
+      await card.update();
+      expect(spoken(card)).toEqual(['Listening…', 'One minute left.']);
+      talking.state.set('writing');
+      talking.progress.set(0.4);
+      await card.update();
+      expect(spoken(card)).toEqual(['Writing down what you said…']);
+    });
+
     it('shows how far writing it down has got, with a Cancel', async () => {
       talking.state.set('writing');
       talking.progress.set(0.4);
