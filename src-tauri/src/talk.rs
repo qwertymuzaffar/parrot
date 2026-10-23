@@ -523,6 +523,7 @@ impl Talks {
                 scored.words.into_iter().map(|word| WordResult { t: word.t.map(|[from, to]| [round3(from + offset), round3(to + offset)]), ..word }),
             );
         }
+        drop(samples);
         let text = store.add(&said, title, Some("whole".into()))?;
         store.set_spoken(&text.id)?;
         let dir = store.part_dir(&text.id, &said)?;
@@ -530,8 +531,8 @@ impl Talks {
         let now = chrono::Local::now();
         let id = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
         let file = dir.join(format!("{id}.wav"));
-        fs::rename(&talk.path, &file).map_err(|error| error.to_string())?;
-        let _ = fs::remove_file(talk.path.with_extension("json"));
+        // what is filed for the take, taken back if any step fails: the talk is then as it was, to keep again
+        let mut filed = vec![file.clone(), dir.join(format!("{id}.json"))];
         let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
         let attempt = Attempt {
             id,
@@ -546,18 +547,32 @@ impl Talks {
             words,
             cut: None,
         };
-        store.save_attempt(&dir, &attempt)?;
-        // each sentence's first try, cut from the talk: practised in sentences, the text has them already
-        let sentences = text::sentences(&attempt.text);
-        if sentences.len() > 1 {
-            // read again, one recording in memory at a time
-            drop(samples);
-            let pcm = audio::read_wav(&fs::read(&file).map_err(|error| error.to_string())?)?;
-            let said: Vec<&str> = attempt.text.split_whitespace().collect();
-            for (sentence, span) in sentences.iter().zip(cuts(&attempt.words, &sentences, duration)) {
-                cut_take(store, &text.id, &said[sentence.clone()].join(" "), &attempt, sentence.clone(), &pcm, span, &now)?;
+        let filing = (|| {
+            store.save_attempt(&dir, &attempt)?;
+            // each sentence's first try, cut from the talk: practised in sentences, the text has them already
+            let sentences = text::sentences(&attempt.text);
+            if sentences.len() > 1 {
+                // read again, one recording in memory at a time
+                let pcm = audio::read_wav_file(&talk.path)?;
+                let said: Vec<&str> = attempt.text.split_whitespace().collect();
+                for (sentence, span) in sentences.iter().zip(cuts(&attempt.words, &sentences, duration)) {
+                    cut_take(store, &text.id, &said[sentence.clone()].join(" "), &attempt, sentence.clone(), &pcm, span, &now, &mut filed)?;
+                }
             }
+            // the recording moves in last: until the take is whole, the talk is where it was
+            fs::rename(&talk.path, &file).map_err(|error| error.to_string())
+        })();
+        if let Err(error) = filing {
+            for path in &filed {
+                let _ = fs::remove_file(path);
+            }
+            // the parts' folders left empty go too (a folder with tries of its own stays)
+            for path in &filed {
+                let _ = path.parent().map(fs::remove_dir);
+            }
+            return Err(error);
         }
+        let _ = fs::remove_file(talk.path.with_extension("json"));
         *current = None;
         // read again: its scores now count the take
         Ok(Kept { text: store.text(&text.id)?, attempt })
@@ -635,6 +650,7 @@ fn cut_take(
     pcm: &audio::Pcm,
     [from, to]: [f64; 2],
     now: &chrono::DateTime<chrono::Local>,
+    filed: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
     if to - from < audio::SHORTEST_TAKE {
         return Ok(());
@@ -651,6 +667,7 @@ fn cut_take(
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let take = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
     let file = dir.join(format!("{take}.wav"));
+    filed.extend([file.clone(), dir.join(format!("{take}.json"))]);
     audio::write_wav(&file, &piece)?;
     let good = words.iter().filter(|word| word.status == WordStatus::Good).count();
     // what was heard of it: each word, or what was heard instead of a word misheard
@@ -968,6 +985,45 @@ mod tests {
         assert_eq!(store.activity().tries, 1, "the cuts are no tries of their own");
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_talk_not_kept_whole_is_left_as_it_was() {
+        let (talks, dir) = talks("keep-failed");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-failed-data-{}", std::process::id())) };
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let listener = Stretches { heard: "One two. Three four.", lengths: RefCell::new(vec![]) };
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        // the second sentence's folder can't be made: a file is in its way
+        let text = store.add(&heard.heard, None, None).unwrap();
+        let blocked = store.text_dir(&text.id).unwrap().join(format!("p-{}", store::sha("One two.")));
+        fs::write(&blocked, b"").unwrap();
+        assert!(talks.keep(&listener, &store, &heard.heard, None).is_err());
+        // nothing of the take is filed, and the talk is where it was
+        assert!(store.attempts(&text.id, &heard.heard).unwrap().is_empty());
+        let wavs =
+            |folder: &std::path::Path| walk(folder).into_iter().filter(|path| path.extension().is_some_and(|extension| extension == "wav")).count();
+        assert_eq!(wavs(&store.data.join("texts")), 0);
+        assert_eq!(wavs(&dir), 1);
+        // so it can be kept once the way is clear
+        fs::remove_file(&blocked).unwrap();
+        let kept = talks.keep(&listener, &store, &heard.heard, None).unwrap();
+        assert!(store.data.join(&kept.attempt.audio).exists());
+        assert_eq!(wavs(&dir), 0);
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    /// Every file under `folder`.
+    fn walk(folder: &std::path::Path) -> Vec<PathBuf> {
+        fs::read_dir(folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|entry| if entry.path().is_dir() { walk(&entry.path()) } else { vec![entry.path()] })
+            .collect()
     }
 
     #[test]
