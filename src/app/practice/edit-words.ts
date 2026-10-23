@@ -70,6 +70,9 @@ import { Icon } from '../shared/icon';
       display: flex;
       align-items: center;
       justify-content: space-between;
+      margin: 0 -22px;
+      padding: 0 22px 14px;
+      border-bottom: 1px solid var(--line);
     }
     h2 {
       margin: 0;
