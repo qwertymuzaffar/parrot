@@ -251,6 +251,11 @@ pub fn fold(text: &str) -> String {
 
 /// Lower-case word tokens; runs of number words or digits become one "#digits" token.
 pub fn toks(text: &str) -> Vec<String> {
+    numbers_joined(&raw_words(text)).into_iter().map(|(_, token)| token).collect()
+}
+
+/// The lower-case words of `text` before numbers are joined: those of each word of it alone, one after the other.
+fn raw_words(text: &str) -> Vec<String> {
     let lowered = fold(&text.to_lowercase()).replace('\u{2019}', "'").replace(['-', ':'], " ");
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
@@ -278,6 +283,12 @@ pub fn toks(text: &str) -> Vec<String> {
             words.push(word);
         }
     }
+    words
+}
+
+/// The tokens of `words` (raw words): each run of number words or digits joined into one "#digits" token. Each
+/// token comes with the index of the word it starts at.
+fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
     let mut out = vec![];
     let mut word_index = 0;
     while word_index < words.len() {
@@ -285,10 +296,11 @@ pub fn toks(text: &str) -> Vec<String> {
         let nxt = words.get(word_index + 1).map(String::as_str).unwrap_or("");
         let starts = numeric(word) || (word == "a" && SCALES.contains_key(nxt));
         if !starts {
-            out.push(word.clone());
+            out.push((word_index, word.clone()));
             word_index += 1;
             continue;
         }
+        let start = word_index;
         let mut run: Vec<String> = vec![];
         while word_index < words.len() {
             let word = words[word_index].as_str();
@@ -304,9 +316,48 @@ pub fn toks(text: &str) -> Vec<String> {
                 break;
             }
         }
-        out.push(format!("#{}", compose(&run)));
+        out.push((start, format!("#{}", compose(&run))));
     }
     out
+}
+
+/// Which word of `words` owns each token of them: numbers spelled over several words become one token ("nineteen
+/// fifty-nine"); a longer run of words can have fewer tokens ("two hundred and" is [#200, and], "two hundred and fifty"
+/// is [#250]), so the tokens a later word merges away are given back. The raw words are joined once, and for each
+/// word only the token or two at the end of the words so far are joined again, as they may join differently with
+/// nothing after them: tokenising every run of first words whole took 30 s at the end of a long talk.
+fn owners(words: &[&str]) -> Vec<usize> {
+    let mut raw: Vec<String> = vec![];
+    // how many raw words the first words have, up to each word
+    let mut raw_ends = vec![];
+    for word in words {
+        raw.extend(raw_words(word));
+        raw_ends.push(raw.len());
+    }
+    let joined = numbers_joined(&raw);
+    // the token each raw word is in
+    let mut token_of = vec![0; raw.len()];
+    for (token_index, &(start, _)) in joined.iter().enumerate() {
+        let end = joined.get(token_index + 1).map_or(raw.len(), |&(next, _)| next);
+        token_of[start..end].fill(token_index);
+    }
+    let mut owner: Vec<usize> = vec![];
+    for (word_index, &raw_end) in raw_ends.iter().enumerate() {
+        // the tokens before the one the last raw word but one is in looked no further than the last raw word, as in
+        // the whole text, and stay as they are; from that one on they are joined again, the last with none after it
+        let tokens_so_far = match raw_end {
+            0 => 0,
+            _ => {
+                let token_index = token_of[raw_end.saturating_sub(2)];
+                token_index + numbers_joined(&raw[joined[token_index].0..raw_end]).len()
+            }
+        };
+        owner.truncate(tokens_so_far);
+        while owner.len() < tokens_so_far {
+            owner.push(word_index);
+        }
+    }
+    owner
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -377,17 +428,7 @@ pub fn pair_up(xs: &[String], ys: &[String], floor: f64) -> HashMap<usize, usize
 /// plus the extra words whisper heard after each word.
 pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>) {
     let sw: Vec<&str> = text.split_whitespace().collect();
-    // which word owns each token: numbers spelled over several words become one token ("nineteen fifty-nine");
-    // a longer prefix can have fewer tokens ("two hundred and" is [#200, and], "two hundred and fifty" is [#250]),
-    // so the tokens a later word merges away are given back
-    let mut owner: Vec<usize> = vec![];
-    for word_index in 0..sw.len() {
-        let tokens_so_far = toks(&sw[..=word_index].join(" ")).len();
-        owner.truncate(tokens_so_far);
-        while owner.len() < tokens_so_far {
-            owner.push(word_index);
-        }
-    }
+    let owner = owners(&sw);
     let (text_tokens, heard_tokens) = (toks(text), toks(heard));
     let mut wrong: Vec<Option<String>> = vec![None; sw.len()];
     let mut extra: Vec<String> = vec![String::new(); sw.len()];
@@ -683,6 +724,46 @@ mod tests {
         assert_eq!(toks("about two hundred tests"), toks("about 200 tests"));
         assert_eq!(toks("one point three million"), vec!["#1300000"]);
         assert_eq!(toks("at three thirty"), toks("at 3:30"));
+    }
+
+    #[test]
+    fn each_token_is_owned_by_the_word_it_was_before_numbers_were_joined_in_one_pass() {
+        // what owners() must give: every run of first words tokenised whole
+        let by_prefix = |words: &[&str]| {
+            let mut owner: Vec<usize> = vec![];
+            for word_index in 0..words.len() {
+                let tokens_so_far = toks(&words[..=word_index].join(" ")).len();
+                owner.truncate(tokens_so_far);
+                while owner.len() < tokens_so_far {
+                    owner.push(word_index);
+                }
+            }
+            owner
+        };
+        for text in [
+            "Hello there. How are you?",
+            "about two hundred and fifty tests, and two hundred and then",
+            "nineteen fifty-nine was a year; in 1959 the 1950s and the eighteens",
+            "one point three million, a hundred and one, a thousand ways and a dog",
+            "at three thirty or 3:30 — the seventh and the eleventh … point",
+            "twenty twenty twenty and twenty point five a",
+            "— … 'twas NASA's two-thirds",
+        ] {
+            let words: Vec<&str> = text.split_whitespace().collect();
+            assert_eq!(owners(&words), by_prefix(&words), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_long_text_is_compared_with_what_was_heard_in_moments() {
+        let words = ["the", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog", "while", "people", "talk"];
+        let text: Vec<&str> = (0..8000).map(|index| words[(index * 7 + index / 5) % words.len()]).collect();
+        let heard: Vec<&str> = text.iter().enumerate().map(|(index, word)| if index % 10 == 5 { "zebra" } else { word }).collect();
+        let started = std::time::Instant::now();
+        let (wrong, _) = heard_words(&text.join(" "), &heard.join(" "));
+        // tokenising every run of first words took about a minute here (10 s in a release build)
+        assert!(started.elapsed().as_secs_f64() < 5.0, "{:?}", started.elapsed());
+        assert_eq!(wrong.iter().filter(|verdict| verdict.is_some()).count(), 800);
     }
 
     #[test]
