@@ -71,6 +71,8 @@ export class Talking {
   private started = false;
   private sendFailed: string | null = null;
   private watch = 0;
+  /** counts the talks begun: one whose start finds a newer one begun (it was cancelled meanwhile) leaves it be */
+  private starts = 0;
 
   constructor() {
     this.session.whenOpening(() => this.away());
@@ -103,6 +105,7 @@ export class Talking {
     if (this.state() !== 'idle') await this.discard();
     this.playback.stop();
     this.reset();
+    const run = ++this.starts;
     this.about.set(this.prompt());
     this.state.set('recording');
     this.sending = Promise.resolve();
@@ -111,10 +114,13 @@ export class Talking {
     try {
       await this.recorder.start('free', (pcm, rate) => this.send(pcm, rate));
     } catch (error) {
+      if (run !== this.starts) return;
       this.state.set('idle');
       this.failure.set(micError(error));
       return;
     }
+    // cancelled while the microphone got ready, and started again since: the talk now is that start's
+    if (run !== this.starts) return;
     // stopped before it got going
     if (!this.recording()) {
       if (this.state() === 'recording') this.state.set('idle');

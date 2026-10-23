@@ -45,6 +45,8 @@ export class WordPractice {
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'word');
   /** the word the take being recorded is of */
   private taking: PractisedWord | null = null;
+  /** counts the takes begun: one whose start finds a newer one begun leaves the microphone to it */
+  private starts = 0;
 
   constructor() {
     effect(() => {
@@ -104,13 +106,16 @@ export class WordPractice {
     if (this.recorder.owner() || this.checking() || !practised) return;
     this.playback.stop();
     this.taking = practised;
+    const run = ++this.starts;
     try {
       await this.recorder.start('word');
-      this.error.set(null);
     } catch (error) {
-      this.error.set(micError(error));
+      if (run === this.starts) this.error.set(micError(error));
       return;
     }
+    // dropped while the microphone got ready, and another take started since: that one is not this one to stop
+    if (run !== this.starts) return;
+    this.error.set(null);
     // another word was chosen while the microphone opened
     if (!this.still(practised)) await this.recorder.stop();
   }
