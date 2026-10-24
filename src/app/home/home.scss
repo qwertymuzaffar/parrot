@@ -295,6 +295,12 @@
     font-family: var(--display);
     font-size: 20px;
     font-weight: 700;
+    // a long title would run past the Continue button, or make the card tall: two lines at most
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .next {
     font-size: 13px;
@@ -386,6 +392,8 @@
     margin: 0;
     font-size: 13px;
     color: var(--ink-2);
+    // a long unbroken word has to break for the two-line clamp to ever cut the text
+    overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;

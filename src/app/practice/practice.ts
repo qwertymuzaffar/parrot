@@ -19,6 +19,7 @@ import { WordPractice } from '../core/word-practice';
 import { Names } from '../core/names';
 import { Icon } from '../shared/icon';
 import { band } from '../shared/score';
+import { fitTo } from './fit';
 import { ScoreRing } from './score-ring';
 import { Sidebar } from './sidebar';
 import { TriesChart } from './tries-chart';
@@ -110,12 +111,7 @@ export class Practice {
   protected fit() {
     const el = this.sentence()?.nativeElement;
     if (!el) return;
-    el.style.fontSize = '';
-    let size = parseFloat(getComputedStyle(el).fontSize);
-    while (el.scrollHeight > el.clientHeight + 1 && size > 18) {
-      size -= 1;
-      el.style.fontSize = `${size}px`;
-    }
+    fitTo(el);
   }
 
   private wordButton(wordIndex: number) {
