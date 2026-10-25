@@ -89,10 +89,12 @@ class FakeEngine extends Engine {
   async downloadModels(): Promise<never> {
     throw new Error('not used');
   }
+  /** the texts as they are when the call begins: a slow read of the folder is stale by the time it lands */
   async texts() {
-    this.calls.push('texts');
+    const list = [...this.library];
+    await this.pass('texts');
     this.answer();
-    return [...this.library];
+    return list;
   }
   async addText(text: string, title: string, mode: Mode) {
     await this.pass(`addText ${title}`);
@@ -110,7 +112,7 @@ class FakeEngine extends Engine {
     return this.library[index];
   }
   async deleteText(id: string) {
-    this.calls.push(`deleteText ${id}`);
+    await this.pass(`deleteText ${id}`);
     this.answer();
     this.library = this.library.filter((item) => item.id !== id);
   }
@@ -532,6 +534,57 @@ describe('the practice state', () => {
       await app.remove(ID);
       expect(app.texts()).toEqual([]);
       expect(engine.calls).toContain(`deleteText ${ID}`);
+    });
+
+    describe('a reload of the texts that lands after a change made meanwhile', () => {
+      let release: () => void;
+      let reloading: Promise<void>;
+
+      beforeEach(() => {
+        release = engine.hold('texts');
+        reloading = app.loadTexts();
+      });
+
+      it('keeps a rename', async () => {
+        await app.rename(ID, 'Hi');
+        release();
+        await reloading;
+        expect(app.texts()[0].title).toBe('Hi');
+      });
+
+      it('keeps a delete', async () => {
+        await app.remove(ID);
+        release();
+        await reloading;
+        expect(app.texts()).toEqual([]);
+      });
+
+      it('keeps a mode change, with its parts', async () => {
+        await app.open(ID);
+        await app.setMode('whole');
+        release();
+        await reloading;
+        expect([app.text()?.mode, app.parts().length]).toEqual(['whole', 1]);
+      });
+
+      it('keeps a text added, open', async () => {
+        await app.add('One more text.', 'New', 'whole');
+        release();
+        await reloading;
+        expect([app.view(), app.text()?.id, app.texts().length]).toEqual(['practice', 'abcdef0123', 2]);
+      });
+    });
+
+    it('goes Home when the open text is deleted (its delete still pending as it was clicked)', async () => {
+      const release = engine.hold(`deleteText ${ID}`);
+      const removing = app.remove(ID);
+      await settle();
+      await app.open(ID);
+      expect(app.view()).toBe('practice');
+      release();
+      await removing;
+      TestBed.tick();
+      expect([app.view(), app.text()]).toEqual(['home', null]);
     });
   });
 
