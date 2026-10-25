@@ -71,7 +71,6 @@ static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
         ("fahrenheit", "f"),
         ("degrees", ""),
         ("okay", "ok"),
-        ("a.i", "ai"),
         // British spelling in the text; whisper small.en writes American
         ("kilometres", "kilometers"),
         ("metres", "meters"),
@@ -269,7 +268,7 @@ pub fn toks(text: &str) -> Vec<String> {
 
 /// The lower-case words of `text` before numbers are joined: those of each word of it alone, one after the other.
 fn raw_words(text: &str) -> Vec<String> {
-    let lowered = fold(&text.to_lowercase()).replace('\u{2019}', "'").replace(['-', ':'], " ");
+    let lowered = undotted(&fold(&text.to_lowercase())).replace('\u{2019}', "'").replace(['-', ':'], " ");
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
@@ -300,6 +299,23 @@ fn raw_words(text: &str) -> Vec<String> {
         }
     }
     words
+}
+
+/// `text` without the dots inside a word of letters: whisper writes "U.S." as "US" and "p.m." as "PM" as often as with
+/// the dots, so both compare as the letters alone. A dot between digits is a decimal point and stays, as does one after
+/// a word, a full stop.
+fn undotted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut before = ' ';
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        let after = chars.peek().copied().unwrap_or(' ');
+        if !(character == '.' && before.is_ascii_alphabetic() && after.is_ascii_alphabetic()) {
+            out.push(character);
+        }
+        before = character;
+    }
+    out
 }
 
 /// The tokens of `words` (raw words): each run of number words or digits joined into one "#digits" token. Each
@@ -876,6 +892,24 @@ mod tests {
         assert_eq!(got[0], ("suite".into(), "suit".into()));
         assert!(got[1..].iter().all(|(_, heard_as)| heard_as.is_empty()), "{got:?}");
         assert!(got.iter().any(|(word, _)| word == "hundred"));
+    }
+
+    #[test]
+    fn a_dotted_abbreviation_matches_itself_without_the_dots() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // whisper writes "U.S." and "US", "p.m." and "PM", one or the other
+        assert_eq!(toks("the U.S. Army at 5 p.m."), vec!["the", "us", "army", "at", "#5", "pm"]);
+        assert!(matches("the U.S. Army at 5 p.m.", "the US Army at 5 PM"));
+        assert!(matches("the U.K. and the E.U.", "the UK and the EU"));
+        assert!(matches("e.g. the A.I. system", "e.g. the AI system"));
+        assert!(matches("Node.js is fast", "NodeJS is fast"));
+        assert!(matches("Node.js is fast", "Node.js is fast"));
+        // a dot between digits is a decimal point still, and one after a word a full stop
+        assert_eq!(toks("about 3.5 metres. Then Mr. Smith"), vec!["about", "#3.5", "meters", "then", "mr", "smith"]);
+        assert_eq!(heard("the U.S. Army", "the USB Army"), vec![("U.S.".to_string(), "usb".to_string())]);
     }
 
     #[test]
