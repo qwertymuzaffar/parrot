@@ -124,10 +124,12 @@ class FakeEngine extends Engine {
     }
     return scores;
   }
+  /** the tries as they are when the call begins: a slow read of the folder is stale by the time it lands */
   async attempts(_textId: string, part: string) {
-    this.calls.push(`attempts ${part}`);
+    const list = [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+    await this.pass(`attempts ${part}`);
     this.answer();
-    return [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+    return list;
   }
   async attempt(_textId: string, part: string, id: string) {
     await this.pass(`attempt ${id}`);
@@ -1017,6 +1019,51 @@ describe('the practice state', () => {
       await scoring;
       await settle();
       expect([app.index(), app.result()]).toEqual([2, null]);
+    });
+
+    it("doesn't show a take on the part moved to while its tries loaded", async () => {
+      engine.nextCheck = attempt('t1', 'How are you?', 80, ['good', 'wrong', 'good']);
+      await app.toggleRecord();
+      const release = engine.hold('attempts How are you?');
+      const scoring = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      app.next();
+      await settle();
+      release();
+      await scoring;
+      await settle();
+      expect([app.index(), app.result(), app.history(), app.selected()]).toEqual([2, null, [], null]);
+    });
+
+    it("doesn't show a take on a text opened while its tries loaded", async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      engine.nextCheck = attempt('t1', 'How are you?', 80, ['good', 'wrong', 'good']);
+      await app.toggleRecord();
+      const release = engine.hold('attempts How are you?');
+      const scoring = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      await app.open('b0b0b0b0b0', 0);
+      release();
+      await scoring;
+      await settle();
+      expect([app.text()?.id, app.result(), app.history(), app.selected()]).toEqual(['b0b0b0b0b0', null, [], null]);
+    });
+
+    it("doesn't put a part's old tries, landing late, over a take just scored", async () => {
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60)];
+      await app.open(ID, 0);
+      const release = engine.hold('attempts How are you?');
+      app.next();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      engine.nextCheck = attempt('t2', 'How are you?', 80);
+      await app.toggleRecord();
+      const scoring = app.toggleRecord();
+      await settle();
+      release();
+      await scoring;
+      await settle();
+      expect([app.index(), app.result()?.id, app.history().map((summary) => summary.id)]).toEqual([1, 't2', ['t2', 't1']]);
     });
   });
   describe('deleting a try', () => {
