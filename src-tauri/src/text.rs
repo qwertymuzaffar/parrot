@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 static UNITS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen"
@@ -19,7 +21,8 @@ static UNITS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
 static TENS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     "twenty thirty forty fifty sixty seventy eighty ninety".split(' ').enumerate().map(|(index, word)| (word, 10 * (index as i64 + 2))).collect()
 });
-// "second" is left out on purpose: it is far more often the time unit ("twenty seconds") than the ordinal
+// "second" is left out on purpose: it is far more often the time unit ("twenty seconds") than the ordinal. It counts
+// right after a tens word only ("twenty second", see numbers_joined), and a bare "2nd" becomes the word (see SAME).
 static ORDINALS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     [
         ("first", 1),
@@ -59,6 +62,8 @@ static SCALES: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
 static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     [
         ("it's", "its"),
+        ("let's", "lets"),
+        ("who's", "whose"),
         ("percent", ""),
         ("%", ""),
         ("dollars", ""),
@@ -99,6 +104,8 @@ static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
         ("practise", "practice"),
         ("mould", "mold"),
         ("storey", "story"),
+        // whisper writes a date's "2nd" as the word as often as not, and never as a bare 2; "22nd" is a number still
+        ("2nd", "second"),
     ]
     .into_iter()
     .collect()
@@ -114,6 +121,12 @@ fn is_digits(token: &str) -> bool {
 
 fn numeric(token: &str) -> bool {
     UNITS.contains_key(token) || TENS.contains_key(token) || ORDINALS.contains_key(token) || SCALES.contains_key(token) || is_digits(token)
+}
+
+/// The value of a number word below a hundred, "second" included, which ORDINALS leaves out: a run admits it after a
+/// tens word only ("twenty second").
+fn word_value(token: &str) -> Option<i64> {
+    UNITS.get(token).or(TENS.get(token)).or(ORDINALS.get(token)).copied().or((token == "second").then_some(2))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -171,7 +184,7 @@ fn compose(run: &[String]) -> String {
             prev = Some(Kind::Scale);
             continue;
         } else {
-            value = *UNITS.get(tok).or(TENS.get(tok)).or(ORDINALS.get(tok)).unwrap_or(&0) as f64;
+            value = word_value(tok).unwrap_or(0) as f64;
             kind = if TENS.contains_key(tok) { Kind::Tens } else { Kind::Unit };
         }
         if let Some(fraction_digits) = frac.as_mut() {
@@ -206,42 +219,42 @@ fn compose(run: &[String]) -> String {
 
 /// The plain letters an accented Latin letter is written with in English ("é" → "e", "ß" → "ss"), lower case; none
 /// for a letter that is plain already, or not Latin. Speech recognition writes "café" as "cafe", and the aligner and
-/// the dictionary know a to z only.
+/// the dictionary know a to z only. A letter with marks is the letter under them, however many: "ễ" is e with two, as
+/// Vietnamese and pinyin write most of theirs, and no list of letters would be complete.
 pub fn plain(character: char) -> Option<&'static str> {
-    Some(match character.to_lowercase().next().unwrap_or(character) {
-        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
-        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' => "c",
-        'ď' | 'đ' | 'ð' => "d",
-        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => "e",
-        'ĝ' | 'ğ' | 'ġ' | 'ģ' => "g",
-        'ĥ' | 'ħ' => "h",
-        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' => "i",
-        'ĵ' => "j",
-        'ķ' => "k",
-        'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => "l",
-        'ñ' | 'ń' | 'ņ' | 'ň' => "n",
-        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' => "o",
-        'ŕ' | 'ŗ' | 'ř' => "r",
-        'ś' | 'ŝ' | 'ş' | 'š' | 'ș' => "s",
-        'ţ' | 'ť' | 'ŧ' | 'ț' => "t",
-        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => "u",
-        'ŵ' => "w",
-        'ý' | 'ÿ' | 'ŷ' => "y",
-        'ź' | 'ż' | 'ž' => "z",
-        'ß' => "ss",
-        'æ' => "ae",
-        'œ' => "oe",
-        'þ' => "th",
-        _ => return None,
+    if character.is_ascii() {
+        return None;
+    }
+    let lower = character.to_lowercase().next().unwrap_or(character);
+    // the letters that are not a plain letter with a mark, as English writes them
+    let letter_of_its_own = match lower {
+        'ß' => Some("ss"),
+        'æ' => Some("ae"),
+        'œ' => Some("oe"),
+        'ø' => Some("o"),
+        'ł' | 'ŀ' => Some("l"),
+        'đ' | 'ð' => Some("d"),
+        'þ' => Some("th"),
+        'ı' => Some("i"),
+        'ħ' => Some("h"),
+        'ŧ' => Some("t"),
+        _ => None,
+    };
+    letter_of_its_own.or_else(|| {
+        const LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
+        let under_the_marks = lower.nfd().next()?;
+        under_the_marks.is_ascii_lowercase().then(|| &LETTERS[under_the_marks as usize - 'a' as usize..][..1])
     })
 }
 
-/// `text` with its accented letters plain (see `plain`).
+/// `text` with its accented letters plain (see `plain`). A mark written as a character of its own goes too: some
+/// keyboards and files write "Việt" as "Vie" + a mark + "t", and that is the same word.
 pub fn fold(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for character in text.chars() {
         match plain(character) {
             Some(letters) => out.push_str(letters),
+            None if is_combining_mark(character) => {}
             None => out.push(character),
         }
     }
@@ -259,11 +272,14 @@ fn raw_words(text: &str) -> Vec<String> {
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
-        if word.ends_with("'s") && !numeric(&word[..word.len() - 2]) {
-            word.truncate(word.len() - 2);
-        }
+        // the table's spelling of the word as written ("it's" is whisper's "its"), else of it without a possessive 's
         if let Some(spelling) = SAME.get(word.as_str()) {
             word = spelling.to_string();
+        } else if word.ends_with("'s") && !numeric(&word[..word.len() - 2]) {
+            word.truncate(word.len() - 2);
+            if let Some(spelling) = SAME.get(word.as_str()) {
+                word = spelling.to_string();
+            }
         }
         if !word.is_empty() && !numeric(&word) && word.ends_with('s') {
             // "eighteens" / whisper "18s", "nineties" / "90s", "hundreds"
@@ -325,6 +341,7 @@ fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
                 || (word == "a" && SCALES.contains_key(nxt) && run.is_empty())
                 || (word == "and" && !run.is_empty() && numeric(nxt))
                 || (word == "point" && !run.is_empty() && (UNITS.contains_key(nxt) || is_digits(nxt)))
+                || (word == "second" && run.last().is_some_and(|last| TENS.contains_key(last.as_str())))
             {
                 run.push(word.to_string());
                 word_index += 1;
@@ -695,6 +712,57 @@ mod tests {
     }
 
     #[test]
+    fn a_letter_with_two_marks_is_its_plain_one_too() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // Vietnamese, pinyin and Indic letters: Latin Extended Additional and the tone letters, not Latin-1
+        assert_eq!(toks("Nguyễn Văn An"), vec!["nguyen", "van", "an"]);
+        assert_eq!(toks("Hà Nội and Hồ Chí Minh"), vec!["ha", "noi", "and", "ho", "chi", "minh"]);
+        assert_eq!(toks("Lǐ Bái wrote"), vec!["li", "bai", "wrote"]);
+        assert_eq!(toks("Ṭhākur"), vec!["thakur"]);
+        assert!(matches("Nguyễn Văn An", "Nguyen Van An"));
+        assert!(matches("Hà Nội and Hồ Chí Minh", "Ha Noi and Ho Chi Minh"));
+        assert!(matches("Lǐ Bái wrote", "Li Bai wrote"));
+        // written as one letter or as a letter and a mark, and a capital that lowers to a letter and a mark
+        assert_eq!(toks("Viê\u{323}t"), toks("Việt"));
+        assert_eq!(toks("İstanbul"), vec!["istanbul"]);
+        // letters of their own, with no mark to take off, keep how English writes them
+        assert_eq!(fold("ß æ œ ø ł đ ð þ ı ħ ŧ ŀ"), "ss ae oe o l d d th i h t l");
+        // every letter the list knew before folds as before; a plain or a non-Latin letter stays
+        for (letters, plain_letter) in [
+            ("àáâãäåāăą", "a"),
+            ("çćĉċč", "c"),
+            ("ďđð", "d"),
+            ("èéêëēĕėęě", "e"),
+            ("ĝğġģ", "g"),
+            ("ĥħ", "h"),
+            ("ìíîïĩīĭįı", "i"),
+            ("ĵ", "j"),
+            ("ķ", "k"),
+            ("ĺļľŀł", "l"),
+            ("ñńņň", "n"),
+            ("òóôõöøōŏő", "o"),
+            ("ŕŗř", "r"),
+            ("śŝşšș", "s"),
+            ("ţťŧț", "t"),
+            ("ùúûüũūŭůűų", "u"),
+            ("ŵ", "w"),
+            ("ýÿŷ", "y"),
+            ("źżž", "z"),
+        ] {
+            for letter in letters.chars() {
+                assert_eq!(plain(letter), Some(plain_letter), "{letter}");
+                // its capital too (a dotless ı has a plain I for one)
+                let capital = letter.to_uppercase().next().unwrap();
+                assert_eq!(plain(capital), (!capital.is_ascii()).then_some(plain_letter), "{capital}");
+            }
+        }
+        assert_eq!([plain('e'), plain('E'), plain('и'), plain('ά'), plain('東')], [None; 5]);
+    }
+
+    #[test]
     fn sentences_are_cut_as_the_interface_cuts_them() {
         let cut = |text: &str| {
             let words: Vec<&str> = text.split_whitespace().collect();
@@ -743,6 +811,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ordinal_second_is_the_same_as_digits_or_as_a_word() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // whisper writes a date's "2nd" as the word as often as not, and never as a bare 2
+        assert_eq!(toks("the 2nd of May"), toks("the second of May"));
+        assert_eq!(toks("on the 22nd of March"), vec!["on", "the", "#22", "of", "march"]);
+        assert_eq!(toks("on the twenty-second of March"), vec!["on", "the", "#22", "of", "march"]);
+        assert!(matches("the 2nd of May", "the second of May"));
+        assert!(matches("on the 22nd of March", "on the twenty-second of March"));
+        assert!(matches("the second time", "the 2nd time"));
+        assert!(matches("on the 2nd of March", "on the 2nd of March"));
+        // the time unit, and "second" with no tens word before it, are words as before
+        assert_eq!(toks("twenty seconds later"), vec!["#20", "seconds", "later"]);
+        assert_eq!(toks("a second later, the second one"), vec!["a", "second", "later", "the", "second", "#1"]);
+        assert_eq!(toks("in 20 seconds"), toks("in twenty seconds"));
+    }
+
+    #[test]
     fn each_token_is_owned_by_the_word_it_was_before_numbers_were_joined_in_one_pass() {
         // what owners() must give: every run of first words tokenised whole
         let by_prefix = |words: &[&str]| {
@@ -764,6 +852,7 @@ mod tests {
             "at three thirty or 3:30 — the seventh and the eleventh … point",
             "twenty twenty twenty and twenty point five a",
             "— … 'twas NASA's two-thirds",
+            "the 2nd and the twenty-second, twenty second, twenty seconds, a second",
         ] {
             let words: Vec<&str> = text.split_whitespace().collect();
             assert_eq!(owners(&words), by_prefix(&words), "{text}");
@@ -837,6 +926,24 @@ mod tests {
     fn same_words_said_differently_match() {
         assert!(heard("I'm a front-end engineer with ten years in Angular", "I'm a frontend engineer with 10 years in Angular").is_empty());
         assert!(heard("practise the colour", "practice the color").is_empty());
+    }
+
+    #[test]
+    fn a_contraction_and_its_homophone_are_the_same_word() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // whisper picks "it's" or "its" by its language model, not by what was said
+        assert_eq!(toks("it's its"), vec!["its", "its"]);
+        assert!(matches("it's fine", "its fine"));
+        assert!(matches("its tail", "it's tail"));
+        assert!(matches("let's go", "lets go"));
+        assert!(matches("who's there", "whose there"));
+        assert!(matches("whose book", "who's book"));
+        // a possessive 's still goes, and the word finds its table spelling after
+        assert_eq!(toks("NASA's colour's"), vec!["nasa", "color"]);
+        assert!(matches("the colour's depth", "the color's depth"));
     }
 
     #[test]

@@ -42,6 +42,8 @@ sha2 = "0.10"
 flate2 = "1.1"
 chrono = "0.4"
 regex = "1.13"
+# to fold a letter with marks to its plain one ("ễ" → "e") by Unicode decomposition
+unicode-normalization = "0.1"
 
 # whisper.cpp: on macOS on the graphics chip (Metal), elsewhere on the processor
 [target.'cfg(target_os = "macos")'.dependencies]
