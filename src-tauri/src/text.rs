@@ -19,7 +19,8 @@ static UNITS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
 static TENS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     "twenty thirty forty fifty sixty seventy eighty ninety".split(' ').enumerate().map(|(index, word)| (word, 10 * (index as i64 + 2))).collect()
 });
-// "second" is left out on purpose: it is far more often the time unit ("twenty seconds") than the ordinal
+// "second" is left out on purpose: it is far more often the time unit ("twenty seconds") than the ordinal. It counts
+// right after a tens word only ("twenty second", see numbers_joined), and a bare "2nd" becomes the word (see SAME).
 static ORDINALS: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
     [
         ("first", 1),
@@ -100,6 +101,8 @@ static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
         ("practise", "practice"),
         ("mould", "mold"),
         ("storey", "story"),
+        // whisper writes a date's "2nd" as the word as often as not, and never as a bare 2; "22nd" is a number still
+        ("2nd", "second"),
     ]
     .into_iter()
     .collect()
@@ -115,6 +118,12 @@ fn is_digits(token: &str) -> bool {
 
 fn numeric(token: &str) -> bool {
     UNITS.contains_key(token) || TENS.contains_key(token) || ORDINALS.contains_key(token) || SCALES.contains_key(token) || is_digits(token)
+}
+
+/// The value of a number word below a hundred, "second" included, which ORDINALS leaves out: a run admits it after a
+/// tens word only ("twenty second").
+fn word_value(token: &str) -> Option<i64> {
+    UNITS.get(token).or(TENS.get(token)).or(ORDINALS.get(token)).copied().or((token == "second").then_some(2))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -172,7 +181,7 @@ fn compose(run: &[String]) -> String {
             prev = Some(Kind::Scale);
             continue;
         } else {
-            value = *UNITS.get(tok).or(TENS.get(tok)).or(ORDINALS.get(tok)).unwrap_or(&0) as f64;
+            value = word_value(tok).unwrap_or(0) as f64;
             kind = if TENS.contains_key(tok) { Kind::Tens } else { Kind::Unit };
         }
         if let Some(fraction_digits) = frac.as_mut() {
@@ -309,6 +318,7 @@ fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
                 || (word == "a" && SCALES.contains_key(nxt) && run.is_empty())
                 || (word == "and" && !run.is_empty() && numeric(nxt))
                 || (word == "point" && !run.is_empty() && (UNITS.contains_key(nxt) || is_digits(nxt)))
+                || (word == "second" && run.last().is_some_and(|last| TENS.contains_key(last.as_str())))
             {
                 run.push(word.to_string());
                 word_index += 1;
@@ -727,6 +737,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ordinal_second_is_the_same_as_digits_or_as_a_word() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // whisper writes a date's "2nd" as the word as often as not, and never as a bare 2
+        assert_eq!(toks("the 2nd of May"), toks("the second of May"));
+        assert_eq!(toks("on the 22nd of March"), vec!["on", "the", "#22", "of", "march"]);
+        assert_eq!(toks("on the twenty-second of March"), vec!["on", "the", "#22", "of", "march"]);
+        assert!(matches("the 2nd of May", "the second of May"));
+        assert!(matches("on the 22nd of March", "on the twenty-second of March"));
+        assert!(matches("the second time", "the 2nd time"));
+        assert!(matches("on the 2nd of March", "on the 2nd of March"));
+        // the time unit, and "second" with no tens word before it, are words as before
+        assert_eq!(toks("twenty seconds later"), vec!["#20", "seconds", "later"]);
+        assert_eq!(toks("a second later, the second one"), vec!["a", "second", "later", "the", "second", "#1"]);
+        assert_eq!(toks("in 20 seconds"), toks("in twenty seconds"));
+    }
+
+    #[test]
     fn each_token_is_owned_by_the_word_it_was_before_numbers_were_joined_in_one_pass() {
         // what owners() must give: every run of first words tokenised whole
         let by_prefix = |words: &[&str]| {
@@ -748,6 +778,7 @@ mod tests {
             "at three thirty or 3:30 — the seventh and the eleventh … point",
             "twenty twenty twenty and twenty point five a",
             "— … 'twas NASA's two-thirds",
+            "the 2nd and the twenty-second, twenty second, twenty seconds, a second",
         ] {
             let words: Vec<&str> = text.split_whitespace().collect();
             assert_eq!(owners(&words), by_prefix(&words), "{text}");
