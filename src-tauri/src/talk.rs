@@ -564,8 +564,8 @@ impl Talks {
             );
         }
         drop(samples);
-        let text = store.add(&said, title, Some("whole".into()))?;
-        store.set_spoken(&text.id)?;
+        // the text with these words: a new one, spoken, or the one that has them (pasted, or talked before), as it is
+        let text = store.add_spoken(&said, title)?;
         let dir = store.part_dir(&text.id, &said)?;
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         let now = chrono::Local::now();
@@ -1059,6 +1059,55 @@ mod tests {
         let kept = talks.keep(&listener, &store, &heard.heard, None).unwrap();
         assert!(store.data.join(&kept.attempt.audio).exists());
         assert_eq!(wavs(&dir), 0);
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_talk_said_as_the_words_a_text_was_added_with_is_kept_by_the_words_texts_have_now() {
+        let (talks, dir) = talks("keep-twin");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-twin-data-{}", std::process::id())) };
+        let _ = fs::remove_dir_all(&store.data);
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        let said = "One two three. Four five six.";
+        let pasted = store.add(said, Some("Pasted".into()), Some("sentences".into())).unwrap().id;
+        // a word of it fixed since, as editing does: the folder keeps the id of the words it was added with
+        store::write_whole(&store.text_dir(&pasted).unwrap().join("text.txt"), b"One two three. Four five seven.").unwrap();
+        let listener = Stretches { heard: said, lengths: RefCell::new(vec![]) };
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        // the talk, heard as the words the text was added with, is a text of its own: the pasted one has other words
+        let kept = talks.keep(&listener, &store, &heard.heard, Some("My talk".into())).expect("the talk is kept");
+        assert_ne!(kept.text.id, pasted);
+        assert_eq!((kept.text.text.as_str(), kept.text.title.as_str(), kept.text.mode.as_str(), kept.text.spoken), (said, "My talk", "whole", true));
+        assert_eq!(store.attempts(&kept.text.id, said).unwrap().len(), 1);
+        let pasted = store.text(&pasted).unwrap();
+        assert_eq!((pasted.title.as_str(), pasted.spoken, pasted.text.as_str()), ("Pasted", false, "One two three. Four five seven."), "untouched");
+        assert_eq!(store.list().len(), 2);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "nothing of the talk left in talks/");
+
+        // talked again, the same words: the take goes to the talk's text, which stays as it is
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        let again = talks.keep(&listener, &store, &heard.heard, Some("Another title".into())).unwrap();
+        assert_eq!((again.text.id.as_str(), again.text.title.as_str()), (kept.text.id.as_str(), "My talk"));
+        assert_eq!(store.attempts(&kept.text.id, said).unwrap().len(), 2);
+        // a talk whose words a pasted text has goes into that text, which is no talk for it and keeps its own title,
+        // but takes the talk's when it has none of its own
+        let plain = store.add("Seven eight nine.", None, Some("short".into())).unwrap().id;
+        let short = Stretches { heard: "Seven eight nine.", lengths: RefCell::new(vec![]) };
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 8.0)).unwrap();
+        let heard = talks.write_down(&short, |_, _| {}).unwrap();
+        let into = talks.keep(&short, &store, &heard.heard, Some("Counting on".into())).unwrap();
+        assert_eq!(
+            (into.text.id.as_str(), into.text.title.as_str(), into.text.mode.as_str(), into.text.spoken),
+            (plain.as_str(), "Counting on", "short", false)
+        );
+        assert_eq!(store.attempts(&plain, "Seven eight nine.").unwrap().len(), 1);
+        assert_eq!(store.list().len(), 3);
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(&store.data);
     }
