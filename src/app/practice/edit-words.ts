@@ -6,12 +6,15 @@ import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
 import { Icon } from '../shared/icon';
 
+/** How long the engine may go without a word (a report of progress) before the user is offered to give up waiting (ms). */
+export const STUCK_MS = 15_000;
+
 /** Fixing the words of the text open: the tries of each part whose words change are scored again against them. */
 @Component({
   selector: 'app-edit-words',
   imports: [Icon],
   template: `
-    <dialog #dialog (click)="backdrop($event)" (cancel)="busy() && $event.preventDefault()" aria-labelledby="edit-words-title">
+    <dialog #dialog (click)="backdrop($event)" (cancel)="escape($event)" aria-labelledby="edit-words-title">
       <div class="box">
         <header>
           <h2 id="edit-words-title">Edit the words</h2>
@@ -41,6 +44,10 @@ import { Icon } from '../shared/icon';
                 Saving…
               }
             </span>
+            <!-- the engine has gone quiet: a way out, with the edit kept -->
+            @if (stuck()) {
+              <button class="btn ghost" (click)="giveUp()">Cancel</button>
+            }
           } @else {
             <button class="btn ghost" (click)="close()">Cancel</button>
             <button class="btn primary" [disabled]="!words().trim()" (click)="save()">Save</button>
@@ -121,6 +128,11 @@ export class EditWords {
   protected readonly done = signal(0);
   protected readonly total = signal(0);
   protected readonly failure = signal<string | null>(null);
+  /** the engine has not been heard from for STUCK_MS: the user may give up waiting */
+  protected readonly stuck = signal(false);
+  private stuckTimer = 0;
+  /** counts the saves: a save the user gave up waiting for has nothing more to say in the dialog */
+  private edits = 0;
   /** a take being recorded or checked: the words wait for it, or it would be filed under words the text no longer has */
   readonly taking = computed(() => !!this.recorder.owner() || this.session.checking() || this.wordPractice.checking());
 
@@ -140,6 +152,14 @@ export class EditWords {
     if (event.target === this.dialog().nativeElement) this.close();
   }
 
+  /** Esc closes the dialog; while a save is under way it does nothing, unless the engine has gone quiet: then it gives up
+   * waiting, as Cancel does. */
+  protected escape(event: Event) {
+    if (!this.busy()) return;
+    event.preventDefault();
+    if (this.stuck()) this.giveUp();
+  }
+
   protected async save() {
     const text = this.session.text();
     if (!text) return;
@@ -148,22 +168,54 @@ export class EditWords {
       return;
     }
     this.playback.stop();
+    const edit = ++this.edits;
     this.busy.set(true);
     this.failure.set(null);
     this.done.set(0);
     this.total.set(0);
+    this.heard();
     try {
       await this.library.editText(text.id, this.words(), (done, total) => {
+        if (edit !== this.edits) return;
         this.done.set(done);
         this.total.set(total);
+        this.heard();
       });
+      if (edit !== this.edits) {
+        // the user gave up waiting, but the words are changed now: the text shows them if it is still open
+        if (this.session.text()?.id === text.id) void this.session.open(text.id, this.session.index());
+        return;
+      }
       // its parts may have changed: open it again where it was
       await this.session.open(text.id, this.session.index());
       this.busy.set(false);
       this.close();
     } catch (error) {
+      if (edit !== this.edits) return;
       this.busy.set(false);
       this.failure.set(errorMessage(error));
+    } finally {
+      if (edit === this.edits) this.quiet();
     }
+  }
+
+  /** Stop waiting for the engine: the edit stays in the box, to save again or close. */
+  protected giveUp() {
+    if (!this.busy()) return;
+    this.edits++;
+    this.quiet();
+    this.busy.set(false);
+    this.failure.set("The speech engine hasn't answered. Your edit is still here: save it again, or close.");
+  }
+
+  /** The engine was heard from: it has STUCK_MS again before the user is offered to give up. */
+  private heard() {
+    this.quiet();
+    this.stuckTimer = window.setTimeout(() => this.stuck.set(true), STUCK_MS);
+  }
+
+  private quiet() {
+    clearTimeout(this.stuckTimer);
+    this.stuck.set(false);
   }
 }
