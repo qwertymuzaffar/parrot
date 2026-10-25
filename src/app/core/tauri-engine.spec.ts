@@ -1,6 +1,27 @@
 import { clearMocks, mockConvertFileSrc, mockIPC } from '@tauri-apps/api/mocks';
 import { EngineError } from './engine';
-import { TauriEngine } from './tauri-engine';
+import { CHECK_LIMIT_MS, EDIT_LIMIT_MS, LIMIT_MS, NO_ANSWER, Patience, PROGRESS_LIMIT_MS, TauriEngine, wavSeconds } from './tauri-engine';
+
+/** A WAV recording `seconds` long: 16-bit mono at 1 kHz, its header as the recorder writes one. */
+function wavOf(seconds: number) {
+  const rate = 1000;
+  const bytes = new Uint8Array(44 + seconds * rate * 2);
+  const header = new DataView(bytes.buffer);
+  header.setUint16(22, 1, true);
+  header.setUint32(24, rate, true);
+  header.setUint16(34, 16, true);
+  return bytes;
+}
+
+/** Whether `promise` has settled, once pending work has run. */
+function settled(promise: Promise<unknown>) {
+  let done = false;
+  promise.then(
+    () => (done = true),
+    () => (done = true),
+  );
+  return () => done;
+}
 
 describe('TauriEngine', () => {
   let calls: { cmd: string; args: unknown }[];
@@ -122,5 +143,80 @@ describe('TauriEngine', () => {
     await engine.info();
     expect(engine.audioUrl('/files/texts/95e3ac5665/p-1/take.wav')).toBe(engine.audioUrl('texts/95e3ac5665/p-1/take.wav'));
     expect(decodeURIComponent(engine.audioUrl('texts/95e3ac5665/p-1/take.wav'))).toContain('/data/texts/95e3ac5665/p-1/take.wav');
+  });
+
+  describe('a command that never answers', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      // the event listeners register at once; every command hangs
+      mockIPC((cmd) => (cmd.startsWith('plugin:event') ? [] : new Promise(() => {})));
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    it('is given up on after half a minute, with an error the flow that made it already shows', async () => {
+      const texts = new TauriEngine().texts();
+      const done = settled(texts);
+      await vi.advanceTimersByTimeAsync(LIMIT_MS - 1);
+      expect(done()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done()).toBe(true);
+      await expect(texts).rejects.toBeInstanceOf(EngineError);
+      await expect(texts).rejects.toThrow(NO_ANSWER);
+    });
+
+    it("a take's check is given longer, the longer the take", async () => {
+      expect(wavSeconds(wavOf(10))).toBe(10);
+      const check = new TauriEngine().check('95e3ac5665', 'Hello there.', new Blob([wavOf(10)]));
+      const done = settled(check);
+      await vi.advanceTimersByTimeAsync(CHECK_LIMIT_MS + 30_000 - 1);
+      expect(done()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(check).rejects.toThrow(NO_ANSWER);
+    });
+
+    it('a command that reports progress is given its time again at every report', async () => {
+      const patience = new Patience(1000);
+      const waited = patience.wait(new Promise(() => {}));
+      const done = settled(waited);
+      await vi.advanceTimersByTimeAsync(900);
+      patience.more();
+      await vi.advanceTimersByTimeAsync(900);
+      expect(done()).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(waited).rejects.toThrow(NO_ANSWER);
+    });
+
+    it('a download, a talk written down and a text edited wait longer between reports than a plain command', async () => {
+      const engine = new TauriEngine();
+      const download = settled(engine.downloadModels(() => {}));
+      const writing = settled(engine.talkStop(() => {}));
+      const editing = settled(engine.editText('95e3ac5665', 'Hello.', () => {}));
+      await vi.advanceTimersByTimeAsync(PROGRESS_LIMIT_MS - 1);
+      expect([download(), writing(), editing()]).toEqual([false, false, false]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect([download(), writing(), editing()]).toEqual([true, true, false]);
+      await vi.advanceTimersByTimeAsync(EDIT_LIMIT_MS - PROGRESS_LIMIT_MS);
+      expect(editing()).toBe(true);
+    });
+
+    it("the talk's sound is waited for without a limit", async () => {
+      const engine = new TauriEngine();
+      const start = settled(engine.talkStart(48000));
+      const feed = settled(engine.talkFeed(new Int16Array(100)));
+      await vi.advanceTimersByTimeAsync(EDIT_LIMIT_MS * 10);
+      expect([start(), feed()]).toEqual([false, false]);
+    });
+
+    it('drops an answer that comes after it stopped waiting', async () => {
+      let answer!: (texts: unknown[]) => void;
+      mockIPC(() => new Promise((resolve) => (answer = resolve)));
+      const texts = new TauriEngine().texts();
+      const done = settled(texts);
+      await vi.advanceTimersByTimeAsync(LIMIT_MS);
+      expect(done()).toBe(true);
+      answer([]);
+      await expect(texts).rejects.toThrow(NO_ANSWER);
+    });
   });
 });

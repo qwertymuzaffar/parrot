@@ -61,6 +61,8 @@ static SCALES: LazyLock<HashMap<&str, i64>> = LazyLock::new(|| {
 static SAME: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     [
         ("it's", "its"),
+        ("let's", "lets"),
+        ("who's", "whose"),
         ("percent", ""),
         ("%", ""),
         ("dollars", ""),
@@ -262,11 +264,14 @@ fn raw_words(text: &str) -> Vec<String> {
     let mut words: Vec<String> = vec![];
     for found in RAW.find_iter(&lowered) {
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
-        if word.ends_with("'s") && !numeric(&word[..word.len() - 2]) {
-            word.truncate(word.len() - 2);
-        }
+        // the table's spelling of the word as written ("it's" is whisper's "its"), else of it without a possessive 's
         if let Some(spelling) = SAME.get(word.as_str()) {
             word = spelling.to_string();
+        } else if word.ends_with("'s") && !numeric(&word[..word.len() - 2]) {
+            word.truncate(word.len() - 2);
+            if let Some(spelling) = SAME.get(word.as_str()) {
+                word = spelling.to_string();
+            }
         }
         if !word.is_empty() && !numeric(&word) && word.ends_with('s') {
             // "eighteens" / whisper "18s", "nineties" / "90s", "hundreds"
@@ -856,6 +861,24 @@ mod tests {
     fn same_words_said_differently_match() {
         assert!(heard("I'm a front-end engineer with ten years in Angular", "I'm a frontend engineer with 10 years in Angular").is_empty());
         assert!(heard("practise the colour", "practice the color").is_empty());
+    }
+
+    #[test]
+    fn a_contraction_and_its_homophone_are_the_same_word() {
+        let matches = |text: &str, recognized: &str| {
+            let (verdicts, extra) = heard_words(text, recognized);
+            verdicts.iter().all(Option::is_none) && extra.iter().all(String::is_empty)
+        };
+        // whisper picks "it's" or "its" by its language model, not by what was said
+        assert_eq!(toks("it's its"), vec!["its", "its"]);
+        assert!(matches("it's fine", "its fine"));
+        assert!(matches("its tail", "it's tail"));
+        assert!(matches("let's go", "lets go"));
+        assert!(matches("who's there", "whose there"));
+        assert!(matches("whose book", "who's book"));
+        // a possessive 's still goes, and the word finds its table spelling after
+        assert_eq!(toks("NASA's colour's"), vec!["nasa", "color"]);
+        assert!(matches("the colour's depth", "the color's depth"));
     }
 
     #[test]
