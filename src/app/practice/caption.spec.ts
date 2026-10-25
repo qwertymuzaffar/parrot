@@ -37,6 +37,7 @@ function shownSession() {
     troubleWords: signal([]),
     preparing: signal(false),
     checking: signal(false),
+    loading: signal(false),
     recording: signal(false),
     error: signal<string | null>(null),
     selected: signal(null),
