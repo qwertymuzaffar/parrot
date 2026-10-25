@@ -57,12 +57,21 @@ export async function partKey(text: string): Promise<string> {
   return 'p-' + hex.slice(0, 10);
 }
 
-/** each text split, by mode and words: the same words always split the same way, so they are split (and hashed) once */
+/** each text split, by mode and words: the same words always split the same way, so they are split (and hashed) once.
+ * Kept for the texts the library has (see forgetSplits): the splits of words edited away or deleted would otherwise
+ * stay for the session, hundreds of KB per edit of a long text. */
 const splits = new Map<string, Part[]>();
+
+const MODES: Mode[] = ['whole', 'sentences', 'short'];
 
 /** The parts of a text split before, at once; undefined if it hasn't been. */
 export function splitKnown(text: string, mode: Mode): Part[] | undefined {
   return splits.get(mode + '\n' + text);
+}
+
+/** Forget the splits of `text`, in every mode: no text has these words any more (edited, or deleted). */
+export function forgetSplits(text: string) {
+  for (const mode of MODES) splits.delete(mode + '\n' + text);
 }
 
 export async function splitText(text: string, mode: Mode): Promise<Part[]> {

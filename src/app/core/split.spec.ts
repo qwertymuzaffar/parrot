@@ -1,4 +1,17 @@
-import { bare, sentences, shortRanges } from './split';
+import { bare, forgetSplits, sentences, shortRanges, splitKnown, splitText } from './split';
+
+describe('the splits kept', () => {
+  it('keeps a split by its words and mode, and forgets the splits of words gone in every mode', async () => {
+    const old = 'One two. Three four.';
+    const edited = 'One two. Three five.';
+    for (const mode of ['whole', 'sentences', 'short'] as const) await splitText(old, mode);
+    await splitText(edited, 'sentences');
+    expect([splitKnown(old, 'whole')?.length, splitKnown(old, 'sentences')?.length, splitKnown(old, 'short')?.length]).toEqual([1, 2, 2]);
+    forgetSplits(old);
+    expect([splitKnown(old, 'whole'), splitKnown(old, 'sentences'), splitKnown(old, 'short')]).toEqual([undefined, undefined, undefined]);
+    expect(splitKnown(edited, 'sentences')?.length).toBe(2);
+  });
+});
 
 describe('sentences', () => {
   it('splits at a full stop followed by a capital', () => {
