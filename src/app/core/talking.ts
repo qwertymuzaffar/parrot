@@ -12,6 +12,13 @@ import { readSetting, writeSetting } from './settings';
 export const LONGEST_TALK = 1800;
 /** A talk stops itself after this long without sound (ms): its speaker walked away, or forgot to stop it. */
 export const QUIET_STOP_MS = 120_000;
+/** How long the talk's last sound may take to reach the engine once the talk stops (ms). The engine takes a block only
+ * once it has written down the stretch before, so this is generous; past it, the engine has stopped taking the talk. */
+export const STOP_WAIT_MS = 10_000;
+/** What the card says then; the talk is kept as the engine has it, to write down or let go. */
+export const STOPPED_TAKING = 'The speech engine stopped taking the talk.';
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Where a talk is: being recorded; being written down; stopped with its recording kept (a writing-down cancelled
@@ -174,20 +181,24 @@ export class Talking {
 
   /** Stop recording and write the talk down. */
   async stop(reason: StopReason = 'you') {
-    if (!(await this.endRecording())) return;
+    if (!(await this.stopRecording()) || !(await this.sent())) return;
     this.stopReason.set(reason);
     await this.writeDown();
   }
 
-  /** A text is opening: a talk being recorded stops, and is written down out of sight, to wait on the card. */
+  /** A text is opening: a talk being recorded stops, and is written down out of sight, to wait on the card. The text
+   * opens as soon as the microphone is free; the talk's last sound reaches the engine behind it. */
   private async away() {
-    if (!(await this.endRecording())) return;
-    this.stopReason.set('you');
-    void this.writeDown();
+    if (!(await this.stopRecording())) return;
+    void this.sent().then((sent) => {
+      if (!sent) return;
+      this.stopReason.set('you');
+      void this.writeDown();
+    });
   }
 
-  /** Stop recording the talk, once all of it has reached the engine; whether there is anything to write down. */
-  private async endRecording() {
+  /** Stop recording the talk; whether anything was recorded. */
+  private async stopRecording() {
     if (this.state() !== 'recording') return false;
     clearInterval(this.watch);
     const got = this.recording();
@@ -199,7 +210,24 @@ export class Talking {
       this.state.set('idle');
       return false;
     }
-    await this.sending;
+    return true;
+  }
+
+  /** Whether all of the talk's sound has reached the engine, waited for a while but not for ever: an engine that has
+   * stopped taking it would otherwise leave the card at "Stopping…" for the session. The talk is then kept as the
+   * engine has it, to write down or let go. */
+  private async sent() {
+    let timer = 0;
+    const limit = new Promise<false>((resolve) => (timer = window.setTimeout(() => resolve(false), STOP_WAIT_MS)));
+    const taken = await Promise.race([this.sending.then(() => true as const), limit]);
+    clearTimeout(timer);
+    if (!taken) {
+      // the sound still on its way is not sent on if the engine answers after all: the talk is as the engine has it
+      this.sendFailed = STOPPED_TAKING;
+      this.state.set('stopped');
+      this.failure.set(STOPPED_TAKING);
+      return false;
+    }
     if (this.sendFailed) return false;
     if (!this.started) {
       this.reset();
