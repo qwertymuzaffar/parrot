@@ -70,6 +70,8 @@ export class Talking {
   private sending: Promise<void> = Promise.resolve();
   private started = false;
   private sendFailed: string | null = null;
+  /** a talk the engine refused being dropped: the recorder stopping and the engine's talk discarded. A new talk waits. */
+  private abandoning: Promise<void> | null = null;
   private watch = 0;
   /** counts the talks begun: one whose start finds a newer one begun (it was cancelled meanwhile) leaves it be */
   private starts = 0;
@@ -103,8 +105,12 @@ export class Talking {
     // a talk left from last time is dealt with first: starting another would drop it
     if (this.recorder.owner() || this.unfinished() || !['idle', 'preview', 'stopped'].includes(this.state())) return;
     if (this.state() !== 'idle') await this.discard();
+    // a talk the engine refused is still being dropped: the engine's talk goes before this one starts
+    await this.abandoning;
     this.playback.stop();
     this.reset();
+    // a text whose open is still under way would take the screen from the talk when its parts and scores land
+    this.session.dropOpening();
     const run = ++this.starts;
     this.about.set(this.prompt());
     this.state.set('recording');
@@ -152,12 +158,18 @@ export class Talking {
       });
   }
 
-  private async abandon(why: string) {
+  /** The engine refused the talk's sound: the card says so at once, and the recorder and the engine's talk are dropped
+   * behind it. Shown as recording meanwhile, the card offered a Cancel that set the talk idle under this, and a talk
+   * started then was set idle by this in turn, while it went on recording. */
+  private abandon(why: string) {
     clearInterval(this.watch);
-    if (this.recorder.owner() === 'free') await this.recorder.stop();
-    await this.engine.talkDiscard().catch(() => {});
     this.reset();
     this.failure.set(why);
+    this.abandoning = (async () => {
+      if (this.recorder.owner() === 'free') await this.recorder.stop();
+      await this.engine.talkDiscard().catch(() => {});
+    })().finally(() => (this.abandoning = null));
+    return this.abandoning;
   }
 
   /** Stop recording and write the talk down. */
@@ -235,6 +247,7 @@ export class Talking {
     if (!talk || this.state() !== 'idle') return;
     this.unfinished.set(null);
     this.failure.set(null);
+    this.session.dropOpening();
     this.talk.set(talk);
     this.state.set('preview');
   }

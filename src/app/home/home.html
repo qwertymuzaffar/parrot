@@ -113,7 +113,7 @@
 
     @if (resume(); as card) {
       @let progress = ring(card);
-      <button class="resume" (click)="continue(card)">
+      <button class="resume" [class.opening]="session.opening() === card.t.id" (click)="continue(card)">
         <span class="ring">
           <svg width="58" height="58" viewBox="0 0 64 64" aria-hidden="true">
             <circle cx="32" cy="32" r="27" class="track" />
@@ -134,7 +134,12 @@
 
     <ul class="grid">
       @for (card of shown(); track card.t.id) {
-        <li class="card text" (click)="renaming() !== card.t.id && confirming() !== card.t.id && session.open(card.t.id)">
+        <li
+          class="card text"
+          [class.opening]="session.opening() === card.t.id"
+          [attr.aria-busy]="session.opening() === card.t.id || null"
+          (click)="renaming() !== card.t.id && confirming() !== card.t.id && session.open(card.t.id)"
+        >
           <div class="row">
             @if (renaming() === card.t.id) {
               <input
