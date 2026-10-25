@@ -30,6 +30,11 @@ export class Session {
   readonly result = signal<Attempt | null>(null);
   readonly history = signal<AttemptSummary[]>([]);
   readonly checking = signal(false);
+  /** how many loads (a text's parts and scores, a mode's save) are under way */
+  private loads = signal(0);
+  /** a text or mode is loading, and the screen still shows the parts before. No take starts meanwhile: it would be of
+   * the part shown, and filed where the user was not reading. */
+  readonly loading = computed(() => this.loads() > 0);
   /** a take of the part is being recorded (not one of a word said alone) */
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'part');
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'part');
@@ -136,7 +141,7 @@ export class Session {
     const w0 = this.part()?.w0 ?? 0;
     this.playback.stop();
     try {
-      await this.library.setMode(text.id, mode);
+      await this.whileLoading(this.library.setMode(text.id, mode));
     } catch (error) {
       this.failure.set(errorMessage(error));
       return;
@@ -146,21 +151,35 @@ export class Session {
     await this.build(text, mode, null, w0);
   }
 
+  /** `work` counts as loading while it runs: no take starts meanwhile. */
+  private async whileLoading<T>(work: Promise<T>) {
+    this.loads.update((count) => count + 1);
+    try {
+      return await work;
+    } finally {
+      this.loads.update((count) => count - 1);
+    }
+  }
+
   /** Split a text and go to a part: the saved one, or the one holding word w0. The text, its parts, their scores and
    * the part go on screen together once all are in, so the new words never show with the try of the part left, nor
    * a part number past the end of the new parts (no part at all). */
   private async build(text: TextItem, mode: Mode, savedIndex: string | null, w0?: number) {
     const build = ++this.builds;
-    const parts = await splitText(text.text, mode);
+    const parts = await this.whileLoading(splitText(text.text, mode));
     if (build !== this.builds) return;
     // scores that can't be loaded are not "nothing practised yet": say so
     let scores: Record<string, PartScore> = {};
     let failed: string | null = null;
     try {
-      scores = await this.engine.scores(text.id);
+      scores = await this.whileLoading(this.engine.scores(text.id));
     } catch (error) {
       failed = errorMessage(error);
     }
+    if (build !== this.builds) return;
+    // a take under way (none should be: no take starts while loading) is of the part still shown, so it is dropped
+    // rather than filed where the user was not reading
+    if (this.takeUnderWay()) await this.dropTake();
     if (build !== this.builds) return;
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
@@ -287,11 +306,13 @@ export class Session {
     if (this.takeUnderWay() && this.recorder.recording()) return this.finishRecording();
     const text = this.text();
     const part = this.part();
-    if (this.recorder.owner() || this.checking() || !text || !part) return;
+    if (this.recorder.owner() || this.checking() || this.loading() || !text || !part) return;
     this.playback.stop();
-    this.taking = { text, part };
+    const taking = (this.taking = { text, part });
     try {
       await this.recorder.start('part');
+      // the screen moved on while the microphone got ready: a take of the part left is dropped, not filed there
+      if (this.taking === taking && (this.text()?.id !== text.id || this.part() !== part)) return await this.dropTake();
       this.failure.set(null);
     } catch (error) {
       this.failure.set(micError(error));

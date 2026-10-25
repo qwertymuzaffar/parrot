@@ -424,6 +424,7 @@ function practiceApp() {
     checking: () => session.checking(),
     recording: () => session.recording(),
     playWordTry: (attempt: Attempt) => playback.playWordTry(attempt),
+    loading: () => session.loading(),
   };
 }
 
@@ -914,6 +915,47 @@ describe('the practice state', () => {
     it('selects a word', () => {
       app.selectWord(2);
       expect(app.selected()).toBe(2);
+    });
+  });
+
+  describe('recording while a text or mode loads', () => {
+    beforeEach(async () => {
+      await app.open(ID, 1);
+      await settle();
+    });
+
+    it('refuses a take while another text opens, and takes one once it is open', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      const release = engine.hold('scores b0b0b0b0b0');
+      const opening = app.open('b0b0b0b0b0');
+      await vi.waitFor(() => expect(engine.calls).toContain('scores b0b0b0b0b0'));
+      await app.toggleRecord();
+      expect([recorder.owner(), app.loading()]).toEqual([null, true]);
+      release();
+      await opening;
+      expect([app.loading(), app.text()?.id]).toEqual([false, 'b0b0b0b0b0']);
+      await app.toggleRecord();
+      expect(recorder.owner()).toBe('part');
+    });
+
+    it('refuses a take while the mode is saved, until the new parts show', async () => {
+      const release = engine.hold('updateText {"mode":"whole"}');
+      const changing = app.setMode('whole');
+      await settle();
+      await app.toggleRecord();
+      expect([recorder.owner(), app.loading()]).toEqual([null, true]);
+      release();
+      await changing;
+      expect([app.loading(), app.parts().length]).toEqual([false, 1]);
+      await app.toggleRecord();
+      expect(recorder.owner()).toBe('part');
+    });
+
+    it("is not loading after a mode the engine wouldn't save", async () => {
+      engine.down = true;
+      await app.setMode('whole');
+      expect([app.loading(), app.error()]).toEqual([false, 'The speech engine is not running.']);
     });
   });
 
