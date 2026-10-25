@@ -254,7 +254,7 @@ class FakeEngine extends Engine {
     return changed;
   }
   async talkDiscard() {
-    this.calls.push('talkDiscard');
+    await this.pass('talkDiscard');
     this.talk = null;
     this.left = null;
   }
@@ -1416,6 +1416,26 @@ describe('the practice state', () => {
       await settle();
       expect([talking.state(), talking.failure(), recorder.owner()]).toEqual(['idle', 'No space left on device', null]);
       expect(engine.calls).toContain('talkDiscard');
+    });
+
+    it('started again while the refused one is dropped, waits for that, then records on the card and stops', async () => {
+      engine.refuseFeed = 'No space left on device';
+      const release = engine.hold('talkDiscard');
+      await talking.start();
+      recorder.say(2);
+      await settle();
+      expect([talking.state(), talking.failure()]).toEqual(['idle', 'No space left on device']);
+      engine.refuseFeed = null;
+      const starting = talking.start();
+      await settle();
+      expect(engine.calls.filter((call) => call.startsWith('talkStart')).length).toBe(1);
+      release();
+      await starting;
+      recorder.say(1);
+      await settle();
+      expect([talking.state(), talking.recording(), recorder.owner(), engine.talk?.samples]).toEqual(['recording', true, 'free', 100]);
+      await talking.stop();
+      expect(talking.state()).toBe('preview');
     });
 
     it('says why it could not be kept, and stays to try again', async () => {

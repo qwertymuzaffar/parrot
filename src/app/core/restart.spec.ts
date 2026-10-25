@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Engine } from './engine';
+import { Engine, EngineError } from './engine';
 import { Library } from './library';
 import { Playback } from './playback';
 import { Recorder } from './recorder';
@@ -23,7 +23,7 @@ function microphone(recorder: Recorder) {
   const capture = inner['capture'] as (samples: Float32Array, rate: number) => void;
   return {
     settled: () => (settling as unknown as { finish(): void }).finish(),
-    sound: () => capture.call(recorder, new Float32Array(128).fill(0.1), 48000),
+    sound: (samples = 128) => capture.call(recorder, new Float32Array(samples).fill(0.1), 48000),
   };
 }
 
@@ -103,5 +103,51 @@ describe('starting again while a cancelled start waits for the microphone to set
     mic.sound();
     await tick();
     expect([practice.recording(), recorder.owner()]).toEqual([true, 'word']);
+  });
+});
+
+describe('a talk whose sound the engine refuses', () => {
+  let recorder: Recorder;
+  let mic: ReturnType<typeof microphone>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: Engine,
+          useValue: {
+            talkLeft: async () => null,
+            talkStart: async () => {},
+            talkFeed: async () => {
+              throw new EngineError('No space left on device');
+            },
+            talkDiscard: async () => {},
+          },
+        },
+        { provide: Library, useValue: {} },
+        { provide: Session, useValue: { whenOpening() {}, dropOpening() {} } },
+        { provide: Playback, useValue: { stop() {} } },
+      ],
+    });
+    recorder = TestBed.inject(Recorder);
+    mic = microphone(recorder);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('says so at once, with nothing to cancel while the recorder stops', async () => {
+    const talking = TestBed.inject(Talking);
+    void talking.start();
+    await tick();
+    mic.settled();
+    await tick();
+    // two seconds of sound: enough for the recorder to send it on, and the engine to refuse it
+    mic.sound(96000);
+    await tick();
+    // the recorder takes a moment to stop: meanwhile the card is not recording, with a Cancel, but idle, with the error
+    expect([talking.state(), talking.failure(), recorder.owner()]).toEqual(['idle', 'No space left on device', 'free']);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(recorder.owner()).toBeNull();
   });
 });
