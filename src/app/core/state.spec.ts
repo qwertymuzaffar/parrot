@@ -8,7 +8,7 @@ import { Playback } from './playback';
 import { Recorder, Sink, TakeFor } from './recorder';
 import { Session } from './session';
 import { Sound, Track } from './sound';
-import { bare, partKey } from './split';
+import { bare, partKey, splitKnown } from './split';
 import { WordPractice } from './word-practice';
 import { LONGEST_TALK, QUIET_STOP_MS, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
@@ -459,6 +459,18 @@ describe('the practice state', () => {
       expect(engine.edited).toEqual({ id: ID, text: 'Hello there. How old are you?' });
       expect(progress).toEqual(['0/2', '2/2']);
       expect(app.texts()[0].text).toBe('Hello there. How old are you?');
+    });
+
+    it("forgets the splits of a text's old words once they are changed, and of a text deleted", async () => {
+      await app.open(ID);
+      expect(splitKnown(TEXT, 'sentences')?.length).toBe(3);
+      await app.editText(ID, 'Hello there. How old are you?', () => {});
+      expect(splitKnown(TEXT, 'sentences')).toBeUndefined();
+      await app.open(ID);
+      expect(splitKnown('Hello there. How old are you?', 'sentences')?.length).toBe(2);
+      await app.home();
+      await app.remove(ID);
+      expect(splitKnown('Hello there. How old are you?', 'sentences')).toBeUndefined();
     });
 
     it('loads the texts and marks the engine ready', () => {

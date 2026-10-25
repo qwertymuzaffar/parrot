@@ -1,6 +1,7 @@
 import { inject, Injectable, signal } from '@angular/core';
 import { Engine, EngineError } from './engine';
 import { Activity, Mode, TextItem } from './models';
+import { forgetSplits } from './split';
 
 /** The texts kept for practice, and the week's activity. */
 @Injectable({ providedIn: 'root' })
@@ -57,7 +58,11 @@ export class Library {
 
   /** Change a text's words (the tries of the parts that changed are scored again); throws why it couldn't. */
   async editText(id: string, text: string, onProgress: (done: number, total: number) => void) {
-    this.replace(await this.engine.editText(id, text, ({ done, total }) => onProgress(done, total)));
+    const before = this.texts().find((item) => item.id === id);
+    const saved = await this.engine.editText(id, text, ({ done, total }) => onProgress(done, total));
+    // the old words are nobody's now: their splits go with them
+    if (before && before.text !== saved.text) forgetSplits(before.text);
+    this.replace(saved);
   }
 
   async setMode(id: string, mode: Mode) {
@@ -66,6 +71,9 @@ export class Library {
 
   async remove(id: string) {
     await this.change(async () => {
+      // its splits go with it (split again on demand should the delete fail)
+      const text = this.texts().find((item) => item.id === id);
+      if (text) forgetSplits(text.text);
       await this.engine.deleteText(id);
       this.texts.update((list) => list.filter((item) => item.id !== id));
     });
