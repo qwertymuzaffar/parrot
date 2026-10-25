@@ -54,7 +54,7 @@ describe('starting again while a cancelled start waits for the microphone to set
         { provide: Library, useValue: {} },
         {
           provide: Session,
-          useValue: { whenOpening() {}, text: signal({ id: 'text' }), words: signal(['Hello', 'there.']), selected },
+          useValue: { whenOpening() {}, dropOpening() {}, text: signal({ id: 'text' }), words: signal(['Hello', 'there.']), selected },
         },
         { provide: Playback, useValue: { stop() {} } },
       ],
