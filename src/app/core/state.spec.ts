@@ -10,7 +10,7 @@ import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey } from './split';
 import { WordPractice } from './word-practice';
-import { LONGEST_TALK, QUIET_STOP_MS, Talking } from './talking';
+import { LONGEST_TALK, QUIET_STOP_MS, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
@@ -1353,6 +1353,38 @@ describe('the practice state', () => {
       release();
       await stopping;
       expect(talking.state()).toBe('preview');
+    });
+
+    it('gives up waiting for the engine to take its last sound after a while, keeping what the engine took', async () => {
+      vi.useFakeTimers();
+      await talking.start();
+      recorder.say(1);
+      await vi.advanceTimersByTimeAsync(0);
+      const release = engine.hold('talkFeed 100');
+      const stopping = talking.stop();
+      await vi.advanceTimersByTimeAsync(STOP_WAIT_MS - 1);
+      expect(talking.state()).toBe('stopping');
+      await vi.advanceTimersByTimeAsync(1);
+      expect([talking.state(), talking.failure(), engine.calls.includes('talkStop')]).toEqual(['stopped', STOPPED_TAKING, false]);
+      await stopping;
+      // the engine answers after all: the talk is as the engine has it, written down on request
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await talking.writeDown();
+      expect(talking.state()).toBe('preview');
+    });
+
+    it('lets a text open at once when the engine is slow to take its last sound; the talk then waits on the card', async () => {
+      await talking.start();
+      recorder.say(2);
+      await settle();
+      const release = engine.hold('talkFeed 100');
+      await app.open(ID);
+      expect([recorder.owner(), app.view(), talking.state()]).toEqual([null, 'practice', 'stopping']);
+      release();
+      await settle();
+      await settle();
+      expect([talking.state(), talking.unfinished()?.heard]).toEqual(['idle', written]);
     });
 
     it('can be cancelled while it is written down, keeping it to write down again, or discarded', async () => {
