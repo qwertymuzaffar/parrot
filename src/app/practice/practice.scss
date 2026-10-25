@@ -491,6 +491,12 @@ header {
     opacity: 0.5;
     cursor: default;
   }
+  // a text or mode is loading: no take starts, and the button says so after the moment every load takes
+  &.loading {
+    cursor: progress;
+    opacity: 0.6;
+    transition: opacity 0.15s 0.25s;
+  }
   &.on {
     animation: ring 1.4s infinite;
   }

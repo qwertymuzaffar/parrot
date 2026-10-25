@@ -2,7 +2,8 @@
 //! Python prototype, since removed) used, so a library made with it opens unchanged.
 //!
 //! ```text
-//! texts/<id>/text.txt          the text (id: the first 10 hex digits of the SHA-1 of its words)
+//! texts/<id>/text.txt          the text (id: the first 10 hex digits of the SHA-1 of the words it was added with,
+//!                              and -2, -3... when a text added with the same words before, fixed since, holds it)
 //! texts/<id>/meta.json         title, practise mode, when created and last opened
 //! texts/<id>/p-<sha1>/         one folder per part that has been recorded, named after its words
 //!     <time>.wav + <time>.json a try: the cleaned recording, and what was heard and scored
@@ -21,6 +22,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Held while tries are filed: a take saved, or an edit moving tries to its parts' new words, so neither files a try
@@ -29,6 +31,14 @@ static FILING: Mutex<()> = Mutex::new(());
 
 pub fn filing() -> MutexGuard<'static, ()> {
     FILING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Held while a text's details (meta.json) or the names are read, changed and written back: two changes at once (a
+/// rename as the text is marked opened) would each write back the file without the other's change.
+static CHANGING: Mutex<()> = Mutex::new(());
+
+fn changing() -> MutexGuard<'static, ()> {
+    CHANGING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The JSON file at `path` as a `T`, if there is one. A file that can't be read as one (synced half-way, edited by
@@ -162,11 +172,15 @@ pub struct Activity {
     pub average: Option<i64>,
 }
 
-/// Write a file whole or not at all: to <file>.tmp first, then renamed over it, so a crash or power cut midway leaves
-/// the old file (a half-written meta.json would lose the title and mode, a half-written try would vanish).
+/// Tells the temporary files of writes under way apart, so two writes of one file at once don't share one.
+static WRITES: AtomicU64 = AtomicU64::new(0);
+
+/// Write a file whole or not at all: to a temporary beside it first (<file>.<process>-<count>.tmp, this write's own),
+/// then renamed over it, so a crash or power cut midway leaves the old file (a half-written meta.json would lose the
+/// title and mode, a half-written try would vanish), and two writes at once each land whole, the later one last.
 pub(crate) fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
     let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".tmp");
+    temporary.push(format!(".{}-{}.tmp", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     let temporary = PathBuf::from(temporary);
     let written = fs::File::create(&temporary).and_then(|mut file| {
         file.write_all(contents)?;
@@ -192,11 +206,37 @@ impl Store {
     }
 
     pub(crate) fn text_dir(&self, id: &str) -> Result<PathBuf, String> {
-        if id.len() != 10 || !id.chars().all(|character| character.is_ascii_hexdigit()) {
+        if !is_text_id(id) {
             return Err("bad text id".into());
         }
         let dir = self.texts().join(id);
         if dir.join("text.txt").exists() { Ok(dir) } else { Err(format!("not found: {id}")) }
+    }
+
+    /// The folder of the text whose words are `body` (normalised), if any text has them: the one named after them,
+    /// else, as words fixed since a text was added leave it under the old words' name, whichever has them now.
+    fn with_words(&self, body: &str) -> Option<PathBuf> {
+        let has = |dir: &Path| fs::read_to_string(dir.join("text.txt")).is_ok_and(|words| norm(&words) == body);
+        let named = self.texts().join(sha(body));
+        if has(&named) {
+            return Some(named);
+        }
+        let mut dirs: Vec<PathBuf> = fs::read_dir(self.texts()).into_iter().flatten().flatten().map(|entry| entry.path()).collect();
+        dirs.sort();
+        dirs.into_iter().find(|dir| has(dir))
+    }
+
+    /// A folder for a new text with the words `body`: named after them, or after them with -2, -3... while a text
+    /// added with the same words before (its words fixed since) holds the name.
+    fn new_dir(&self, body: &str) -> PathBuf {
+        let id = sha(body);
+        for count in 1.. {
+            let dir = self.texts().join(if count == 1 { id.clone() } else { format!("{id}-{count}") });
+            if !dir.join("text.txt").is_file() {
+                return dir;
+            }
+        }
+        unreachable!("the counter runs out before the folder does")
     }
 
     /// The folder of one part of a text, checked to really be in the text.
@@ -238,6 +278,7 @@ impl Store {
     }
 
     fn save_meta(dir: &Path, change: &[(&str, Option<Value>)]) -> Result<(), String> {
+        let _changing = changing();
         set_aside_if_damaged::<serde_json::Map<String, Value>>(&dir.join("meta.json"));
         let mut meta = Self::meta(dir);
         for (key, value) in change {
@@ -338,21 +379,38 @@ impl Store {
     }
 
     pub fn add(&self, text: &str, title: Option<String>, mode: Option<String>) -> Result<TextItem, String> {
+        self.add_with(text, title, &[("mode", mode.map(Value::from))])
+    }
+
+    /// Add what was said in a talk as a text: practised whole, and marked as one that began as a talk. The same words
+    /// already a text (pasted, or an earlier talk) are that text, as it is: no talk of its own.
+    pub fn add_spoken(&self, text: &str, title: Option<String>) -> Result<TextItem, String> {
+        self.add_with(text, title, &[("mode", Some(json!("whole"))), ("spoken", Some(json!(true)))])
+    }
+
+    /// The text with the words `text`: the one already here with them, as it is now (its title and the way it is
+    /// practised chosen since; given `title` only if it has none of its own), else a new one with `title` and
+    /// `details` (its mode, whether it began as a talk).
+    fn add_with(&self, text: &str, title: Option<String>, details: &[(&str, Option<Value>)]) -> Result<TextItem, String> {
         let body = norm(text);
         if body.is_empty() {
             return Err("the text is empty".into());
         }
-        let dir = self.texts().join(sha(&body));
-        // a text added again is the one already here, as it is now: its words may have been fixed since, and its
-        // title and the way it is practised chosen
-        if dir.join("text.txt").is_file() {
+        let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty()).map(Value::from);
+        if let Some(dir) = self.with_words(&body) {
+            let untitled = Self::meta(&dir).get("title").and_then(Value::as_str).is_none_or(str::is_empty);
+            if title.is_some() && untitled {
+                Self::save_meta(&dir, &[("title", title)])?;
+            }
             return Ok(self.text_info(&dir));
         }
+        let dir = self.new_dir(&body);
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         write_whole(&dir.join("text.txt"), body.as_bytes())?;
         let created = if dir.join("meta.json").exists() { None } else { Some(json!(now())) };
-        let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty()).map(Value::from);
-        Self::save_meta(&dir, &[("title", title), ("mode", mode.map(Value::from)), ("created", created)])?;
+        let mut change = vec![("title", title), ("created", created)];
+        change.extend(details.iter().cloned());
+        Self::save_meta(&dir, &change)?;
         Ok(self.text_info(&dir))
     }
 
@@ -375,6 +433,7 @@ impl Store {
         if key.is_empty() || key.chars().count() > 40 || key.chars().any(char::is_whitespace) {
             return Err(format!("“{word}” can't be a name"));
         }
+        let _changing = changing();
         set_aside_if_damaged::<Vec<String>>(&self.data.join("names.json"));
         let mut names = self.names();
         names.retain(|kept| *kept != key);
@@ -389,11 +448,6 @@ impl Store {
     /// One text as the library shows it.
     pub fn text(&self, id: &str) -> Result<TextItem, String> {
         Ok(self.text_info(&self.text_dir(id)?))
-    }
-
-    /// Mark a text as one that began as a talk.
-    pub fn set_spoken(&self, id: &str) -> Result<(), String> {
-        Self::save_meta(&self.text_dir(id)?, &[("spoken", Some(json!(true)))])
     }
 
     /// Moved to the trash folder, not deleted.
@@ -569,6 +623,15 @@ impl Store {
     }
 }
 
+/// Whether `id` is shaped as a text's id (10 hex digits, with -2, -3... when the first text with those words still
+/// holds the name): anything else could name a folder elsewhere.
+fn is_text_id(id: &str) -> bool {
+    let (sha, count) = id.split_once('-').map_or((id, None), |(sha, count)| (sha, Some(count)));
+    sha.len() == 10
+        && sha.chars().all(|character| character.is_ascii_hexdigit())
+        && count.is_none_or(|count| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 /// Where a try's file goes among the others, oldest first: by its time stamp, then by the -2, -3... a try made in
 /// the same second got (plain name order would put "...-2" before the first and "...-10" before "...-2").
 fn try_order(path: &Path) -> (String, u32) {
@@ -645,19 +708,45 @@ mod tests {
     }
 
     #[test]
-    fn a_text_added_again_is_the_one_already_there_as_it_is_now() {
+    fn a_text_added_again_is_the_one_with_its_words_now() {
         let dir = std::env::temp_dir().join(format!("parrot-store-again-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         let store = Store { data: dir.clone() };
         let id = store.add("Hello there. How are you?", Some("Greeting".into()), Some("sentences".into())).unwrap().id;
         // its words fixed, as editing does: the folder keeps the id of the words it was added with
         write_whole(&store.text_dir(&id).unwrap().join("text.txt"), b"Hello there. How were you?").unwrap();
         store.update(&id, None, Some("whole".into()), false).unwrap();
-        let again = store.add("Hello  there. How are you?", Some("Another title".into()), Some("sentences".into())).unwrap();
+        // the words it has now, added again: the text as it is, its title and the way it is practised kept
+        let again = store.add("Hello  there. How were you?", Some("Another title".into()), Some("sentences".into())).unwrap();
         assert_eq!(
             (again.id.as_str(), again.text.as_str(), again.title.as_str(), again.mode.as_str()),
             (id.as_str(), "Hello there. How were you?", "Greeting", "whole")
         );
         assert_eq!(store.list().len(), 1);
+        // the words it was added with, which no text has now: a text of its own, beside the one whose id they name
+        let other = store.add("Hello there. How are you?", Some("Another title".into()), Some("sentences".into())).unwrap();
+        let twin = format!("{id}-2");
+        assert_eq!(
+            (other.id.as_str(), other.text.as_str(), other.title.as_str(), other.mode.as_str()),
+            (twin.as_str(), "Hello there. How are you?", "Another title", "sentences")
+        );
+        assert_eq!(store.text(&id).unwrap().text, "Hello there. How were you?", "the fix stands");
+        assert_eq!(store.list().len(), 2);
+        // a text like any other: its parts, its details, its deletion and the time its trash entry is read for
+        assert!(store.part_dir(&other.id, "How are you?").is_ok() && store.part_dir(&other.id, "How were you?").is_err());
+        assert_eq!(store.update(&other.id, Some("Hi".into()), None, true).unwrap().title, "Hi");
+        assert_eq!(store.add("Hello there. How are you?", None, None).unwrap().id, other.id, "found by its words");
+        store.delete(&other.id).unwrap();
+        assert!(store.text_dir(&other.id).is_err() && store.list().len() == 1);
+        store.expire_trash(Local::now().naive_local() + chrono::Duration::days(TRASH_DAYS + 1));
+        assert_eq!(store.trash_size(), 0);
+        // a text with no title of its own takes the one it is added again with, once
+        assert_eq!(store.add("Good morning.", None, None).unwrap().title, "Good morning.…");
+        assert_eq!(store.add("Good morning.", Some("Morning".into()), None).unwrap().title, "Morning");
+        assert_eq!(store.add("Good morning.", Some("Later".into()), None).unwrap().title, "Morning");
+        for bad in ["", "95e3ac566", "95e3ac5665-", "95e3ac5665-x", "95e3ac5665-2-3", "../95e3ac5665", "95e3ac5665/.."] {
+            assert!(store.text_dir(bad).is_err(), "{bad:?}");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -972,7 +1061,7 @@ mod tests {
         // a .tmp a crash left behind is no try and no part of the text
         let part = store.part_dir(&id, "Hello there.").unwrap();
         fs::create_dir_all(&part).unwrap();
-        fs::write(part.join("20261020-153000.json.tmp"), "{").unwrap();
+        fs::write(part.join("20261020-153000.json.4242-7.tmp"), "{").unwrap();
         assert!(store.attempts(&id, "Hello there.").unwrap().is_empty());
         assert_eq!(store.activity().tries, 0);
         let _ = fs::remove_dir_all(dir);
@@ -1047,6 +1136,37 @@ mod tests {
         assert_eq!(keys(activity.clone()), "average days tries");
         assert_eq!(keys(activity["days"][6].clone()), "date tries");
         assert_eq!((activity["days"].as_array().unwrap().len(), &activity["tries"], &activity["average"]), (7, &json!(0), &Value::Null));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_changes_to_one_text_at_once_both_land() {
+        let dir = std::env::temp_dir().join(format!("parrot-two-changes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", Some("Old".into()), Some("sentences".into())).unwrap().id;
+        let text = store.text_dir(&id).unwrap();
+        let (mut lost, mut failed) = (0, vec![]);
+        for round in 0..300 {
+            // a rename and a change of mode (which marks the text opened too) at the same moment, as the window sends
+            // them: each must land, and neither may fail or leave meta.json in pieces
+            let title = format!("Title {round}");
+            let mode = if round % 2 == 0 { "whole" } else { "short" };
+            let (renamed, switched) = std::thread::scope(|scope| {
+                let renamed = scope.spawn(|| store.update(&id, Some(title.clone()), None, false));
+                let switched = scope.spawn(|| store.update(&id, None, Some(mode.into()), true));
+                (renamed.join().unwrap(), switched.join().unwrap())
+            });
+            failed.extend(renamed.err().into_iter().chain(switched.err()));
+            let now = store.text(&id).unwrap();
+            if now.title != title || now.mode != mode {
+                lost += 1;
+            }
+        }
+        let names: Vec<String> = fs::read_dir(&text).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        let aside = names.iter().filter(|name| name.contains(".damaged-")).count();
+        assert_eq!((lost, failed.len(), aside), (0, 0, 0), "lost a change, failed, set aside; first failure: {:?}", failed.first());
+        assert!(names.iter().all(|name| !name.ends_with(".tmp")), "{names:?}");
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -50,7 +50,7 @@ describe('coming back to the home screen', () => {
           provide: Library,
           useValue: { texts, error: signal(null), activity: signal(null), loaded: signal(true), engineState: signal('ready') },
         },
-        { provide: Session, useValue: {} },
+        { provide: Session, useValue: { opening: signal(null) } },
         // the Just talk card, at rest
         {
           provide: Talking,
