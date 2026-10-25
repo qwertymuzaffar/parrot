@@ -41,6 +41,9 @@ export class Session {
   private taking: { text: TextItem; part: Part } | null = null;
   /** counts the builds begun: a build that finds a newer one begun (another text opened) gives way to it */
   private builds = 0;
+  /** counts the times the part shown, or the try on it, changed: a part's tries or a try that land after such a
+   * change are not what is shown any more, and are dropped */
+  private shows = 0;
   /** what went wrong last: with this text, else with the library */
   readonly error = computed(() => this.failure() ?? this.library.error());
 
@@ -162,6 +165,7 @@ export class Session {
   private async goTo(partIndex: number) {
     const text = this.text()!;
     const parts = this.parts();
+    const show = ++this.shows;
     this.index.set(partIndex);
     this.result.set(null);
     this.history.set([]);
@@ -173,13 +177,14 @@ export class Session {
     if (!this.scores()[part.key]) return;
     try {
       const history = await this.engine.attempts(text.id, part.text);
-      if (this.part() !== part || !history.length) return;
+      // the user moved on while the tries loaded, or a new take of the part was scored meanwhile: these are not
+      // the tries to show
+      if (show !== this.shows || !history.length) return;
       this.history.set(history);
       const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
-      // the user moved on while the try loaded: it is not this part's
-      if (this.part() === part) this.show(attempt);
+      if (show === this.shows) this.show(attempt);
     } catch (error) {
-      if (this.part() === part) this.failure.set(errorMessage(error));
+      if (show === this.shows) this.failure.set(errorMessage(error));
     }
   }
 
@@ -290,7 +295,12 @@ export class Session {
       }));
       this.library.loadTexts();
       if (this.part() !== part) return;
-      this.history.set(await this.engine.attempts(text.id, part.text));
+      // the take is the part's newest try: a list of its tries on its way from before is stale
+      const show = ++this.shows;
+      const history = await this.engine.attempts(text.id, part.text);
+      // the user moved on, to another part or text, while the tries loaded: the take is shown when they come back
+      if (show !== this.shows) return;
+      this.history.set(history);
       this.show(attempt);
       const first = attempt.words.findIndex((word) => word.status !== 'good');
       this.selected.set(first >= 0 ? first : null);
