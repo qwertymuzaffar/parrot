@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Held while tries are filed: a take saved, or an edit moving tries to its parts' new words, so neither files a try
@@ -30,6 +31,14 @@ static FILING: Mutex<()> = Mutex::new(());
 
 pub fn filing() -> MutexGuard<'static, ()> {
     FILING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Held while a text's details (meta.json) or the names are read, changed and written back: two changes at once (a
+/// rename as the text is marked opened) would each write back the file without the other's change.
+static CHANGING: Mutex<()> = Mutex::new(());
+
+fn changing() -> MutexGuard<'static, ()> {
+    CHANGING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The JSON file at `path` as a `T`, if there is one. A file that can't be read as one (synced half-way, edited by
@@ -163,11 +172,15 @@ pub struct Activity {
     pub average: Option<i64>,
 }
 
-/// Write a file whole or not at all: to <file>.tmp first, then renamed over it, so a crash or power cut midway leaves
-/// the old file (a half-written meta.json would lose the title and mode, a half-written try would vanish).
+/// Tells the temporary files of writes under way apart, so two writes of one file at once don't share one.
+static WRITES: AtomicU64 = AtomicU64::new(0);
+
+/// Write a file whole or not at all: to a temporary beside it first (<file>.<process>-<count>.tmp, this write's own),
+/// then renamed over it, so a crash or power cut midway leaves the old file (a half-written meta.json would lose the
+/// title and mode, a half-written try would vanish), and two writes at once each land whole, the later one last.
 pub(crate) fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
     let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".tmp");
+    temporary.push(format!(".{}-{}.tmp", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     let temporary = PathBuf::from(temporary);
     let written = fs::File::create(&temporary).and_then(|mut file| {
         file.write_all(contents)?;
@@ -265,6 +278,7 @@ impl Store {
     }
 
     fn save_meta(dir: &Path, change: &[(&str, Option<Value>)]) -> Result<(), String> {
+        let _changing = changing();
         set_aside_if_damaged::<serde_json::Map<String, Value>>(&dir.join("meta.json"));
         let mut meta = Self::meta(dir);
         for (key, value) in change {
@@ -419,6 +433,7 @@ impl Store {
         if key.is_empty() || key.chars().count() > 40 || key.chars().any(char::is_whitespace) {
             return Err(format!("“{word}” can't be a name"));
         }
+        let _changing = changing();
         set_aside_if_damaged::<Vec<String>>(&self.data.join("names.json"));
         let mut names = self.names();
         names.retain(|kept| *kept != key);
@@ -1046,7 +1061,7 @@ mod tests {
         // a .tmp a crash left behind is no try and no part of the text
         let part = store.part_dir(&id, "Hello there.").unwrap();
         fs::create_dir_all(&part).unwrap();
-        fs::write(part.join("20261020-153000.json.tmp"), "{").unwrap();
+        fs::write(part.join("20261020-153000.json.4242-7.tmp"), "{").unwrap();
         assert!(store.attempts(&id, "Hello there.").unwrap().is_empty());
         assert_eq!(store.activity().tries, 0);
         let _ = fs::remove_dir_all(dir);
@@ -1121,6 +1136,37 @@ mod tests {
         assert_eq!(keys(activity.clone()), "average days tries");
         assert_eq!(keys(activity["days"][6].clone()), "date tries");
         assert_eq!((activity["days"].as_array().unwrap().len(), &activity["tries"], &activity["average"]), (7, &json!(0), &Value::Null));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn two_changes_to_one_text_at_once_both_land() {
+        let dir = std::env::temp_dir().join(format!("parrot-two-changes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there.", Some("Old".into()), Some("sentences".into())).unwrap().id;
+        let text = store.text_dir(&id).unwrap();
+        let (mut lost, mut failed) = (0, vec![]);
+        for round in 0..300 {
+            // a rename and a change of mode (which marks the text opened too) at the same moment, as the window sends
+            // them: each must land, and neither may fail or leave meta.json in pieces
+            let title = format!("Title {round}");
+            let mode = if round % 2 == 0 { "whole" } else { "short" };
+            let (renamed, switched) = std::thread::scope(|scope| {
+                let renamed = scope.spawn(|| store.update(&id, Some(title.clone()), None, false));
+                let switched = scope.spawn(|| store.update(&id, None, Some(mode.into()), true));
+                (renamed.join().unwrap(), switched.join().unwrap())
+            });
+            failed.extend(renamed.err().into_iter().chain(switched.err()));
+            let now = store.text(&id).unwrap();
+            if now.title != title || now.mode != mode {
+                lost += 1;
+            }
+        }
+        let names: Vec<String> = fs::read_dir(&text).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        let aside = names.iter().filter(|name| name.contains(".damaged-")).count();
+        assert_eq!((lost, failed.len(), aside), (0, 0, 0), "lost a change, failed, set aside; first failure: {:?}", failed.first());
+        assert!(names.iter().all(|name| !name.ends_with(".tmp")), "{names:?}");
         let _ = fs::remove_dir_all(dir);
     }
 }

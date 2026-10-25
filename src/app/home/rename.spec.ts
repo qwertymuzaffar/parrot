@@ -38,7 +38,7 @@ describe('renaming a text on the home screen', () => {
             rename: async (id: string, title: string) => void renamed.push([id, title]),
           },
         },
-        { provide: Session, useValue: { open: () => undefined } },
+        { provide: Session, useValue: { open: () => undefined, opening: signal(null) } },
         {
           provide: Talking,
           useValue: {
