@@ -1,4 +1,4 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, effect, inject, Injectable, signal } from '@angular/core';
 import { Clips } from './clips';
 import { Engine } from './engine';
 import { errorMessage, Library } from './library';
@@ -18,6 +18,8 @@ export class Session {
   private recorder = inject(Recorder);
 
   readonly view = signal<'home' | 'practice'>('home');
+  /** the text clicked, while its parts and scores are fetched: its card says it is coming */
+  readonly opening = signal<string | null>(null);
   private openId = signal<string | null>(null);
   /** the open text, as the library has it now */
   readonly text = computed(() => this.library.texts().find((item) => item.id === this.openId()) ?? null);
@@ -28,6 +30,11 @@ export class Session {
   readonly result = signal<Attempt | null>(null);
   readonly history = signal<AttemptSummary[]>([]);
   readonly checking = signal(false);
+  /** how many loads (a text's parts and scores, a mode's save) are under way */
+  private loads = signal(0);
+  /** a text or mode is loading, and the screen still shows the parts before. No take starts meanwhile: it would be of
+   * the part shown, and filed where the user was not reading. */
+  readonly loading = computed(() => this.loads() > 0);
   /** a take of the part is being recorded (not one of a word said alone) */
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'part');
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'part');
@@ -39,10 +46,22 @@ export class Session {
   private failure = signal<string | null>(null);
   /** the text and part a take is of, from its start: it is scored against them, wherever the user has gone since */
   private taking: { text: TextItem; part: Part } | null = null;
-  /** counts the builds begun: a build that finds a newer one begun (another text opened) gives way to it */
+  /** counts the opens and builds begun: one that finds a newer one begun (another text opened, Home, a talk) gives
+   * way to it */
   private builds = 0;
+  /** counts the times the part shown, or the try on it, changed: a part's tries or a try that land after such a
+   * change are not what is shown any more, and are dropped */
+  private shows = 0;
   /** what went wrong last: with this text, else with the library */
   readonly error = computed(() => this.failure() ?? this.library.error());
+
+  constructor() {
+    // the open text has gone from the library (deleted as it was opened, or not in the list the engine gave): the
+    // practice screen would have no title, no words and dead controls
+    effect(() => {
+      if (this.view() === 'practice' && this.openId() && !this.text()) this.home();
+    });
+  }
 
   readonly part = computed(() => this.parts()[this.index()] ?? null);
   readonly words = computed(() => this.part()?.text.split(' ') ?? []);
@@ -78,20 +97,32 @@ export class Session {
   async open(id: string, index?: number) {
     const text = this.library.texts().find((item) => item.id === id);
     if (!text) return;
+    // this open's turn, from the click: another text clicked, Home or a talk started meanwhile takes the screen instead
+    const build = ++this.builds;
     for (const hook of this.beforeOpen) await hook();
+    if (build !== this.builds) return;
     this.playback.stop();
     await this.dropTake();
+    if (build !== this.builds) return;
     this.recorder.warm();
     writeSetting('text', id);
     this.engine.updateText(id, { opened: true }).catch(() => {});
     // the text shows (and the practice screen, from Home) once its parts and scores are in
-    await this.build(text, text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
+    this.opening.set(id);
+    try {
+      await this.build(text, text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
+    } finally {
+      // open, or given way: its card no longer says it is coming (unless clicked again meanwhile, and still coming)
+      if (this.opening() === id) this.opening.set(null);
+    }
   }
 
   /** Add a text and open it; null if the engine would not add it (library.error() says why). */
   async add(text: string, title: string, mode: Mode) {
+    const build = this.builds;
     const added = await this.library.add(text, title, mode);
-    if (added) await this.open(added.id);
+    // the user opened a text, or went elsewhere, while it was added: it waits in the library
+    if (added && build === this.builds) await this.open(added.id);
     return added;
   }
 
@@ -100,8 +131,16 @@ export class Session {
     void this.dropTake();
     this.failure.set(null);
     this.view.set('home');
+    this.dropOpening();
     this.library.loadTexts();
     this.library.loadActivity();
+  }
+
+  /** Drop the open of a text still under way: Home, or a talk, has the screen now, and the text would take it when its
+   * parts and scores land. */
+  dropOpening() {
+    this.builds++;
+    this.opening.set(null);
   }
 
   async setMode(mode: Mode) {
@@ -110,7 +149,7 @@ export class Session {
     const w0 = this.part()?.w0 ?? 0;
     this.playback.stop();
     try {
-      await this.library.setMode(text.id, mode);
+      await this.whileLoading(this.library.setMode(text.id, mode));
     } catch (error) {
       this.failure.set(errorMessage(error));
       return;
@@ -120,21 +159,35 @@ export class Session {
     await this.build(text, mode, null, w0);
   }
 
+  /** `work` counts as loading while it runs: no take starts meanwhile. */
+  private async whileLoading<T>(work: Promise<T>) {
+    this.loads.update((count) => count + 1);
+    try {
+      return await work;
+    } finally {
+      this.loads.update((count) => count - 1);
+    }
+  }
+
   /** Split a text and go to a part: the saved one, or the one holding word w0. The text, its parts, their scores and
    * the part go on screen together once all are in, so the new words never show with the try of the part left, nor
    * a part number past the end of the new parts (no part at all). */
   private async build(text: TextItem, mode: Mode, savedIndex: string | null, w0?: number) {
     const build = ++this.builds;
-    const parts = await splitText(text.text, mode);
+    const parts = await this.whileLoading(splitText(text.text, mode));
     if (build !== this.builds) return;
     // scores that can't be loaded are not "nothing practised yet": say so
     let scores: Record<string, PartScore> = {};
     let failed: string | null = null;
     try {
-      scores = await this.engine.scores(text.id);
+      scores = await this.whileLoading(this.engine.scores(text.id));
     } catch (error) {
       failed = errorMessage(error);
     }
+    if (build !== this.builds) return;
+    // a take under way (none should be: no take starts while loading) is of the part still shown, so it is dropped
+    // rather than filed where the user was not reading
+    if (this.takeUnderWay()) await this.dropTake();
     if (build !== this.builds) return;
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
     if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
@@ -162,6 +215,7 @@ export class Session {
   private async goTo(partIndex: number) {
     const text = this.text()!;
     const parts = this.parts();
+    const show = ++this.shows;
     this.index.set(partIndex);
     this.result.set(null);
     this.history.set([]);
@@ -173,13 +227,14 @@ export class Session {
     if (!this.scores()[part.key]) return;
     try {
       const history = await this.engine.attempts(text.id, part.text);
-      if (this.part() !== part || !history.length) return;
+      // the user moved on while the tries loaded, or a new take of the part was scored meanwhile: these are not
+      // the tries to show
+      if (show !== this.shows || !history.length) return;
       this.history.set(history);
       const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
-      // the user moved on while the try loaded: it is not this part's
-      if (this.part() === part) this.show(attempt);
+      if (show === this.shows) this.show(attempt);
     } catch (error) {
-      if (this.part() === part) this.failure.set(errorMessage(error));
+      if (show === this.shows) this.failure.set(errorMessage(error));
     }
   }
 
@@ -259,11 +314,13 @@ export class Session {
     if (this.takeUnderWay() && this.recorder.recording()) return this.finishRecording();
     const text = this.text();
     const part = this.part();
-    if (this.recorder.owner() || this.checking() || !text || !part) return;
+    if (this.recorder.owner() || this.checking() || this.loading() || !text || !part) return;
     this.playback.stop();
-    this.taking = { text, part };
+    const taking = (this.taking = { text, part });
     try {
       await this.recorder.start('part');
+      // the screen moved on while the microphone got ready: a take of the part left is dropped, not filed there
+      if (this.taking === taking && (this.text()?.id !== text.id || this.part() !== part)) return await this.dropTake();
       this.failure.set(null);
     } catch (error) {
       this.failure.set(micError(error));
@@ -290,7 +347,12 @@ export class Session {
       }));
       this.library.loadTexts();
       if (this.part() !== part) return;
-      this.history.set(await this.engine.attempts(text.id, part.text));
+      // the take is the part's newest try: a list of its tries on its way from before is stale
+      const show = ++this.shows;
+      const history = await this.engine.attempts(text.id, part.text);
+      // the user moved on, to another part or text, while the tries loaded: the take is shown when they come back
+      if (show !== this.shows) return;
+      this.history.set(history);
       this.show(attempt);
       const first = attempt.words.findIndex((word) => word.status !== 'good');
       this.selected.set(first >= 0 ? first : null);
