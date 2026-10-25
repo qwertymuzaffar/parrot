@@ -18,6 +18,8 @@ export class Session {
   private recorder = inject(Recorder);
 
   readonly view = signal<'home' | 'practice'>('home');
+  /** the text clicked, while its parts and scores are fetched: its card says it is coming */
+  readonly opening = signal<string | null>(null);
   private openId = signal<string | null>(null);
   /** the open text, as the library has it now */
   readonly text = computed(() => this.library.texts().find((item) => item.id === this.openId()) ?? null);
@@ -39,7 +41,8 @@ export class Session {
   private failure = signal<string | null>(null);
   /** the text and part a take is of, from its start: it is scored against them, wherever the user has gone since */
   private taking: { text: TextItem; part: Part } | null = null;
-  /** counts the builds begun: a build that finds a newer one begun (another text opened) gives way to it */
+  /** counts the opens and builds begun: one that finds a newer one begun (another text opened, Home, a talk) gives
+   * way to it */
   private builds = 0;
   /** counts the times the part shown, or the try on it, changed: a part's tries or a try that land after such a
    * change are not what is shown any more, and are dropped */
@@ -81,20 +84,32 @@ export class Session {
   async open(id: string, index?: number) {
     const text = this.library.texts().find((item) => item.id === id);
     if (!text) return;
+    // this open's turn, from the click: another text clicked, Home or a talk started meanwhile takes the screen instead
+    const build = ++this.builds;
     for (const hook of this.beforeOpen) await hook();
+    if (build !== this.builds) return;
     this.playback.stop();
     await this.dropTake();
+    if (build !== this.builds) return;
     this.recorder.warm();
     writeSetting('text', id);
     this.engine.updateText(id, { opened: true }).catch(() => {});
     // the text shows (and the practice screen, from Home) once its parts and scores are in
-    await this.build(text, text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
+    this.opening.set(id);
+    try {
+      await this.build(text, text.mode, index != null ? String(index) : readSetting(`part:${id}:${text.mode}`, '0'));
+    } finally {
+      // open, or given way: its card no longer says it is coming (unless clicked again meanwhile, and still coming)
+      if (this.opening() === id) this.opening.set(null);
+    }
   }
 
   /** Add a text and open it; null if the engine would not add it (library.error() says why). */
   async add(text: string, title: string, mode: Mode) {
+    const build = this.builds;
     const added = await this.library.add(text, title, mode);
-    if (added) await this.open(added.id);
+    // the user opened a text, or went elsewhere, while it was added: it waits in the library
+    if (added && build === this.builds) await this.open(added.id);
     return added;
   }
 
@@ -103,8 +118,16 @@ export class Session {
     void this.dropTake();
     this.failure.set(null);
     this.view.set('home');
+    this.dropOpening();
     this.library.loadTexts();
     this.library.loadActivity();
+  }
+
+  /** Drop the open of a text still under way: Home, or a talk, has the screen now, and the text would take it when its
+   * parts and scores land. */
+  dropOpening() {
+    this.builds++;
+    this.opening.set(null);
   }
 
   async setMode(mode: Mode) {

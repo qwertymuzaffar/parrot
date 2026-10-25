@@ -105,6 +105,8 @@ export class Talking {
     if (this.state() !== 'idle') await this.discard();
     this.playback.stop();
     this.reset();
+    // a text whose open is still under way would take the screen from the talk when its parts and scores land
+    this.session.dropOpening();
     const run = ++this.starts;
     this.about.set(this.prompt());
     this.state.set('recording');
@@ -235,6 +237,7 @@ export class Talking {
     if (!talk || this.state() !== 'idle') return;
     this.unfinished.set(null);
     this.failure.set(null);
+    this.session.dropOpening();
     this.talk.set(talk);
     this.state.set('preview');
   }
