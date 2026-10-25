@@ -5,7 +5,8 @@
 //!
 //! A talk not kept when Parrot quits or crashes is kept for the next start: its recording (whose header is brought up
 //! to date after every block) and, beside it, what is known of it so far (`<stamp>.json`: whether the recording is
-//! cleaned, and what was heard once it is written down).
+//! cleaned, what was heard once it is written down, and, while it is kept, the take it becomes, so that a keep cut
+//! short is finished at the next start rather than done again).
 
 use crate::store::{self, Attempt, Store, TextItem};
 use crate::text::{self, WordResult, WordStatus};
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
 
@@ -65,6 +66,10 @@ struct Talk {
     generation: u64,
     /// what is heard of it while it is recorded
     live: Live,
+    /// being kept: the take its recording becomes (texts/<id>/p-<sha>/<try>.wav, relative to the data folder), noted
+    /// beside the talk before anything of the take is filed, so that a keep a quit cuts short is finished at the
+    /// next start
+    keeping: Option<String>,
 }
 
 /// A talk heard while it is recorded, a stretch at a time, so that once it stops only its last stretch is left.
@@ -107,6 +112,9 @@ struct Known {
     cleaned: bool,
     written: Option<Vec<Written>>,
     heard: Option<Heard>,
+    /// the take the talk is being kept as (see `Talk::keeping`); a talk left by 0.5.0 has none
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keeping: Option<String>,
 }
 
 /// A talk left from the last time Parrot ran, not kept: to write down (again) or discard.
@@ -165,13 +173,24 @@ pub struct Talks {
 }
 
 impl Talks {
-    /// The talks in `dir`. The latest talk left there when Parrot quit (or crashed) is taken up again, as stopped,
-    /// if any of it was recorded; anything else there is cleared.
+    /// The talks in `dir` (talks/ in the data folder). The latest talk left there when Parrot quit (or crashed) is
+    /// taken up again, as stopped, if any of it was recorded; one whose keep the quit cut short is finished, or taken
+    /// back to keep again, rather than offered as it is (kept again, its every try would be filed twice); anything
+    /// else there is cleared.
     pub fn open(dir: PathBuf) -> Self {
         let mut files: Vec<PathBuf> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|entry| entry.path()).collect();
         files.sort();
         let latest = files.iter().rfind(|path| path.extension().is_some_and(|extension| extension == "wav")).cloned();
-        let left = latest.as_ref().and_then(|path| Talk::left(path));
+        let data = dir.parent().unwrap_or(Path::new(""));
+        let left = latest.as_ref().and_then(|path| Talk::left(path)).and_then(|mut talk| match talk.finish_keep(data) {
+            Ok(true) => None,
+            Ok(false) => Some(talk),
+            Err(error) => {
+                // left as it is, to finish at a later start: it is not offered meanwhile (see `left`)
+                log::warn!("{error}");
+                Some(talk)
+            }
+        });
         for path in files {
             let known = latest.as_ref().is_some_and(|latest| path == *latest || path == latest.with_extension("json"));
             if !(known && left.is_some()) {
@@ -182,9 +201,10 @@ impl Talks {
     }
 
     /// The talk left from the last time Parrot ran, if it is still here: not yet started again, kept or discarded.
+    /// Not one whose keep could not be finished at the start: its take is filed, and kept again it would be twice.
     pub fn left(&self) -> Option<Left> {
         let current = self.current();
-        let talk = current.as_ref().filter(|talk| talk.writer.is_none())?;
+        let talk = current.as_ref().filter(|talk| talk.writer.is_none() && talk.keeping.is_none())?;
         let stem = talk.path.file_stem()?.to_string_lossy().to_string();
         let started = chrono::NaiveDateTime::parse_from_str(&stem, "%Y%m%d-%H%M%S").ok()?;
         Some(Left {
@@ -219,6 +239,7 @@ impl Talks {
             heard: None,
             generation,
             live: Live::default(),
+            keeping: None,
         });
         Ok(())
     }
@@ -482,14 +503,33 @@ impl Talk {
             heard: known.heard,
             generation: 0,
             live: Live::default(),
+            keeping: known.keeping,
         })
     }
 
     /// What is known of the talk, written beside its recording.
     fn save(&self) -> Result<(), String> {
-        let known = Known { cleaned: self.cleaned, written: self.written.clone(), heard: self.heard.clone() };
+        let known = Known { cleaned: self.cleaned, written: self.written.clone(), heard: self.heard.clone(), keeping: self.keeping.clone() };
         let json = serde_json::to_vec(&known).map_err(|error| error.to_string())?;
         fs::write(self.path.with_extension("json"), json).map_err(|error| error.to_string())
+    }
+
+    /// Finish the keep a quit cut short, if the talk was being kept (`data` is the data folder). Once the take's
+    /// result is filed, only the recording's move in is left to do: moved, the talk is over (true). Before that,
+    /// nothing of the take is kept but the empty file that claimed its name, which goes, and the talk is here to
+    /// keep again (false).
+    fn finish_keep(&mut self, data: &Path) -> Result<bool, String> {
+        let Some(audio) = &self.keeping else { return Ok(false) };
+        let file = data.join(audio);
+        if file.with_extension("json").is_file() {
+            fs::rename(&self.path, &file).map_err(|error| format!("could not finish keeping the talk as {audio}: {error}"))?;
+            let _ = fs::remove_file(self.path.with_extension("json"));
+            return Ok(true);
+        }
+        let _ = fs::remove_file(&file);
+        self.keeping = None;
+        self.save()?;
+        Ok(false)
     }
 }
 
@@ -547,7 +587,11 @@ impl Talks {
             words,
             cut: None,
         };
+        // noted beside the talk before anything is filed: from here on a quit leaves a keep to finish at the next
+        // start, not a talk to offer again
+        talk.keeping = Some(attempt.audio.clone());
         let filing = (|| {
+            talk.save()?;
             store.save_attempt(&dir, &attempt)?;
             // each sentence's first try, cut from the talk: practised in sentences, the text has them already
             let sentences = text::sentences(&attempt.text);
@@ -570,6 +614,9 @@ impl Talks {
             for path in &filed {
                 let _ = path.parent().map(fs::remove_dir);
             }
+            // and the note: left behind, it would come to the same at the next start, with nothing of the take filed
+            talk.keeping = None;
+            let _ = talk.save();
             return Err(error);
         }
         let _ = fs::remove_file(talk.path.with_extension("json"));
@@ -1141,5 +1188,81 @@ mod tests {
         assert!(talks.left().is_none());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_keep_cut_short_by_a_quit_is_finished_at_the_next_start() {
+        // talks/ in the data folder, as in the app: the take a talk is being kept as is noted relative to that folder
+        let data = std::env::temp_dir().join(format!("parrot-talks-keep-quit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data);
+        let store = Store { data: data.clone() };
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        let dir = data.join("talks");
+        let listener = Stretches { heard: "One two three. Four five six.", lengths: RefCell::new(vec![]) };
+        let deaf = || Stretches { heard: "nothing like it", lengths: RefCell::new(vec![]) };
+        // a talk written down, and its files as they are until it is kept
+        let talk = |talks: &Talks| {
+            talks.start(16000).unwrap();
+            talks.feed(&speech(16000, 20.0)).unwrap();
+            let said = talks.write_down(&listener, |_, _| {}).unwrap().heard;
+            let files: Vec<(PathBuf, Vec<u8>)> =
+                fs::read_dir(&dir).unwrap().flatten().map(|entry| (entry.path(), fs::read(entry.path()).unwrap())).collect();
+            (said, files)
+        };
+        // the talk's files put back as they were, and beside its recording the keep's note of the take it was filing
+        let put_back = |files: &[(PathBuf, Vec<u8>)], audio: &str| {
+            for (path, bytes) in files {
+                fs::write(path, bytes).unwrap();
+            }
+            let note = files.iter().map(|(path, _)| path.with_extension("json")).next().unwrap();
+            let mut known: serde_json::Value = serde_json::from_slice(&fs::read(&note).unwrap()).unwrap();
+            known["keeping"] = serde_json::json!(audio);
+            fs::write(&note, serde_json::to_vec(&known).unwrap()).unwrap();
+        };
+        let talks = Talks::open(dir.clone());
+        let (said, files) = talk(&talks);
+        let kept = talks.keep(&listener, &store, &said, Some("Counting".into())).unwrap();
+        let id = kept.text.id.clone();
+        let whole = data.join(&kept.attempt.audio);
+        let tries = |store: &Store| {
+            let count = |part: &str| store.attempts(&id, part).unwrap().len();
+            (count(&said), count("One two three."), count("Four five six."))
+        };
+        assert_eq!(tries(&store), (1, 1, 1));
+        // Parrot quits once the take's result and the sentences' cuts are filed, before the recording moves in: the
+        // take's recording is still the empty file that claimed its name, and the talk is where it was
+        quit(talks);
+        fs::write(&whole, b"").unwrap();
+        put_back(&files, &kept.attempt.audio);
+
+        // the next start finishes the keep rather than offer the talk again: kept again, as a user would, it would
+        // file every try a second time, the first with no recording
+        let talks = Talks::open(dir.clone());
+        if let Some(left) = talks.left() {
+            talks.keep(&deaf(), &store, &left.heard.unwrap().heard, Some("Counting".into())).unwrap();
+        }
+        assert_eq!(tries(&store), (1, 1, 1), "the take is filed once");
+        assert!(talks.left().is_none() && fs::read_dir(&dir).unwrap().count() == 0, "the talk is over");
+        let recording = audio::read_wav_file(&whole).expect("the take's recording is the talk's");
+        assert!((recording.seconds() - kept.attempt.duration).abs() < 0.02, "{}", recording.seconds());
+
+        // a quit before the take's result was filed: nothing of the take is kept, and the talk is here to keep again
+        let (said, files) = talk(&talks);
+        let before = walk(&data.join("texts"));
+        let kept = talks.keep(&listener, &store, &said, None).unwrap();
+        quit(talks);
+        for path in walk(&data.join("texts")).iter().filter(|path| !before.contains(path)) {
+            fs::remove_file(path).unwrap();
+        }
+        let claimed = data.join(&kept.attempt.audio);
+        fs::write(&claimed, b"").unwrap();
+        put_back(&files, &kept.attempt.audio);
+        let talks = Talks::open(dir.clone());
+        assert!(talks.left().is_some(), "offered again");
+        assert!(!claimed.exists(), "the empty file that claimed the take's name is gone");
+        talks.keep(&deaf(), &store, &said, None).unwrap();
+        assert_eq!(tries(&store), (2, 2, 2));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(data);
     }
 }

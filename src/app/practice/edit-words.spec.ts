@@ -6,7 +6,7 @@ import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
-import { EditWords } from './edit-words';
+import { EditWords, STUCK_MS } from './edit-words';
 
 describe('editing the words of a text', () => {
   const session = {
@@ -46,9 +46,12 @@ describe('editing the words of a text', () => {
     await fixture.whenStable();
     const element: HTMLElement = fixture.nativeElement;
     const textarea = element.querySelector('textarea')!;
-    const save = () => [...element.querySelectorAll('button')].find((each) => /Save/.test(each.textContent!))!.click();
-    return { fixture, element, textarea, save, dialog: element.querySelector('dialog')! };
+    const button = (name: RegExp) => [...element.querySelectorAll('button')].find((each) => name.test(each.textContent!));
+    const save = () => button(/Save/)!.click();
+    return { fixture, element, textarea, save, button, dialog: element.querySelector('dialog')! };
   }
+
+  afterEach(() => vi.useRealTimers());
 
   it('saves the words changed, saying how far the tries are scored again, and opens the text again where it was', async () => {
     let finish!: () => void;
@@ -82,6 +85,83 @@ describe('editing the words of a text', () => {
     await fixture.whenStable();
     expect(element.querySelector('[role=alert]')!.textContent).toContain('the speech engine is not running');
     expect([dialog.open, textarea.value, textarea.disabled]).toEqual([true, 'Hello there.', false]);
+  });
+
+  describe('when the engine goes quiet', () => {
+    let finish: () => void;
+    /** Let `ms` pass on the (fake) clock, then show what changed. whenStable never settles under fake timers. */
+    const after = async (fixture: { detectChanges(): void }, ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      fixture.detectChanges();
+    };
+
+    beforeEach(() => {
+      library.editText.mockImplementation((_id, _words, onProgress) => {
+        onProgress(1, 3);
+        return new Promise<void>((resolve) => (finish = resolve));
+      });
+    });
+
+    it('offers Cancel after a while without a report, which keeps the edit to save again or close', async () => {
+      const { fixture, element, textarea, save, button, dialog } = await editor();
+      vi.useFakeTimers();
+      textarea.value = 'Hello there. How old are you?';
+      textarea.dispatchEvent(new Event('input'));
+      save();
+      await after(fixture, STUCK_MS - 1);
+      expect(button(/Cancel/)).toBeUndefined();
+      await after(fixture, 1);
+      expect(element.querySelector('[role=status]')!.textContent).toContain('Scoring the tries again: 1 of 3');
+      button(/Cancel/)!.click();
+      await after(fixture, 0);
+      expect(element.querySelector('[role=alert]')!.textContent).toContain("The speech engine hasn't answered");
+      expect([dialog.open, textarea.value, textarea.disabled]).toEqual([true, 'Hello there. How old are you?', false]);
+      expect([button(/Save/)?.disabled, element.querySelector<HTMLButtonElement>('[aria-label=Close]')!.disabled]).toEqual([false, false]);
+    });
+
+    it('gives the engine its time again at every report', async () => {
+      let report!: (done: number, total: number) => void;
+      library.editText.mockImplementation((_id, _words, onProgress) => {
+        report = onProgress;
+        return new Promise<void>(() => {});
+      });
+      const { fixture, save, button } = await editor();
+      vi.useFakeTimers();
+      save();
+      await after(fixture, STUCK_MS - 1000);
+      report(2, 3);
+      await after(fixture, STUCK_MS - 1000);
+      expect(button(/Cancel/)).toBeUndefined();
+      await after(fixture, 1000);
+      expect(button(/Cancel/)).toBeDefined();
+    });
+
+    it('lets Esc give up waiting once Cancel is offered, and not before', async () => {
+      const { fixture, save, dialog } = await editor();
+      vi.useFakeTimers();
+      save();
+      await after(fixture, 0);
+      dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+      await after(fixture, 0);
+      expect(fixture.componentInstance['busy']()).toBe(true);
+      await after(fixture, STUCK_MS);
+      dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+      await after(fixture, 0);
+      expect([fixture.componentInstance['busy'](), dialog.open]).toEqual([false, true]);
+    });
+
+    it('shows the words changed if the engine answers after the user gave up, without closing the dialog', async () => {
+      const { fixture, save, button, dialog } = await editor();
+      vi.useFakeTimers();
+      save();
+      await after(fixture, STUCK_MS);
+      button(/Cancel/)!.click();
+      await after(fixture, 0);
+      finish();
+      await after(fixture, 0);
+      expect(session.open).toHaveBeenCalledWith('abcdef0123', 1);
+      expect([dialog.open, fixture.componentInstance['busy']()]).toEqual([true, false]);
+    });
   });
 
   it('waits while a take is recorded or checked, which would be filed under the words as they were', async () => {
