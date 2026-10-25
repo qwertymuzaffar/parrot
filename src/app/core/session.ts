@@ -1,4 +1,4 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, effect, inject, Injectable, signal } from '@angular/core';
 import { Clips } from './clips';
 import { Engine } from './engine';
 import { errorMessage, Library } from './library';
@@ -43,6 +43,14 @@ export class Session {
   private builds = 0;
   /** what went wrong last: with this text, else with the library */
   readonly error = computed(() => this.failure() ?? this.library.error());
+
+  constructor() {
+    // the open text has gone from the library (deleted as it was opened, or not in the list the engine gave): the
+    // practice screen would have no title, no words and dead controls
+    effect(() => {
+      if (this.view() === 'practice' && this.openId() && !this.text()) this.home();
+    });
+  }
 
   readonly part = computed(() => this.parts()[this.index()] ?? null);
   readonly words = computed(() => this.part()?.text.split(' ') ?? []);
