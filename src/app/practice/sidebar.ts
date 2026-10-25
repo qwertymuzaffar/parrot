@@ -33,6 +33,7 @@ import { matchesSearch } from '../shared/search';
       @for (text of shown(); track text.id) {
         <button
           [class.on]="text.id === session.text()?.id"
+          [class.opening]="text.id === session.opening()"
           [attr.aria-current]="text.id === session.text()?.id ? 'page' : null"
           (click)="session.open(text.id)"
         >
@@ -142,6 +143,12 @@ import { matchesSearch } from '../shared/search';
           .t {
             font-weight: 600;
           }
+        }
+        // a text taking a moment to open: shown after the moment every open takes
+        &.opening {
+          cursor: progress;
+          opacity: 0.7;
+          transition: opacity 0.15s 0.25s;
         }
       }
       .what {

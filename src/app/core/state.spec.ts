@@ -89,13 +89,15 @@ class FakeEngine extends Engine {
   async downloadModels(): Promise<never> {
     throw new Error('not used');
   }
+  /** the texts as they are when the call begins: a slow read of the folder is stale by the time it lands */
   async texts() {
-    this.calls.push('texts');
+    const list = [...this.library];
+    await this.pass('texts');
     this.answer();
-    return [...this.library];
+    return list;
   }
   async addText(text: string, title: string, mode: Mode) {
-    this.calls.push(`addText ${title}`);
+    await this.pass(`addText ${title}`);
     if (!text.trim()) throw new EngineError('the text is empty');
     const added = this.item({ id: 'abcdef0123', text, title, mode });
     this.library.unshift(added);
@@ -110,7 +112,7 @@ class FakeEngine extends Engine {
     return this.library[index];
   }
   async deleteText(id: string) {
-    this.calls.push(`deleteText ${id}`);
+    await this.pass(`deleteText ${id}`);
     this.answer();
     this.library = this.library.filter((item) => item.id !== id);
   }
@@ -124,10 +126,12 @@ class FakeEngine extends Engine {
     }
     return scores;
   }
+  /** the tries as they are when the call begins: a slow read of the folder is stale by the time it lands */
   async attempts(_textId: string, part: string) {
-    this.calls.push(`attempts ${part}`);
+    const list = [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+    await this.pass(`attempts ${part}`);
     this.answer();
-    return [...(this.tries[part] ?? [])].reverse().map(({ id, when, score, wpm, duration }) => ({ id, when, score, wpm, duration }));
+    return list;
   }
   async attempt(_textId: string, part: string, id: string) {
     await this.pass(`attempt ${id}`);
@@ -254,7 +258,7 @@ class FakeEngine extends Engine {
     return changed;
   }
   async talkDiscard() {
-    this.calls.push('talkDiscard');
+    await this.pass('talkDiscard');
     this.talk = null;
     this.left = null;
   }
@@ -379,6 +383,7 @@ function practiceApp() {
     engineState: () => library.engineState(),
     error: () => session.error(),
     view: () => session.view(),
+    opening: () => session.opening(),
     add: (text: string, title: string, mode: Mode) => session.add(text, title, mode),
     rename: (id: string, title: string) => library.rename(id, title),
     remove: (id: string) => library.remove(id),
@@ -421,6 +426,7 @@ function practiceApp() {
     checking: () => session.checking(),
     recording: () => session.recording(),
     playWordTry: (attempt: Attempt) => playback.playWordTry(attempt),
+    loading: () => session.loading(),
   };
 }
 
@@ -528,6 +534,57 @@ describe('the practice state', () => {
       await app.remove(ID);
       expect(app.texts()).toEqual([]);
       expect(engine.calls).toContain(`deleteText ${ID}`);
+    });
+
+    describe('a reload of the texts that lands after a change made meanwhile', () => {
+      let release: () => void;
+      let reloading: Promise<void>;
+
+      beforeEach(() => {
+        release = engine.hold('texts');
+        reloading = app.loadTexts();
+      });
+
+      it('keeps a rename', async () => {
+        await app.rename(ID, 'Hi');
+        release();
+        await reloading;
+        expect(app.texts()[0].title).toBe('Hi');
+      });
+
+      it('keeps a delete', async () => {
+        await app.remove(ID);
+        release();
+        await reloading;
+        expect(app.texts()).toEqual([]);
+      });
+
+      it('keeps a mode change, with its parts', async () => {
+        await app.open(ID);
+        await app.setMode('whole');
+        release();
+        await reloading;
+        expect([app.text()?.mode, app.parts().length]).toEqual(['whole', 1]);
+      });
+
+      it('keeps a text added, open', async () => {
+        await app.add('One more text.', 'New', 'whole');
+        release();
+        await reloading;
+        expect([app.view(), app.text()?.id, app.texts().length]).toEqual(['practice', 'abcdef0123', 2]);
+      });
+    });
+
+    it('goes Home when the open text is deleted (its delete still pending as it was clicked)', async () => {
+      const release = engine.hold(`deleteText ${ID}`);
+      const removing = app.remove(ID);
+      await settle();
+      await app.open(ID);
+      expect(app.view()).toBe('practice');
+      release();
+      await removing;
+      TestBed.tick();
+      expect([app.view(), app.text()]).toEqual(['home', null]);
     });
   });
 
@@ -699,6 +756,38 @@ describe('the practice state', () => {
       await settle();
       expect([app.text()?.id, app.parts().map((part) => part.text), app.index()]).toEqual(['b0b0b0b0b0', ['One.', 'Two.', 'Three.'], 0]);
       expect(localStorage.getItem('parrot.part:b0b0b0b0b0:sentences')).toBe('0');
+    });
+
+    it('stays on Home when it is pressed while a text opens', async () => {
+      const release = engine.hold(`scores ${ID}`);
+      const opening = app.open(ID);
+      await vi.waitFor(() => expect(engine.calls).toContain(`scores ${ID}`));
+      app.home();
+      release();
+      await opening;
+      await settle();
+      expect([app.view(), app.text(), app.opening()]).toEqual(['home', null, null]);
+    });
+
+    it('says which text is opening until it is open', async () => {
+      const release = engine.hold(`scores ${ID}`);
+      const opening = app.open(ID);
+      await vi.waitFor(() => expect(engine.calls).toContain(`scores ${ID}`));
+      expect(app.opening()).toBe(ID);
+      release();
+      await opening;
+      expect([app.opening(), app.view()]).toEqual([null, 'practice']);
+    });
+
+    it('keeps the text opened while a text was slowly added: the new one waits in the library', async () => {
+      const release = engine.hold('addText New');
+      const adding = app.add('One more text.', 'New', 'whole');
+      await vi.waitFor(() => expect(engine.calls).toContain('addText New'));
+      await app.open(ID);
+      release();
+      await adding;
+      await settle();
+      expect([app.text()?.id, app.texts().map((text) => text.id)]).toEqual([ID, ['abcdef0123', ID]]);
     });
 
     it('opens a text clicked while the mode of the one before was saved, in its own mode', async () => {
@@ -882,6 +971,47 @@ describe('the practice state', () => {
     });
   });
 
+  describe('recording while a text or mode loads', () => {
+    beforeEach(async () => {
+      await app.open(ID, 1);
+      await settle();
+    });
+
+    it('refuses a take while another text opens, and takes one once it is open', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      const release = engine.hold('scores b0b0b0b0b0');
+      const opening = app.open('b0b0b0b0b0');
+      await vi.waitFor(() => expect(engine.calls).toContain('scores b0b0b0b0b0'));
+      await app.toggleRecord();
+      expect([recorder.owner(), app.loading()]).toEqual([null, true]);
+      release();
+      await opening;
+      expect([app.loading(), app.text()?.id]).toEqual([false, 'b0b0b0b0b0']);
+      await app.toggleRecord();
+      expect(recorder.owner()).toBe('part');
+    });
+
+    it('refuses a take while the mode is saved, until the new parts show', async () => {
+      const release = engine.hold('updateText {"mode":"whole"}');
+      const changing = app.setMode('whole');
+      await settle();
+      await app.toggleRecord();
+      expect([recorder.owner(), app.loading()]).toEqual([null, true]);
+      release();
+      await changing;
+      expect([app.loading(), app.parts().length]).toEqual([false, 1]);
+      await app.toggleRecord();
+      expect(recorder.owner()).toBe('part');
+    });
+
+    it("is not loading after a mode the engine wouldn't save", async () => {
+      engine.down = true;
+      await app.setMode('whole');
+      expect([app.loading(), app.error()]).toEqual([false, 'The speech engine is not running.']);
+    });
+  });
+
   describe('recording', () => {
     beforeEach(async () => {
       await app.open(ID, 1);
@@ -984,6 +1114,51 @@ describe('the practice state', () => {
       await scoring;
       await settle();
       expect([app.index(), app.result()]).toEqual([2, null]);
+    });
+
+    it("doesn't show a take on the part moved to while its tries loaded", async () => {
+      engine.nextCheck = attempt('t1', 'How are you?', 80, ['good', 'wrong', 'good']);
+      await app.toggleRecord();
+      const release = engine.hold('attempts How are you?');
+      const scoring = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      app.next();
+      await settle();
+      release();
+      await scoring;
+      await settle();
+      expect([app.index(), app.result(), app.history(), app.selected()]).toEqual([2, null, [], null]);
+    });
+
+    it("doesn't show a take on a text opened while its tries loaded", async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      engine.nextCheck = attempt('t1', 'How are you?', 80, ['good', 'wrong', 'good']);
+      await app.toggleRecord();
+      const release = engine.hold('attempts How are you?');
+      const scoring = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      await app.open('b0b0b0b0b0', 0);
+      release();
+      await scoring;
+      await settle();
+      expect([app.text()?.id, app.result(), app.history(), app.selected()]).toEqual(['b0b0b0b0b0', null, [], null]);
+    });
+
+    it("doesn't put a part's old tries, landing late, over a take just scored", async () => {
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60)];
+      await app.open(ID, 0);
+      const release = engine.hold('attempts How are you?');
+      app.next();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      engine.nextCheck = attempt('t2', 'How are you?', 80);
+      await app.toggleRecord();
+      const scoring = app.toggleRecord();
+      await settle();
+      release();
+      await scoring;
+      await settle();
+      expect([app.index(), app.result()?.id, app.history().map((summary) => summary.id)]).toEqual([1, 't2', ['t2', 't1']]);
     });
   });
   describe('deleting a try', () => {
@@ -1418,6 +1593,26 @@ describe('the practice state', () => {
       expect(engine.calls).toContain('talkDiscard');
     });
 
+    it('started again while the refused one is dropped, waits for that, then records on the card and stops', async () => {
+      engine.refuseFeed = 'No space left on device';
+      const release = engine.hold('talkDiscard');
+      await talking.start();
+      recorder.say(2);
+      await settle();
+      expect([talking.state(), talking.failure()]).toEqual(['idle', 'No space left on device']);
+      engine.refuseFeed = null;
+      const starting = talking.start();
+      await settle();
+      expect(engine.calls.filter((call) => call.startsWith('talkStart')).length).toBe(1);
+      release();
+      await starting;
+      recorder.say(1);
+      await settle();
+      expect([talking.state(), talking.recording(), recorder.owner(), engine.talk?.samples]).toEqual(['recording', true, 'free', 100]);
+      await talking.stop();
+      expect(talking.state()).toBe('preview');
+    });
+
     it('says why it could not be kept, and stays to try again', async () => {
       await talking.start();
       recorder.say(1);
@@ -1439,6 +1634,37 @@ describe('the practice state', () => {
       expect([talking.state(), talking.checking(), talking.unfinished()?.heard]).toEqual(['idle', false, written]);
       await app.toggleRecord();
       expect(recorder.owner()).toBe('part');
+    });
+
+    it('has the screen when started while a text opened: the text does not take it back', async () => {
+      const release = engine.hold(`scores ${ID}`);
+      const opening = app.open(ID);
+      await vi.waitFor(() => expect(engine.calls).toContain(`scores ${ID}`));
+      await talking.start();
+      recorder.say(1);
+      release();
+      await opening;
+      await settle();
+      expect([app.view(), talking.state(), recorder.owner()]).toEqual(['home', 'recording', 'free']);
+      await talking.stop();
+      expect([talking.state(), app.view()]).toEqual(['preview', 'home']);
+    });
+
+    it('opens the text clicked last while the one before waited for the talk to stop', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'One. Two. Three.' }));
+      await app.loadTexts();
+      await talking.start();
+      recorder.say(1);
+      await settle();
+      // the talk's last block, sent as the recorder stops, takes long to reach the engine
+      const release = engine.hold('talkFeed 100');
+      const first = app.open(ID);
+      await settle();
+      const second = app.open('b0b0b0b0b0');
+      release();
+      await Promise.all([first, second]);
+      await settle();
+      expect([app.text()?.id, localStorage.getItem('parrot.text')]).toEqual(['b0b0b0b0b0', 'b0b0b0b0b0']);
     });
 
     it('is left unfinished from its check screen, with what was typed, to check again from the card', async () => {
