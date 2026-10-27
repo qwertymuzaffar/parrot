@@ -192,84 +192,89 @@
 
 <!-- right: score, word, tries -->
 <aside class="right">
-  @if (recording()) {
-    <section class="card tips">
-      <span class="eyebrow">While you read</span>
-      <div class="tip"><span class="num">1</span><span>Keep the same distance from the microphone every time.</span></div>
-      <div class="tip"><span class="num">2</span><span>Keep going if you slip. Parrot marks the words, not the pauses.</span></div>
-      @if (session.troubleWords().length) {
-        <div class="tip">
-          <span class="num">3</span>
-          <span
-            >Last time <b>{{ session.troubleWords().slice(0, 2).join(', ') }}</b>
-            {{ session.troubleWords().length > 1 ? 'were' : 'was' }} misheard. Say
-            {{ session.troubleWords().length > 1 ? 'them' : 'it' }} slowly.</span
-          >
-        </div>
-      } @else {
-        <div class="tip"><span class="num">3</span><span>Read at your interview pace, not slower.</span></div>
-      }
-    </section>
-    <section class="card level">
-      <span class="eyebrow">Input level</span>
-      <div class="meter"><i [style.width.%]="recorder.level() * 100"></i></div>
-      <span class="hint">{{ recorder.device() || 'Microphone' }}</span>
-    </section>
-  } @else {
-    @if (take) {
-      <section class="card score" aria-label="Score">
-        <app-score-ring [score]="take.score" />
-        <div class="stats">
-          <span
-            ><b class="big">{{ take.wpm }}</b> words a minute</span
-          >
-          <span class="hint">{{ pace(take.wpm) }}</span>
-          @if (take.pauses?.length; as pauseCount) {
-            <span class="hint">{{ pauseCount }} pause{{ pauseCount === 1 ? '' : 's' }} over a second</span>
-          }
-          <span
-            ><b class="bad">{{ counts().wrong }}</b> misheard · <b class="warn">{{ counts().unclear }}</b> sounded off</span
-          >
-          @if (delta(); as scoreDelta) {
-            <span class="delta" [class.down]="scoreDelta < 0">{{ scoreDelta > 0 ? '+' : '' }}{{ scoreDelta }} since the try before</span>
-          }
-        </div>
+  <!-- the cards scroll in a box of their own, under the strip over the window buttons rather than up over it -->
+  <div class="cards">
+    @if (recording()) {
+      <section class="card tips">
+        <span class="eyebrow">While you read</span>
+        <div class="tip"><span class="num">1</span><span>Keep the same distance from the microphone every time.</span></div>
+        <div class="tip"><span class="num">2</span><span>Keep going if you slip. Parrot marks the words, not the pauses.</span></div>
+        @if (session.troubleWords().length) {
+          <div class="tip">
+            <span class="num">3</span>
+            <span
+              >Last time <b>{{ session.troubleWords().slice(0, 2).join(', ') }}</b>
+              {{ session.troubleWords().length > 1 ? 'were' : 'was' }} misheard. Say
+              {{ session.troubleWords().length > 1 ? 'them' : 'it' }} slowly.</span
+            >
+          </div>
+        } @else {
+          <div class="tip"><span class="num">3</span><span>Read at your interview pace, not slower.</span></div>
+        }
       </section>
-    }
-
-    @if (session.selected() != null) {
-      <app-word-card class="card" />
-    } @else if (take) {
-      <section class="card hint-card">
-        <app-icon name="ear" [size]="24" />
-        <span>Click any word to see how it sounds and to hear yours next to the correct one.</span>
+      <section class="card level">
+        <span class="eyebrow">Input level</span>
+        <div class="meter"><i [style.width.%]="recorder.level() * 100"></i></div>
+        <span class="hint">{{ recorder.device() || 'Microphone' }}</span>
       </section>
     } @else {
-      <section class="card start">
-        <span class="eyebrow">How it works</span>
-        <div class="tip">
-          <span class="num">1</span><span><b>Listen</b> to the part (Space). Slow it down if you need to.</span>
-        </div>
-        <div class="tip">
-          <span class="num">2</span><span><b>Record</b> yourself reading it (R), and press R again when you finish.</span>
-        </div>
-        <div class="tip">
-          <span class="num">3</span
-          ><span>See which words came out <b class="bad">misheard</b> or <b class="warn">sounded off</b>, and click them to practise.</span>
-        </div>
-      </section>
+      @if (take) {
+        <section class="card score" aria-label="Score">
+          <app-score-ring [score]="take.score" />
+          <div class="stats">
+            <span
+              ><b class="big">{{ take.wpm }}</b> words a minute</span
+            >
+            <span class="hint">{{ pace(take.wpm) }}</span>
+            @if (take.pauses?.length; as pauseCount) {
+              <span class="hint">{{ pauseCount }} pause{{ pauseCount === 1 ? '' : 's' }} over a second</span>
+            }
+            <span
+              ><b class="bad">{{ counts().wrong }}</b> misheard · <b class="warn">{{ counts().unclear }}</b> sounded off</span
+            >
+            @if (delta(); as scoreDelta) {
+              <span class="delta" [class.down]="scoreDelta < 0">{{ scoreDelta > 0 ? '+' : '' }}{{ scoreDelta }} since the try before</span>
+            }
+          </div>
+        </section>
+      }
+
+      @if (session.selected() != null) {
+        <app-word-card class="card" />
+      } @else if (take) {
+        <section class="card hint-card">
+          <app-icon name="ear" [size]="24" />
+          <span>Click any word to see how it sounds and to hear yours next to the correct one.</span>
+        </section>
+      } @else {
+        <section class="card start">
+          <span class="eyebrow">How it works</span>
+          <div class="tip">
+            <span class="num">1</span><span><b>Listen</b> to the part (Space). Slow it down if you need to.</span>
+          </div>
+          <div class="tip">
+            <span class="num">2</span><span><b>Record</b> yourself reading it (R), and press R again when you finish.</span>
+          </div>
+          <div class="tip">
+            <span class="num">3</span
+            ><span
+              >See which words came out <b class="bad">misheard</b> or <b class="warn">sounded off</b>, and click them to practise.</span
+            >
+          </div>
+        </section>
+      }
+
+      @if (session.history().length) {
+        <app-tries-chart class="card tries" />
+      }
     }
 
-    @if (session.history().length) {
-      <app-tries-chart class="card tries" />
-    }
-  }
-
-  <div class="keys">
-    <span><kbd>Space</kbd> listen</span>
-    <span><kbd>R</kbd> record</span>
-    <span><kbd>M</kbd> mine</span>
-    <span><kbd>↑ ↓</kbd> {{ unit().toLowerCase() }}</span>
-    <span><kbd>Esc</kbd> stop</span>
+    <div class="keys">
+      <span><kbd>Space</kbd> listen</span>
+      <span><kbd>R</kbd> record</span>
+      <span><kbd>M</kbd> mine</span>
+      <span><kbd>↑ ↓</kbd> {{ unit().toLowerCase() }}</span>
+      <span><kbd>Esc</kbd> stop</span>
+    </div>
   </div>
 </aside>
