@@ -369,6 +369,11 @@ impl Talks {
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
         }
+        // written down already, as when Stop comes twice: it can't have changed since (its recording has stopped),
+        // and hearing it all again would hold up every other talk command meanwhile
+        if let Some(heard) = &talk.heard {
+            return Ok(heard.clone());
+        }
         let live = std::mem::take(&mut talk.live);
         let mut trim = None;
         let pcm = audio::read_wav_file(&talk.path)?;
@@ -936,6 +941,21 @@ mod tests {
         let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
         assert_eq!(heard.words.len(), 2 * listener.lengths.borrow().len());
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_written_down_is_not_heard_again() {
+        let (talks, dir) = talks("twice");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let first = talks.write_down(&Stretches { heard: "hello there", lengths: RefCell::new(vec![]) }, |_, _| {}).unwrap();
+        // stopped a second time: what was heard the first time, with nothing heard again
+        let listener = Stretches { heard: "something else", lengths: RefCell::new(vec![]) };
+        let again = talks.write_down(&listener, |_, _| {}).unwrap();
+        assert!(listener.lengths.borrow().is_empty(), "heard again: {:?}", listener.lengths.borrow());
+        assert_eq!((again.heard, again.words.len(), again.audio), (first.heard, first.words.len(), first.audio));
         talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);
     }
