@@ -255,6 +255,11 @@
     opacity: 0.8;
     transition: opacity 0.15s 0.25s;
   }
+  // its text on its way to the trash
+  &:disabled {
+    cursor: progress;
+    opacity: 0.5;
+  }
 
   .ring {
     position: relative;
@@ -358,6 +363,15 @@
     cursor: progress;
     opacity: 0.7;
     transition: opacity 0.15s 0.25s;
+  }
+  // a text on its way to the trash: it doesn't open
+  &.deleting {
+    cursor: progress;
+    opacity: 0.5;
+    &:hover {
+      border-color: var(--line);
+      box-shadow: none;
+    }
   }
   &:hover,
   &:focus-within {
