@@ -68,8 +68,10 @@ export class Practice {
 
   /** a take of the part is being recorded (a word said alone is recorded in its card) */
   protected readonly recording = this.session.recording;
-  /** the try shown, unless a new one is being recorded */
-  protected readonly result = computed(() => (this.recording() ? null : this.session.result()));
+  /** a new take of the part is being recorded or scored: the try before it is not what the screen is about */
+  protected readonly newTake = computed(() => this.recording() || this.session.checking());
+  /** the try shown, unless a new one is being recorded or scored (one that fails to score leaves the try before) */
+  protected readonly result = computed(() => (this.newTake() ? null : this.session.result()));
   /** a take being recorded or checked: the words can't be edited until it is filed (EditWords waits for it too) */
   protected readonly taking = computed(() => !!this.recorder.owner() || this.session.checkingText() || this.words.checking());
   protected readonly counts = computed(() => {
