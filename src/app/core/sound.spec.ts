@@ -91,6 +91,46 @@ describe('sound', () => {
     });
   });
 
+  describe('a whole take', () => {
+    let sound: Sound;
+    /** the element whole takes play in */
+    const takeAudio = () => audios[0];
+
+    beforeEach(() => (sound = TestBed.inject(Sound)));
+
+    it("that fails to start once something else has begun doesn't end that", async () => {
+      takeAudio().holdStart = true;
+      sound.play('audio:first.wav', 'mine');
+      const failFirst = takeAudio().failStart!;
+      takeAudio().holdStart = false;
+      const clip = sound.playClip('blob:word');
+      failFirst();
+      expect(await over(clip)).toBe(false);
+
+      takeAudio().holdStart = true;
+      sound.play('audio:first.wav', 'mine');
+      const failAgain = takeAudio().failStart!;
+      takeAudio().holdStart = false;
+      const second = sound.play('audio:second.wav', 'mine');
+      failAgain();
+      expect([await over(second), sound.playing()]).toEqual([false, 'mine']);
+    });
+
+    it('resumed and cut short by something else leaves that playing', async () => {
+      sound.play('audio:take.wav', 'mine');
+      await settle();
+      sound.togglePause();
+      takeAudio().holdStart = true;
+      sound.togglePause();
+      const failResume = takeAudio().failStart!;
+      takeAudio().holdStart = false;
+      const second = sound.play('audio:second.wav', 'mine');
+      // the failed resume must be caught too: a rejection left unhandled fails the run
+      failResume();
+      expect([await over(second), sound.playing()]).toEqual([false, 'mine']);
+    });
+  });
+
   describe('a word cut from my take', () => {
     const take: Attempt = {
       id: 't1',
