@@ -82,8 +82,8 @@
               [class]="status(wordIndex)"
               [class.now]="playback.nowRef() === wordIndex || playback.nowMine() === wordIndex"
               [class.name]="names.has(word)"
-              [class.sel]="session.selected() === wordIndex && !recording()"
-              [attr.aria-current]="session.selected() === wordIndex && !recording() ? 'true' : null"
+              [class.sel]="session.selected() === wordIndex && !newTake()"
+              [attr.aria-current]="session.selected() === wordIndex && !newTake() ? 'true' : null"
               [attr.aria-label]="wordLabel(wordIndex, word)"
               (click)="wordClick(wordIndex, $event)"
               >{{ word }}@if (heard(wordIndex); as heardAs) {<span class="tag">{{ heardAs }}</span>}</button
@@ -112,7 +112,7 @@
               <span class="error">{{ session.error() }}</span>
             } @else if (take) {
               <b>Your take</b>
-              <span>· {{ take.duration.toFixed(1) }} s · try {{ session.history().length }}{{ take.cut ? ' · from your talk' : '' }}</span>
+              <span>· {{ take.duration.toFixed(1) }} s · try {{ tryNumber() }}{{ take.cut ? ' · from your talk' : '' }}</span>
               <span class="grow"></span>
               <span class="key"><i class="k-wrong"></i>misheard</span>
               <span class="key"><i class="k-warn"></i>sounded off</span>
@@ -215,6 +215,12 @@
         <span class="eyebrow">Input level</span>
         <div class="meter"><i [style.width.%]="recorder.level() * 100"></i></div>
         <span class="hint">{{ recorder.device() || 'Microphone' }}</span>
+      </section>
+    } @else if (session.checking()) {
+      <!-- the take is being scored: its score comes here, not the try before it -->
+      <section class="card hint-card listening">
+        <span class="spinner"></span>
+        <span>Your score shows here in a moment.</span>
       </section>
     } @else {
       @if (take) {

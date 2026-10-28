@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Clips } from './clips';
-import { Engine, EngineError, TALK_CANCELLED } from './engine';
+import { Engine, EngineError, TALK_CANCELLED, TALK_GONE } from './engine';
 import { Library } from './library';
 import { Activity, Attempt, LeftTalk, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
@@ -10,7 +10,7 @@ import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey, splitKnown } from './split';
 import { WordPractice } from './word-practice';
-import { CANCEL_WAIT_MS, LONGEST_TALK, NOT_STOPPED, QUIET_STOP_MS, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
+import { CANCEL_WAIT_MS, LONGEST_TALK, NOT_STOPPED, QUIET_STOP_MS, RECORDING_GONE, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
@@ -216,7 +216,7 @@ class FakeEngine extends Engine {
   async talkStop(onProgress: (progress: TalkProgress) => void) {
     await this.pass('talkStop');
     this.answer();
-    if (!this.talk) throw new EngineError('there is no talk to write down');
+    if (!this.talk) throw new EngineError(TALK_GONE);
     onProgress({ done: 1, total: 2 });
     await this.pass('talkStop done');
     if (this.talkCancelled) {
@@ -394,6 +394,7 @@ function practiceApp() {
     loaded: () => library.loaded(),
     engineState: () => library.engineState(),
     error: () => session.error(),
+    libraryError: () => library.error(),
     view: () => session.view(),
     opening: () => session.opening(),
     add: (text: string, title: string, mode: Mode) => session.add(text, title, mode),
@@ -494,17 +495,17 @@ describe('the practice state', () => {
 
     it('loads the texts and marks the engine ready', () => {
       expect(app.texts().map((text) => text.id)).toEqual([ID]);
-      expect([app.loaded(), app.engineState(), app.error()]).toEqual([true, 'ready', null]);
+      expect([app.loaded(), app.engineState(), app.libraryError()]).toEqual([true, 'ready', null]);
     });
 
     it('says when the engine is down, and loads once it is up', async () => {
       vi.useFakeTimers();
       engine.down = true;
       await app.loadTexts();
-      expect([app.engineState(), app.error()]).toEqual(['down', 'The speech engine is not running.']);
+      expect([app.engineState(), app.libraryError()]).toEqual(['down', 'The speech engine is not running.']);
       engine.down = false;
       await vi.advanceTimersByTimeAsync(3000);
-      expect([app.engineState(), app.error()]).toEqual(['ready', null]);
+      expect([app.engineState(), app.libraryError()]).toEqual(['ready', null]);
     });
 
     it('tries again on one timer, however often loading fails', async () => {
@@ -528,14 +529,14 @@ describe('the practice state', () => {
 
     it("reports a text the engine wouldn't add", async () => {
       await app.add('  ', 'Empty', 'whole');
-      expect(app.error()).toBe('the text is empty');
+      expect(app.libraryError()).toBe('the text is empty');
       expect(app.view()).toBe('home');
     });
 
     it('forgets why a text was refused once one is added', async () => {
       await app.add('  ', 'Empty', 'whole');
       await app.add('One more text.', 'New', 'whole');
-      expect(app.error()).toBeNull();
+      expect(app.libraryError()).toBeNull();
     });
 
     it('renames a text, the open one too', async () => {
@@ -547,12 +548,12 @@ describe('the practice state', () => {
     it('says why a text could not be renamed or deleted, and keeps it as it was', async () => {
       engine.down = true;
       await app.rename(ID, 'Hi');
-      expect([app.texts()[0].title, app.error()]).toEqual(['Greeting', 'The speech engine is not running.']);
+      expect([app.texts()[0].title, app.libraryError()]).toEqual(['Greeting', 'The speech engine is not running.']);
       await app.remove(ID);
-      expect([app.texts().length, app.error()]).toEqual([1, 'The speech engine is not running.']);
+      expect([app.texts().length, app.libraryError()]).toEqual([1, 'The speech engine is not running.']);
       engine.down = false;
       await app.rename(ID, 'Hi');
-      expect([app.texts()[0].title, app.error()]).toEqual(['Hi', null]);
+      expect([app.texts()[0].title, app.libraryError()]).toEqual(['Hi', null]);
     });
 
     it('removes a text', async () => {
@@ -728,8 +729,8 @@ describe('the practice state', () => {
         expect(shown).toEqual([
           'Greeting: Hello there., try of Hello there. (at updateText)',
           'Greeting: Hello there., try of Hello there. (at scores)',
-          'Other: One., try of none (at attempts)',
-          'Other: One., try of none (at attempt)',
+          'Greeting: Hello there., try of Hello there. (at attempts)',
+          'Greeting: Hello there., try of Hello there. (at attempt)',
         ]);
         expect(snapshot()).toBe('Other: One., try of One.');
       });
@@ -743,16 +744,34 @@ describe('the practice state', () => {
     });
 
     it("doesn't show a part's try on the part moved to while it loaded", async () => {
-      engine.tries['Hello there.'] = [attempt('t1', 'Hello there.', 80, ['wrong', 'good'])];
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 80, ['wrong', 'good', 'good'])];
+      await app.open(ID, 0);
       const release = engine.hold('attempt t1');
-      const opening = app.open(ID, 0);
-      await vi.waitFor(() => expect(engine.calls).toContain('attempt t1'));
       app.next();
-      await settle();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempt t1'));
+      // pressed again before the part landed: on from the part being gone to, not the one still shown
+      app.next();
       release();
-      await opening;
       await settle();
-      expect([app.index(), app.result(), app.history()]).toEqual([1, null, []]);
+      expect([app.index(), app.result(), app.history()]).toEqual([2, null, []]);
+    });
+
+    it('moves between practised parts without showing either without its try', async () => {
+      engine.tries['Hello there.'] = [attempt('t1', 'Hello there.', 80)];
+      engine.tries['How are you?'] = [attempt('t2', 'How are you?', 70), attempt('t3', 'How are you?', 90)];
+      await app.open(ID, 0);
+      const snapshot = () => `${app.index()}: ${app.result()?.id ?? 'no try'}, ${app.history().length} tries`;
+      const release = engine.hold('attempts How are you?');
+      const releaseTry = engine.hold('attempt t3');
+      const moving = app.select(1);
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      const whileTries = snapshot();
+      release();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempt t3'));
+      const whileTry = snapshot();
+      releaseTry();
+      await moving;
+      expect([whileTries, whileTry, snapshot()]).toEqual(['0: t1, 1 tries', '0: t1, 1 tries', '1: t3, 2 tries']);
     });
 
     it("doesn't show a try chosen on a part left while it loaded", async () => {
@@ -802,6 +821,19 @@ describe('the practice state', () => {
       release();
       await opening;
       expect([app.opening(), app.view()]).toEqual([null, 'practice']);
+    });
+
+    it("says why a text slowly added was refused on Home, not as the open text's", async () => {
+      const release = engine.hold('addText Empty');
+      const adding = app.add('  ', 'Empty', 'whole');
+      await vi.waitFor(() => expect(engine.calls).toContain('addText Empty'));
+      await app.open(ID);
+      release();
+      await adding;
+      expect([app.text()?.id, app.error(), app.libraryError()]).toEqual([ID, null, 'the text is empty']);
+      app.next();
+      await settle();
+      expect(app.error()).toBeNull();
     });
 
     it('keeps the text opened while a text was slowly added: the new one waits in the library', async () => {
@@ -1222,18 +1254,35 @@ describe('the practice state', () => {
       expect([app.text()?.id, app.result(), app.history(), app.selected()]).toEqual(['b0b0b0b0b0', null, [], null]);
     });
 
-    it("doesn't put a part's old tries, landing late, over a take just scored", async () => {
+    it("doesn't start a take while the part moved to loads: it would be of the part still shown", async () => {
       engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60)];
       await app.open(ID, 0);
       const release = engine.hold('attempts How are you?');
       app.next();
       await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      await app.toggleRecord();
+      expect([app.index(), recorder.owner()]).toEqual([0, null]);
+      release();
+      await settle();
+      expect([app.index(), app.result()?.id]).toEqual([1, 't1']);
+    });
+
+    it("doesn't put a part's old tries, landing late, over a take just scored", async () => {
+      engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60)];
+      await app.open(ID, 1);
       engine.nextCheck = attempt('t2', 'How are you?', 80);
+      const releaseCheck = engine.hold('check How are you?');
       await app.toggleRecord();
       const scoring = app.toggleRecord();
-      await settle();
-      release();
+      await vi.waitFor(() => expect(engine.calls).toContain('check How are you?'));
+      // away and back while the take is scored: the tries of the part come from before the take
+      await app.previous();
+      const release = engine.hold('attempts How are you?');
+      app.next();
+      await vi.waitFor(() => expect(engine.calls).toContain('attempts How are you?'));
+      releaseCheck();
       await scoring;
+      release();
       await settle();
       expect([app.index(), app.result()?.id, app.history().map((summary) => summary.id)]).toEqual([1, 't2', ['t2', 't1']]);
     });
@@ -1586,6 +1635,14 @@ describe('the practice state', () => {
         const again = await startWith(left(written));
         await again.discard();
         expect([again.state(), again.unfinished(), engine.left]).toEqual(['idle', null, null]);
+      });
+
+      it('whose recording has gone is let go, and says so, rather than offered to write down again', async () => {
+        const fresh = await startWith(left(null));
+        engine.talk = null;
+        await fresh.writeDown();
+        expect([fresh.state(), fresh.unfinished(), fresh.failure()]).toEqual(['idle', null, RECORDING_GONE]);
+        expect(engine.calls).toContain('talkDiscard');
       });
     });
 

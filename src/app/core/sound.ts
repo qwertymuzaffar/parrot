@@ -103,10 +103,12 @@ export class Sound {
       this.onTime = onTime ?? null;
       this.onEnd = resolve;
       this.playing.set(track);
+      // only this take may end itself: one replaced while starting fails to play after the next has begun
+      const ended = () => this.onEnd === resolve && this.ended();
       this.player
         .play()
-        .then(() => this.tick())
-        .catch(() => this.ended());
+        .then(() => this.onEnd === resolve && this.tick())
+        .catch(ended);
     });
   }
 
@@ -135,7 +137,11 @@ export class Sound {
         this.paused.set(true);
       }
     } else if (this.player.paused) {
-      this.player.play().then(() => this.tick());
+      // a resume cut short by something else played is that thing's to handle
+      this.player
+        .play()
+        .then(() => this.tick())
+        .catch(() => {});
       this.paused.set(false);
     } else {
       this.player.pause();

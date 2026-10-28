@@ -26,8 +26,8 @@ export class Playback {
 
   /** every play chain (mine, then the reference) checks this, so Stop really stops it */
   private run = 0;
-  /** the word clip cut last: one cut short by the next leaves the highlight to it */
-  private wordClip: string | null = null;
+  /** counts the word clips cut: one cut short by the next leaves the highlight to it */
+  private wordClip = 0;
 
   setRate(rate: number) {
     this.rate.set(rate);
@@ -90,7 +90,8 @@ export class Playback {
   /** A word as it was said, cut out of my take. */
   playMyWord(attempt: Attempt, wordIndex: number) {
     if (attempt.words[wordIndex]?.t) this.run++;
-    return this.cutMyWord(attempt, wordIndex);
+    // a word that can't be cut (its recording missing or damaged) stays silent
+    return this.cutMyWord(attempt, wordIndex).catch(() => {});
   }
 
   /** A try of one word said alone, played whole (it lights up nothing in the part). */
@@ -109,9 +110,9 @@ export class Playback {
     );
   }
 
-  private cutMyWord(attempt: Attempt, wordIndex: number) {
+  private async cutMyWord(attempt: Attempt, wordIndex: number) {
     const word = attempt.words[wordIndex];
-    if (!word?.t) return Promise.resolve();
+    if (!word?.t) return;
     const before = attempt.words
       .slice(0, wordIndex)
       .reverse()
@@ -119,20 +120,30 @@ export class Playback {
     const after = attempt.words.slice(wordIndex + 1).find((other) => other.t);
     const from = Math.max(before?.t ? before.t[1] : 0, word.t[0] - 0.03);
     const to = Math.min(after?.t ? after.t[0] : word.t[1] + 0.12, word.t[1] + 0.04);
+    const run = this.run;
+    const clip = ++this.wordClip;
     this.nowMine.set(wordIndex);
-    return this.clips.cut(attempt.audio, from, to).then(async (url) => {
-      this.wordClip = url;
+    try {
+      const url = await this.clips.cut(attempt.audio, from, to);
+      // stopped, or something else played, while it was cut: playing it now would cut that off
+      if (run !== this.run) return URL.revokeObjectURL(url);
       // the clip ends when it plays out, or when anything else is played or stopped
       await this.sound.playClip(url);
       URL.revokeObjectURL(url);
-      if (this.wordClip === url) this.nowMine.set(null);
-    });
+    } finally {
+      if (this.wordClip === clip) this.nowMine.set(null);
+    }
   }
 
   /** Play one thing, wait a moment, then the next, unless something else was played or stopped meanwhile. */
   private async chain(first: () => Promise<void>, gap: number, then: () => void) {
     const run = ++this.run;
-    await first();
+    try {
+      await first();
+    } catch {
+      // the first step failed (a word that couldn't be cut): the chain ends there
+      return;
+    }
     if (run !== this.run) return;
     await new Promise((resolve) => setTimeout(resolve, gap));
     if (run === this.run) then();

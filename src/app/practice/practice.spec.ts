@@ -13,6 +13,7 @@ import { Practice } from './practice';
 describe('the practice screen', () => {
   const session = {
     recording: signal(false),
+    checking: signal(false),
     result: signal<Attempt | null>(null),
     previousScore: signal<number | null>(null),
     text: signal(null),
@@ -27,6 +28,8 @@ describe('the practice screen', () => {
   const playback = { toggleReference: vi.fn(), stop: vi.fn() };
   let page: HTMLElement;
   let button: HTMLButtonElement;
+  let box: HTMLInputElement;
+  let field: HTMLInputElement;
   let labels: {
     wordLabel(wordIndex: number, word: string): string;
     stepLabel(label: string, score?: number): string;
@@ -44,11 +47,14 @@ describe('the practice screen', () => {
         { provide: WordPractice, useValue: { toggleRecord: vi.fn() } },
       ],
     });
-    TestBed.overrideComponent(Practice, { set: { imports: [], template: '<div class="page"><button>Mine</button></div>' } });
+    TestBed.overrideComponent(Practice, {
+      set: { imports: [], template: '<div class="page"><button>Mine</button><input type="checkbox" /><input /></div>' },
+    });
     const fixture = TestBed.createComponent(Practice);
     fixture.detectChanges();
     page = fixture.nativeElement.querySelector('.page');
     button = fixture.nativeElement.querySelector('button');
+    [box, field] = fixture.nativeElement.querySelectorAll('input');
     labels = fixture.componentInstance as never;
   });
 
@@ -80,6 +86,21 @@ describe('the practice screen', () => {
     button.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
     expect(press(button, 'ArrowRight')).toBe(true);
     expect(session.next).not.toHaveBeenCalled();
+  });
+
+  it('keeps the shortcuts on a focused box to tick, but leaves it Space to tick it', () => {
+    expect(press(box, ' ')).toBe(false);
+    expect(playback.toggleReference).not.toHaveBeenCalled();
+    // Esc closes the word card even with focus on its "A name" box
+    expect(press(box, 'Escape')).toBe(true);
+    expect([playback.stop.mock.calls.length, session.selectWord.mock.calls]).toEqual([1, [[null]]]);
+  });
+
+  it('leaves every key to a field being typed in', () => {
+    for (const key of [' ', 'r', 'ArrowRight', 'Escape']) expect(press(field, key)).toBe(false);
+    expect([session.toggleRecord, session.next, playback.stop, playback.toggleReference].some((each) => each.mock.calls.length)).toBe(
+      false,
+    );
   });
 
   it('says how each word came out and each part scored, which the screen shows in colour', () => {
@@ -143,6 +164,7 @@ describe('the practice screen when the centre changes size', () => {
           provide: Session,
           useValue: {
             recording: signal(false),
+            checking: signal(false),
             result: signal(null),
             previousScore: signal(null),
             text: signal(null),
