@@ -116,6 +116,9 @@ describe('Just talk', () => {
     it('offers sets of prompts to talk about, one shown at a time', async () => {
       const card = await render(TalkCard);
       expect(card.element.querySelector('.prompt')).toBeNull();
+      // talking about anything is chosen when no set is
+      expect(card.button(/Anything/).getAttribute('aria-pressed')).toBe('true');
+      expect(card.button(/Small talk/).getAttribute('aria-pressed')).toBe('false');
       card.button(/Small talk/).click();
       expect(talking.choosePrompts).toHaveBeenCalledWith('small-talk');
       talking.prompts.set('small-talk');
@@ -125,8 +128,11 @@ describe('Just talk', () => {
       expect(card.element.querySelector('.prompt')!.textContent).toBe('How was your weekend?');
       card.element.querySelector<HTMLButtonElement>('[aria-label="Another question"]')!.click();
       expect(talking.anotherPrompt).toHaveBeenCalled();
-      // the set chosen, clicked again: talk about anything
+      expect(card.button(/Anything/).getAttribute('aria-pressed')).toBe('false');
+      // the set chosen, clicked again, stays chosen; Anything turns the questions off
       card.button(/Small talk/).click();
+      expect(talking.choosePrompts).toHaveBeenCalledTimes(1);
+      card.button(/Anything/).click();
       expect(talking.choosePrompts).toHaveBeenLastCalledWith(null);
       // and the prompt talked about stays in view while talking
       talking.about.set('How was your weekend?');
