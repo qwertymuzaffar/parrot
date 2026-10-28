@@ -240,22 +240,25 @@ function kept(): number | null {
         background: var(--rec);
       }
     }
-    // the right edge, astride the border: a line shows it while it is under the pointer, focused or dragged
+    // the right edge, astride the border: a line shows it while it is under the pointer, focused or dragged. The edge
+    // is taken hold of below the strip over the window buttons, which drags the window, but its line runs on up to
+    // the window's top, over the strip's line rather than cut by it
     .edge {
       position: absolute;
-      top: 0;
+      top: var(--titlebar);
       bottom: 0;
       right: -4px;
       width: 9px;
-      z-index: 1;
+      z-index: 101;
       cursor: col-resize;
       outline: none;
       touch-action: none;
       &::after {
         content: '';
         position: absolute;
-        top: 0;
+        top: calc(-1 * var(--titlebar));
         bottom: 0;
+        pointer-events: none;
         left: 3px;
         width: 3px;
         border-radius: 2px;
