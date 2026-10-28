@@ -134,7 +134,7 @@ export class EditWords {
   /** counts the saves: a save the user gave up waiting for has nothing more to say in the dialog */
   private edits = 0;
   /** a take being recorded or checked: the words wait for it, or it would be filed under words the text no longer has */
-  readonly taking = computed(() => !!this.recorder.owner() || this.session.checking() || this.wordPractice.checking());
+  readonly taking = computed(() => !!this.recorder.owner() || this.session.checkingText() || this.wordPractice.checking());
 
   open() {
     const text = this.session.text();
