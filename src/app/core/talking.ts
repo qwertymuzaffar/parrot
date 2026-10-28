@@ -17,6 +17,11 @@ export const QUIET_STOP_MS = 120_000;
 export const STOP_WAIT_MS = 10_000;
 /** What the card says then; the talk is kept as the engine has it, to write down or let go. */
 export const STOPPED_TAKING = 'The speech engine stopped taking the talk.';
+/** How long a writing-down may take to stop once it is cancelled (ms). The engine sees the cancel between two
+ * stretches, so this is plenty; past it, the card stops waiting for it. */
+export const CANCEL_WAIT_MS = 5_000;
+/** What the card says then; the talk is kept as the engine has it, to write down again or let go. */
+export const NOT_STOPPED = "The speech engine didn't stop writing it down.";
 
 /** the key of a set of prompts there is, or null (talk about anything): a set kept by an earlier version may be gone */
 function knownSet(key: string | null) {
@@ -31,8 +36,9 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export type TalkState = 'idle' | 'recording' | 'stopping' | 'writing' | 'stopped' | 'preview' | 'keeping';
 
-/** Why a talk stopped: the speaker stopped it, it was quiet too long, or it reached the longest a talk can be. */
-export type StopReason = 'you' | 'quiet' | 'longest';
+/** Why a talk stopped: the speaker stopped it, it was quiet too long, it reached the longest a talk can be, or the
+ * microphone went. */
+export type StopReason = 'you' | 'quiet' | 'longest' | 'microphone';
 
 /** What the engine says when a talk had nothing to write down: writing it down again would say the same. */
 const NOTHING_IN_IT = /^(Nothing was heard|Parrot couldn't make out|Parrot got only silence)/;
@@ -70,6 +76,9 @@ export class Talking {
   /** the prompt the talk was about, as it started: the title of the text it becomes. A talk left from an earlier run
    * has none, as that run's prompt isn't known. */
   readonly about = signal<string | null>(null);
+  /** settles once the engine has said whether a talk was left from the last run, answered or not: the first screen
+   * waits for it, so the card doesn't offer a new talk and then swap it for the one left */
+  readonly asked: Promise<void>;
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
@@ -87,13 +96,17 @@ export class Talking {
   private watch = 0;
   /** counts the talks begun: one whose start finds a newer one begun (it was cancelled meanwhile) leaves it be */
   private starts = 0;
+  /** counts the writing-downs begun, and those given up after a cancel: the answer of an older one is dropped */
+  private writes = 0;
 
   constructor() {
     this.session.whenOpening(() => this.away());
     this.anotherPrompt();
     // asked once, at the start: a talk can only be left by an earlier run
-    this.engine.talkLeft().then(
-      (left) => this.state() === 'idle' && this.unfinished.set(left),
+    this.asked = this.engine.talkLeft().then(
+      (left) => {
+        if (this.state() === 'idle') this.unfinished.set(left);
+      },
       () => {},
     );
   }
@@ -130,7 +143,12 @@ export class Talking {
     this.started = false;
     this.sendFailed = null;
     try {
-      await this.recorder.start('free', (pcm, rate) => this.send(pcm, rate));
+      await this.recorder.start('free', {
+        sink: (pcm, rate) => this.send(pcm, rate),
+        lost: () => {
+          if (run === this.starts) void this.cutOff();
+        },
+      });
     } catch (error) {
       if (run !== this.starts) return;
       this.state.set('idle');
@@ -191,6 +209,17 @@ export class Talking {
     await this.writeDown();
   }
 
+  /** The microphone went while the talk was recorded: the recorder has ended it, and what was said up to then is
+   * written down. */
+  private async cutOff() {
+    if (this.state() !== 'recording') return;
+    clearInterval(this.watch);
+    this.state.set('stopping');
+    if (!(await this.sent())) return;
+    this.stopReason.set('microphone');
+    await this.writeDown();
+  }
+
   /** A text is opening: a talk being recorded stops, and is written down out of sight, to wait on the card. The text
    * opens as soon as the microphone is free; the talk's last sound reaches the engine behind it. */
   private async away() {
@@ -244,20 +273,24 @@ export class Talking {
 
   /** Write the talk down: after it stops, again after it was cancelled or failed, or the talk left from last time. */
   async writeDown() {
+    const run = ++this.writes;
     this.unfinished.set(null);
     this.draft.set(null);
     this.state.set('writing');
     this.progress.set(0);
     this.failure.set(null);
     try {
-      const talk = await this.engine.talkStop(({ done, total }) => this.progress.set(total ? done / total : 0));
-      if (this.state() !== 'writing') return;
+      // a writing-down given up on may still report: the card shows the one under way
+      const talk = await this.engine.talkStop(({ done, total }) => {
+        if (run === this.writes) this.progress.set(total ? done / total : 0);
+      });
+      if (run !== this.writes || this.state() !== 'writing') return;
       // a text was opened meanwhile: the talk waits on the card rather than taking the screen from it
       if (this.session.view() === 'practice') return this.putAside(talk, null);
       this.talk.set(talk);
       this.state.set('preview');
     } catch (error) {
-      if (this.state() !== 'writing') return;
+      if (run !== this.writes || this.state() !== 'writing') return;
       const why = errorMessage(error);
       if (why === TALK_CANCELLED) {
         this.state.set('stopped');
@@ -300,9 +333,18 @@ export class Talking {
     this.unfinished.set({ started: startedAt(talk.audio), duration: talk.duration, heard: talk });
   }
 
-  /** Stop writing the talk down; the recording is kept. */
+  /** Stop writing the talk down; the recording is kept. An engine that doesn't stop soon is not waited for: the card
+   * offers the talk to write down again or discard, and what the engine gives after is dropped. */
   cancel() {
-    if (this.state() === 'writing') void this.engine.talkCancel();
+    if (this.state() !== 'writing') return;
+    void this.engine.talkCancel().catch(() => {});
+    const run = this.writes;
+    window.setTimeout(() => {
+      if (run !== this.writes || this.state() !== 'writing') return;
+      this.writes++;
+      this.state.set('stopped');
+      this.failure.set(NOT_STOPPED);
+    }, CANCEL_WAIT_MS);
   }
 
   /** Keep the talk as a text (`text` is what was said, as corrected), and open it with the talk as its take. */

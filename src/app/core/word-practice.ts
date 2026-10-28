@@ -3,7 +3,7 @@ import { Engine } from './engine';
 import { errorMessage } from './library';
 import { Attempt, AttemptSummary } from './models';
 import { Playback } from './playback';
-import { micError, Recorder } from './recorder';
+import { MIC_LOST, micError, Recorder } from './recorder';
 import { Session } from './session';
 import { bare } from './split';
 
@@ -108,7 +108,8 @@ export class WordPractice {
     this.taking = practised;
     const run = ++this.starts;
     try {
-      await this.recorder.start('word');
+      // the microphone going while the take is recorded ends it there: it is dropped, and the card says why
+      await this.recorder.start('word', { lost: () => this.lost(practised) });
     } catch (error) {
       if (run === this.starts) this.error.set(micError(error));
       return;
@@ -118,6 +119,11 @@ export class WordPractice {
     this.error.set(null);
     // another word was chosen while the microphone opened
     if (!this.still(practised)) await this.recorder.stop();
+  }
+
+  private lost(practised: PractisedWord) {
+    if (this.taking === practised) this.taking = null;
+    if (this.still(practised)) this.error.set(MIC_LOST);
   }
 
   private async finishRecording() {
