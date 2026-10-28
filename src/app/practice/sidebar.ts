@@ -102,9 +102,19 @@ function kept(): number | null {
       flex-direction: column;
       gap: 12px;
       padding: calc(18px + var(--titlebar)) 14px 12px;
-      border-right: 1px solid var(--line);
       background: var(--side);
       min-height: 0;
+    }
+    // the column's line on its right starts at the strip's line over the window buttons, not up through the strip
+    :host::after {
+      content: '';
+      position: absolute;
+      top: var(--titlebar);
+      bottom: 0;
+      right: 0;
+      width: 1px;
+      background: var(--line);
+      pointer-events: none;
     }
     :host(.dragging) {
       cursor: col-resize;
@@ -240,9 +250,9 @@ function kept(): number | null {
         background: var(--rec);
       }
     }
-    // the right edge, astride the border: a line shows it while it is under the pointer, focused or dragged. The edge
-    // is taken hold of below the strip over the window buttons, which drags the window, but its line runs on up to
-    // the window's top, over the strip's line rather than cut by it
+    // the right edge, astride the column's line: a line shows it while it is under the pointer, focused or dragged. The
+    // edge is taken hold of below the strip over the window buttons, which drags the window, and its line starts as the
+    // column's does, on the strip's line: drawn over that line, so the two meet with no gap
     .edge {
       position: absolute;
       top: var(--titlebar);
@@ -256,7 +266,7 @@ function kept(): number | null {
       &::after {
         content: '';
         position: absolute;
-        top: calc(-1 * var(--titlebar));
+        top: -1px;
         bottom: 0;
         pointer-events: none;
         left: 3px;
