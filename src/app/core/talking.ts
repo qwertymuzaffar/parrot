@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { Engine, TALK_CANCELLED } from './engine';
+import { Engine, TALK_CANCELLED, TALK_GONE } from './engine';
 import { errorMessage, Library } from './library';
 import { KeptTalk, LeftTalk, Talk } from './models';
 import { Playback } from './playback';
@@ -39,6 +39,9 @@ export type TalkState = 'idle' | 'recording' | 'stopping' | 'writing' | 'stopped
 /** Why a talk stopped: the speaker stopped it, it was quiet too long, it reached the longest a talk can be, or the
  * microphone went. */
 export type StopReason = 'you' | 'quiet' | 'longest' | 'microphone';
+
+/** What the card says when the talk's recording has gone: there is nothing to write down, now or again. */
+export const RECORDING_GONE = "That talk's recording is no longer there.";
 
 /** What the engine says when a talk had nothing to write down: writing it down again would say the same. */
 const NOTHING_IN_IT = /^(Nothing was heard|Parrot couldn't make out|Parrot got only silence)/;
@@ -294,6 +297,11 @@ export class Talking {
       const why = errorMessage(error);
       if (why === TALK_CANCELLED) {
         this.state.set('stopped');
+      } else if (why === TALK_GONE) {
+        // offering to write it down again would fail the same way: the talk is let go
+        await this.engine.talkDiscard().catch(() => {});
+        this.reset();
+        this.failure.set(RECORDING_GONE);
       } else if (NOTHING_IN_IT.test(why)) {
         await this.engine.talkDiscard().catch(() => {});
         const reason = this.stopReason();
