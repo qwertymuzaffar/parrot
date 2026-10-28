@@ -13,6 +13,7 @@ import { Practice } from './practice';
 describe('the practice screen', () => {
   const session = {
     recording: signal(false),
+    checking: signal(false),
     result: signal<Attempt | null>(null),
     previousScore: signal<number | null>(null),
     text: signal(null),
@@ -143,6 +144,7 @@ describe('the practice screen when the centre changes size', () => {
           provide: Session,
           useValue: {
             recording: signal(false),
+            checking: signal(false),
             result: signal(null),
             previousScore: signal(null),
             text: signal(null),
