@@ -33,13 +33,14 @@ const MB = 1_000_000;
         }
       </ul>
 
-      @if (error()) {
-        <p class="error">{{ error() }}</p>
-      }
-
       <button class="btn primary" [disabled]="busy()" (click)="start()">
         {{ busy() ? 'Downloading…' : error() ? 'Try again' : 'Download and start' }}
       </button>
+
+      <!-- under the button, so Try again comes where Download was clicked -->
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
+      }
       <p class="fine">
         The models come from Hugging Face (Whisper, MIT licence) and from Parrot's GitHub releases (wav2vec2 trained on Common Voice, Apache
         2.0).
