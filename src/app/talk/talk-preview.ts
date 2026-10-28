@@ -161,28 +161,36 @@ import { stopNote } from './talk-card';
     }
   `,
   styles: `
+    // the screen is the window's height and its cards scroll in a box of their own, under the header: the room for
+    // the window buttons and the header stay outside it, so a long talk scrolls under them rather than off the window
     :host {
       display: flex;
       flex-direction: column;
       gap: 16px;
-      padding: calc(var(--titlebar) + 18px) 24px 24px;
-      min-height: 100vh;
+      padding-top: calc(var(--titlebar) + 18px);
+      height: 100%;
+      overflow: hidden;
       background: var(--ground);
     }
     .top {
       display: flex;
       align-items: center;
       gap: 14px;
+      padding: 0 24px;
     }
     h1 {
       font-size: 22px;
       margin: 0;
     }
     .body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
       display: grid;
       grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
       gap: 16px;
       align-items: start;
+      padding: 0 24px 24px;
     }
     @media (max-width: 900px) {
       .body {
