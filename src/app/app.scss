@@ -16,3 +16,16 @@
 :host-context(.mac-app) .titlebar {
   border-bottom: 1px solid var(--line);
 }
+
+// the engine slow to answer at the start: said in the middle of the empty window
+.waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 14px;
+}

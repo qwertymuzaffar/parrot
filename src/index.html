@@ -4,8 +4,12 @@
     <meta charset="utf-8" />
     <title>Parrot</title>
     <base href="/" />
+    <!-- the chosen theme on the page before it first paints: a file, which the CSP's script-src 'self' runs as it is -->
+    <script src="theme.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/png" href="favicon.png" />
+    <!-- DM Sans (one file, every weight) asked for with the page, not once the first text is laid out -->
+    <link rel="preload" as="font" type="font/woff2" href="fonts/dm-sans.woff2" crossorigin />
   </head>
   <body>
     <app-root></app-root>

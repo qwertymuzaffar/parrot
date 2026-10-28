@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::ops::Range;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
@@ -29,6 +30,7 @@ pub const STRETCH: f64 = 25.0;
 const LIVE_STRETCH: f64 = 12.0;
 
 pub const CANCELLED: &str = "the writing-down was cancelled";
+const DISCARDED: &str = "the talk was discarded while it was being written down";
 const NO_WORDS: &str = "Parrot couldn't make out any words. Speak a little closer to the microphone, and try again.";
 
 /// What Whisper writes for sounds that aren't words: [BLANK_AUDIO], [Music], (laughs), * coughs *.
@@ -283,11 +285,14 @@ impl Talks {
     /// in, away from the interface's thread. One at a time; what was heard goes back with the next block.
     pub fn listen(&self, listener: &impl Listen) {
         while let Some(job) = self.take_stretch() {
-            let heard = (|| {
+            // a panic in the models counts as a stretch that couldn't be heard: left busy, the talk's writing-down
+            // would wait for it for ever (the next use of a model's lock the panic poisons takes it up as it is)
+            let heard = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 let heard = tidy(&listener.transcribe(&job.audio, &[])?);
                 let placed = if heard.is_empty() { vec![] } else { listener.align(&job.audio, &heard)? };
                 Ok::<_, String>((heard, placed))
-            })();
+            }))
+            .unwrap_or_else(|_| Err("hearing the stretch failed".into()));
             self.stretch_heard(&job, heard);
         }
     }
@@ -346,6 +351,8 @@ impl Talks {
         if let Some(talk) = current.take() {
             drop(talk.writer);
             let _ = fs::remove_file(talk.path.with_extension("json"));
+            // a writing-down waiting for a stretch to be heard wakes to find the talk gone, rather than waiting on
+            self.heard.notify_all();
             fs::remove_file(&talk.path)
                 .or_else(|error| if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error.to_string()) })?;
         }
@@ -361,13 +368,16 @@ impl Talks {
         let generation = current.as_ref().map(|talk| talk.generation);
         let mut current =
             self.heard.wait_while(current, |current| current.as_ref().is_some_and(|talk| talk.live.busy)).unwrap_or_else(PoisonError::into_inner);
-        let talk = current.as_mut().ok_or("there is no talk to write down")?;
-        // the lock is let go while waiting: a talk discarded and another started meanwhile is not this one's to write
-        if Some(talk.generation) != generation {
-            return Err("the talk was discarded while it was being written down".into());
-        }
+        // the lock is let go while waiting: a talk discarded meanwhile (or another started) is not this one's to write
+        let talk = current.as_mut().filter(|talk| Some(talk.generation) == generation);
+        let talk = talk.ok_or(if generation.is_some() { DISCARDED } else { "there is no talk to write down" })?;
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
+        }
+        // written down already, as when Stop comes twice: it can't have changed since (its recording has stopped),
+        // and hearing it all again would hold up every other talk command meanwhile
+        if let Some(heard) = &talk.heard {
+            return Ok(heard.clone());
         }
         let live = std::mem::take(&mut talk.live);
         let mut trim = None;
@@ -894,6 +904,54 @@ mod tests {
     }
 
     #[test]
+    fn a_panic_while_a_stretch_is_heard_leaves_the_talk_to_write_down_whole() {
+        let (talks, dir) = talks("live-panicked");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        struct Panicking;
+        impl Listen for Panicking {
+            fn align(&self, _audio: &[f32], _text: &str) -> Result<Vec<text::WordTime>, String> {
+                panic!("align panicked");
+            }
+            fn transcribe(&self, _audio: &[f32], _words: &[text::WordTime]) -> Result<String, String> {
+                panic!("transcribe panicked");
+            }
+        }
+        // on a thread of its own in the app, which a panic that got out of it would end
+        let _ = std::panic::catch_unwind(AssertUnwindSafe(|| talks.listen(&Panicking)));
+        assert!(!talks.current().as_ref().unwrap().live.busy, "the stretch is no longer being heard");
+        assert!(!talks.ready(), "nothing more is heard while recording");
+        // stopped, it is written down whole rather than waiting for the stretch
+        let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
+        let heard = talks.write_down(&listener, |_, _| {}).unwrap();
+        let heard_in = listener.lengths.borrow();
+        assert!(heard_in.iter().sum::<f64>() > 35.0, "all of it: {heard_in:?}");
+        assert_eq!(heard.words.len(), 2 * heard_in.len());
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_discard_wakes_a_writing_down_waiting_for_a_stretch() {
+        let (talks, dir) = talks("discarded-waiting");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let job = talks.take_stretch().unwrap();
+        std::thread::scope(|scope| {
+            let (done, writing) = std::sync::mpsc::channel();
+            let talks = &talks;
+            scope.spawn(move || done.send(talks.write_down(&Stretches { heard: "hello there", lengths: RefCell::new(vec![]) }, |_, _| {})));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            talks.discard().unwrap();
+            let woken = writing.recv_timeout(std::time::Duration::from_secs(2));
+            // let a writing-down still waiting go, so the test ends either way
+            talks.stretch_heard(&job, Err("the speech engine is busy".into()));
+            assert!(woken.expect("the discard wakes the writing-down").unwrap_err().contains("discarded"));
+        });
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_writing_down_leaves_a_talk_started_while_it_waited() {
         let (talks, dir) = talks("restarted");
         talks.start(16000).unwrap();
@@ -936,6 +994,21 @@ mod tests {
         let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
         assert_eq!(heard.words.len(), 2 * listener.lengths.borrow().len());
+        talks.discard().unwrap();
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_written_down_is_not_heard_again() {
+        let (talks, dir) = talks("twice");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 40.0)).unwrap();
+        let first = talks.write_down(&Stretches { heard: "hello there", lengths: RefCell::new(vec![]) }, |_, _| {}).unwrap();
+        // stopped a second time: what was heard the first time, with nothing heard again
+        let listener = Stretches { heard: "something else", lengths: RefCell::new(vec![]) };
+        let again = talks.write_down(&listener, |_, _| {}).unwrap();
+        assert!(listener.lengths.borrow().is_empty(), "heard again: {:?}", listener.lengths.borrow());
+        assert_eq!((again.heard, again.words.len(), again.audio), (first.heard, first.words.len(), first.audio));
         talks.discard().unwrap();
         let _ = fs::remove_dir_all(dir);
     }

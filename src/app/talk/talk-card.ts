@@ -62,10 +62,12 @@ export function length(seconds: number) {
               <span class="sr-only" role="status">{{ talking.left() <= 60 ? 'One minute left.' : '' }}</span>
             </div>
             <div class="meter" aria-hidden="true"><i [style.width.%]="recorder.level() * 100"></i></div>
-            @if (talking.heardSoFar(); as soFar) {
-              <!-- not read out: it would talk over the speaker, and into the microphone -->
-              <p class="so-far">{{ lastWords(soFar) }}</p>
-            }
+            <!-- there from the start, and one height for the whole talk: Stop stays under the pointer as the words come.
+              Not read out: it would talk over the speaker, and into the microphone -->
+            @let soFar = talking.heardSoFar();
+            <p class="so-far" [class.empty]="!soFar">
+              <span>{{ soFar ? lastWords(soFar) : 'Your words show here as Parrot hears them.' }}</span>
+            </p>
             <div class="go">
               <span class="hint">Stop when you're done. Esc also stops.</span>
               <button class="btn primary stop" (click)="talking.stop()"><app-icon name="stop" [size]="14" /> Stop</button>
@@ -238,11 +240,13 @@ export function length(seconds: number) {
       background: var(--accent);
       transition: width 0.2s;
     }
+    // as high as a button: the small ones of a confirm don't shrink the card under the pointer
     .go {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
+      min-height: 44px;
     }
     .go .hint {
       margin-right: auto;
@@ -260,6 +264,17 @@ export function length(seconds: number) {
       color: var(--ink-2);
       font-size: 14px;
       line-height: 1.5;
+    }
+    // three lines, the newest at the foot: the lines before are cut off at the top, a whole line at a time
+    .so-far span {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      height: calc(3 * 1.5em);
+      overflow: hidden;
+    }
+    .so-far.empty {
+      color: var(--muted);
     }
     .sets {
       display: flex;

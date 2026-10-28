@@ -119,7 +119,8 @@ const MB = 1_000_000;
           }
         </section>
 
-        @if (!health.isLoading()) {
+        <!-- shown once the engine has first answered, and kept while it is asked again on each open -->
+        @if (health.status() !== 'loading') {
           <section>
             <span class="eyebrow">Texts and recordings</span>
             @if (info(); as info) {
@@ -127,7 +128,7 @@ const MB = 1_000_000;
                 Kept on this computer, in<br /><code>{{ info.data }}</code>
               </p>
             }
-            @if (!trash.isLoading()) {
+            @if (trash.status() !== 'loading') {
               @let bytes = trashBytes();
               @if (bytes != null) {
                 <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
@@ -282,11 +283,10 @@ export class Settings {
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
   private updates = inject(Updates);
-  private check = signal(0);
-  protected health = resource({ params: () => this.check(), loader: () => this.engine.info() });
+  protected health = resource({ loader: () => this.engine.info() });
   /** the running version, read from the app (no network); none in a plain browser */
   protected version = resource({ loader: () => this.updates.current() });
-  // the values of the resources above, null while they load or if they failed (reading a failed resource's value throws)
+  // the values of the resources above, null while they first load or if they failed (reading a failed resource's value throws)
   protected readonly info = computed(() => (this.health.hasValue() ? this.health.value() : null));
   protected readonly current = computed(() => (this.version.hasValue() ? this.version.value() : null));
   protected update = signal<UpdateCheck>({ state: 'idle' });
@@ -303,14 +303,17 @@ export class Settings {
     this.updates.open((event.currentTarget as HTMLAnchorElement).href).catch(() => {});
   }
   /** the bytes in the trash: only the desktop app has one */
-  protected trash = resource({ params: () => this.check(), loader: () => this.engine.trashSize() });
+  protected trash = resource({ loader: () => this.engine.trashSize() });
   protected readonly trashBytes = computed(() => (this.trash.hasValue() ? (this.trash.value() ?? 0) : null));
   /** asking whether to empty the trash */
   protected emptying = signal(false);
   protected failure = signal<string | null>(null);
 
   open() {
-    this.check.update((count) => count + 1);
+    // asked again on each open; a reload keeps the last answer on screen until the new one comes, so the dialog doesn't
+    // shrink, re-centre and grow back
+    this.health.reload();
+    this.trash.reload();
     void this.names.load();
     this.emptying.set(false);
     this.failure.set(null);

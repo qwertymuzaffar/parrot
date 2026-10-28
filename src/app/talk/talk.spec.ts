@@ -162,11 +162,13 @@ describe('Just talk', () => {
       talking.left.set(45);
       await card.update();
       expect(card.text()).toContain('0:45 left');
-      // what was heard so far, as it comes
-      expect(card.element.querySelector('.so-far')).toBeNull();
+      // what was heard so far, as it comes, in a box there from the start so Stop doesn't move
+      const soFar = card.element.querySelector('.so-far')!;
+      expect([soFar.textContent!.trim(), soFar.classList.contains('empty')]).toEqual(['Your words show here as Parrot hears them.', true]);
       talking.heardSoFar.set('I moved here three years ago');
       await card.update();
-      expect(card.element.querySelector('.so-far')!.textContent!.trim()).toBe('I moved here three years ago');
+      expect(card.element.querySelector('.so-far')).toBe(soFar);
+      expect([soFar.textContent!.trim(), soFar.classList.contains('empty')]).toEqual(['I moved here three years ago', false]);
       card.button(/Stop/).click();
       expect(talking.stop).toHaveBeenCalled();
       // Esc stops it too
