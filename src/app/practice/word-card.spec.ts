@@ -11,10 +11,15 @@ import { WordCard } from './word-card';
 describe('the word card when the dictionary cannot be read', () => {
   let names: Set<string>;
   let recording: ReturnType<typeof signal<boolean>>;
+  /** the engine refuses to mark a name: the list stays as it was, and says why */
+  let refused: boolean;
+  let nameError: ReturnType<typeof signal<string | null>>;
 
   beforeEach(() => {
     names = new Set();
     recording = signal(false);
+    refused = false;
+    nameError = signal(null);
     const named = signal(0);
     TestBed.configureTestingModule({
       providers: [
@@ -27,9 +32,10 @@ describe('the word card when the dictionary cannot be read', () => {
         {
           provide: Names,
           useValue: {
-            error: signal(null),
+            error: nameError,
             has: (word: string) => (named(), names.has(word)),
             set: async (word: string, name: boolean) => {
+              if (refused) return nameError.set('the speech engine is not running');
               if (name) names.add(word);
               else names.delete(word);
               named.update((count) => count + 1);
@@ -67,5 +73,17 @@ describe('the word card when the dictionary cannot be read', () => {
     recording.set(true);
     await fixture.whenStable();
     expect(read('.buttons')).toContain('Stop');
+  });
+
+  it('unticks "A name" again when the word could not be marked', async () => {
+    refused = true;
+    const fixture = TestBed.createComponent(WordCard);
+    const card: HTMLElement = fixture.nativeElement;
+    await fixture.whenStable();
+    const box = card.querySelector<HTMLInputElement>('.name input')!;
+    box.click();
+    await fixture.whenStable();
+    expect(card.querySelector('.name + .error')!.textContent).toContain('the speech engine is not running');
+    expect([box.checked, card.querySelector('.name span')!.textContent]).toEqual([false, 'A name: never counted as misheard, in any text']);
   });
 });

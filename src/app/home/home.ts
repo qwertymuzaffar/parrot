@@ -17,6 +17,7 @@ import { sentences, shortRanges, splitKnown, splitText } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
+import { HomeState } from './home-state';
 import { TalkCard } from '../talk/talk-card';
 import { Logo } from '../shared/logo';
 import { ringDash } from '../shared/ring';
@@ -47,14 +48,20 @@ export class Home {
   protected Math = Math;
 
   protected query = signal('');
-  protected draft = signal('');
-  protected draftTitle = signal('');
-  protected draftMode = signal<Mode>('sentences');
+  /** the text being written, kept when Home goes (a text opened, a talk checked) and back with it */
+  private kept = inject(HomeState);
+  protected draft = this.kept.draft;
+  protected draftTitle = this.kept.draftTitle;
+  protected draftMode = this.kept.draftMode;
   /** the draft is with the engine, being added */
   protected adding = signal(false);
   protected renaming = signal<string | null>(null);
   protected confirming = signal<string | null>(null);
+  /** the texts whose delete is with the engine: their cards don't open meanwhile, or the text would open and then
+   * vanish from under the practice screen */
+  protected deleting = signal<ReadonlySet<string>>(new Set());
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
+  private textsColumn = viewChild.required<ElementRef<HTMLElement>>('textsColumn');
 
   protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
   /** how many parts each way of practising would give the draft */
@@ -118,6 +125,15 @@ export class Home {
 
   protected readonly practisedParts = computed(() => this.library.texts().reduce((total, text) => total + text.practised, 0));
 
+  constructor() {
+    // back on Home, the texts are scrolled to where they were left (their cards are there from the first frame)
+    afterNextRender(() => {
+      const column = this.textsColumn().nativeElement;
+      column.scrollTop = this.kept.scroll;
+      column.addEventListener('scroll', () => (this.kept.scroll = column.scrollTop), { passive: true });
+    });
+  }
+
   protected ring(card: Card) {
     const total = card.parts.length || 1;
     const done = card.parts.filter((part) => card.t.scores[part.key]).length;
@@ -139,6 +155,7 @@ export class Home {
   }
 
   protected continue(card: Card) {
+    if (this.deleting().has(card.t.id)) return;
     this.session.open(card.t.id, card.nextIndex);
   }
 
@@ -160,7 +177,13 @@ export class Home {
 
   protected async remove(text: TextItem) {
     this.confirming.set(null);
-    await this.library.remove(text.id);
+    this.deleting.update((ids) => new Set(ids).add(text.id));
+    try {
+      await this.library.remove(text.id);
+    } finally {
+      // gone, or kept if the engine wouldn't delete it (the error says why): its card opens again
+      this.deleting.update((ids) => new Set([...ids].filter((id) => id !== text.id)));
+    }
   }
 
   protected when(iso: string | null) {

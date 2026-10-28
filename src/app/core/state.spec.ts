@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Clips } from './clips';
-import { Engine, EngineError, TALK_CANCELLED } from './engine';
+import { Engine, EngineError, TALK_CANCELLED, TALK_GONE } from './engine';
 import { Library } from './library';
 import { Activity, Attempt, LeftTalk, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
@@ -10,7 +10,7 @@ import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey, splitKnown } from './split';
 import { WordPractice } from './word-practice';
-import { CANCEL_WAIT_MS, LONGEST_TALK, NOT_STOPPED, QUIET_STOP_MS, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
+import { CANCEL_WAIT_MS, LONGEST_TALK, NOT_STOPPED, QUIET_STOP_MS, RECORDING_GONE, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
@@ -216,7 +216,7 @@ class FakeEngine extends Engine {
   async talkStop(onProgress: (progress: TalkProgress) => void) {
     await this.pass('talkStop');
     this.answer();
-    if (!this.talk) throw new EngineError('there is no talk to write down');
+    if (!this.talk) throw new EngineError(TALK_GONE);
     onProgress({ done: 1, total: 2 });
     await this.pass('talkStop done');
     if (this.talkCancelled) {
@@ -1607,6 +1607,14 @@ describe('the practice state', () => {
         const again = await startWith(left(written));
         await again.discard();
         expect([again.state(), again.unfinished(), engine.left]).toEqual(['idle', null, null]);
+      });
+
+      it('whose recording has gone is let go, and says so, rather than offered to write down again', async () => {
+        const fresh = await startWith(left(null));
+        engine.talk = null;
+        await fresh.writeDown();
+        expect([fresh.state(), fresh.unfinished(), fresh.failure()]).toEqual(['idle', null, RECORDING_GONE]);
+        expect(engine.calls).toContain('talkDiscard');
       });
     });
 

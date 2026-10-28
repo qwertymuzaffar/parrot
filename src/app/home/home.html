@@ -94,7 +94,7 @@
   </div>
 
   <!-- right: your texts -->
-  <div class="right">
+  <div class="right" #textsColumn>
     <div class="heading">
       <h1>Your texts</h1>
       @if (library.texts().length) {
@@ -113,7 +113,12 @@
 
     @if (resume(); as card) {
       @let progress = ring(card);
-      <button class="resume" [class.opening]="session.opening() === card.t.id" (click)="continue(card)">
+      <button
+        class="resume"
+        [class.opening]="session.opening() === card.t.id"
+        [disabled]="deleting().has(card.t.id)"
+        (click)="continue(card)"
+      >
         <span class="ring">
           <svg width="58" height="58" viewBox="0 0 64 64" aria-hidden="true">
             <circle cx="32" cy="32" r="27" class="track" />
@@ -137,8 +142,9 @@
         <li
           class="card text"
           [class.opening]="session.opening() === card.t.id"
-          [attr.aria-busy]="session.opening() === card.t.id || null"
-          (click)="renaming() !== card.t.id && confirming() !== card.t.id && session.open(card.t.id)"
+          [class.deleting]="deleting().has(card.t.id)"
+          [attr.aria-busy]="session.opening() === card.t.id || deleting().has(card.t.id) || null"
+          (click)="renaming() !== card.t.id && confirming() !== card.t.id && !deleting().has(card.t.id) && session.open(card.t.id)"
         >
           <div class="row">
             @if (renaming() === card.t.id) {
@@ -155,7 +161,7 @@
             } @else {
               <!-- the card's button for the keyboard: its click goes on to the card, which opens the text -->
               <h3>
-                <button type="button" class="open">{{ card.t.title }}</button>
+                <button type="button" class="open" [disabled]="deleting().has(card.t.id)">{{ card.t.title }}</button>
               </h3>
             }
             <span class="pill" [class]="band(card.t.average) || 'none'">{{ card.t.average != null ? card.t.average + '%' : 'new' }}</span>
@@ -169,6 +175,8 @@
           <div class="meta">
             @if (confirming() === card.t.id) {
               <span class="ask">Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span>
+            } @else if (deleting().has(card.t.id)) {
+              <span role="status">Moving it to the trash…</span>
             } @else {
               <span
                 >{{ card.t.words }} words · {{ card.t.spoken ? 'spoken · ' : '' }}{{ modeName(card.t.mode) }} ·
@@ -179,6 +187,8 @@
               @if (confirming() === card.t.id) {
                 <button class="btn ghost small" (click)="confirming.set(null)">Keep</button>
                 <button class="btn danger small" (click)="remove(card.t)">Delete</button>
+              } @else if (deleting().has(card.t.id)) {
+                <!-- nothing to do to a text on its way to the trash -->
               } @else if (renaming() === card.t.id) {
                 <!-- keeps the field focused when pressed, so the field isn't saved on blur first -->
                 <button
