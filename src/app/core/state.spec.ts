@@ -394,6 +394,7 @@ function practiceApp() {
     loaded: () => library.loaded(),
     engineState: () => library.engineState(),
     error: () => session.error(),
+    libraryError: () => library.error(),
     view: () => session.view(),
     opening: () => session.opening(),
     add: (text: string, title: string, mode: Mode) => session.add(text, title, mode),
@@ -494,17 +495,17 @@ describe('the practice state', () => {
 
     it('loads the texts and marks the engine ready', () => {
       expect(app.texts().map((text) => text.id)).toEqual([ID]);
-      expect([app.loaded(), app.engineState(), app.error()]).toEqual([true, 'ready', null]);
+      expect([app.loaded(), app.engineState(), app.libraryError()]).toEqual([true, 'ready', null]);
     });
 
     it('says when the engine is down, and loads once it is up', async () => {
       vi.useFakeTimers();
       engine.down = true;
       await app.loadTexts();
-      expect([app.engineState(), app.error()]).toEqual(['down', 'The speech engine is not running.']);
+      expect([app.engineState(), app.libraryError()]).toEqual(['down', 'The speech engine is not running.']);
       engine.down = false;
       await vi.advanceTimersByTimeAsync(3000);
-      expect([app.engineState(), app.error()]).toEqual(['ready', null]);
+      expect([app.engineState(), app.libraryError()]).toEqual(['ready', null]);
     });
 
     it('tries again on one timer, however often loading fails', async () => {
@@ -528,14 +529,14 @@ describe('the practice state', () => {
 
     it("reports a text the engine wouldn't add", async () => {
       await app.add('  ', 'Empty', 'whole');
-      expect(app.error()).toBe('the text is empty');
+      expect(app.libraryError()).toBe('the text is empty');
       expect(app.view()).toBe('home');
     });
 
     it('forgets why a text was refused once one is added', async () => {
       await app.add('  ', 'Empty', 'whole');
       await app.add('One more text.', 'New', 'whole');
-      expect(app.error()).toBeNull();
+      expect(app.libraryError()).toBeNull();
     });
 
     it('renames a text, the open one too', async () => {
@@ -547,12 +548,12 @@ describe('the practice state', () => {
     it('says why a text could not be renamed or deleted, and keeps it as it was', async () => {
       engine.down = true;
       await app.rename(ID, 'Hi');
-      expect([app.texts()[0].title, app.error()]).toEqual(['Greeting', 'The speech engine is not running.']);
+      expect([app.texts()[0].title, app.libraryError()]).toEqual(['Greeting', 'The speech engine is not running.']);
       await app.remove(ID);
-      expect([app.texts().length, app.error()]).toEqual([1, 'The speech engine is not running.']);
+      expect([app.texts().length, app.libraryError()]).toEqual([1, 'The speech engine is not running.']);
       engine.down = false;
       await app.rename(ID, 'Hi');
-      expect([app.texts()[0].title, app.error()]).toEqual(['Hi', null]);
+      expect([app.texts()[0].title, app.libraryError()]).toEqual(['Hi', null]);
     });
 
     it('removes a text', async () => {
@@ -802,6 +803,19 @@ describe('the practice state', () => {
       release();
       await opening;
       expect([app.opening(), app.view()]).toEqual([null, 'practice']);
+    });
+
+    it("says why a text slowly added was refused on Home, not as the open text's", async () => {
+      const release = engine.hold('addText Empty');
+      const adding = app.add('  ', 'Empty', 'whole');
+      await vi.waitFor(() => expect(engine.calls).toContain('addText Empty'));
+      await app.open(ID);
+      release();
+      await adding;
+      expect([app.text()?.id, app.error(), app.libraryError()]).toEqual([ID, null, 'the text is empty']);
+      app.next();
+      await settle();
+      expect(app.error()).toBeNull();
     });
 
     it('keeps the text opened while a text was slowly added: the new one waits in the library', async () => {

@@ -62,8 +62,10 @@ export class Session {
   /** counts the times the part shown, or the try on it, changed: a part's tries or a try that land after such a
    * change are not what is shown any more, and are dropped */
   private shows = 0;
-  /** what went wrong last: with this text, else with the library */
-  readonly error = computed(() => this.failure() ?? this.library.error());
+  /** what went wrong with this text: a take, its parts or tries, the microphone. Not the library's (a text that
+   * would not be added, renamed or deleted, the list that would not load): Home says those, and shown here they read
+   * as the open text's. */
+  readonly error = this.failure.asReadonly();
 
   constructor() {
     // the open text has gone from the library (deleted as it was opened, or not in the list the engine gave): the
