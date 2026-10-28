@@ -5,6 +5,7 @@ import { Attempt } from './models';
 import { readSetting, writeSetting } from './settings';
 import { Sound } from './sound';
 import { bare } from './split';
+import { forVoice, wordForVoice } from './voice-text';
 
 /** Listening: the reference reading and my takes, whole or word by word, with the word being spoken lit up. */
 @Injectable({ providedIn: 'root' })
@@ -35,14 +36,10 @@ export class Playback {
 
   /** The reference reading of a part, with the word being spoken lit up. */
   playReference(text: string) {
-    const starts: number[] = [];
-    let offset = 0;
-    for (const word of text.split(' ')) {
-      starts.push(offset);
-      offset += word.length + 1;
-    }
+    // the text as the voice should have it (abbreviations spelled out), with where each word starts in it
+    const { spoken, starts } = forVoice(text);
     return this.sound
-      .speak(text, this.rate(), 'ref', (charIndex) => this.nowRef.set(starts.findLastIndex((start) => start <= charIndex)))
+      .speak(spoken, this.rate(), 'ref', (charIndex) => this.nowRef.set(starts.findLastIndex((start) => start <= charIndex)))
       .then(() => this.nowRef.set(null));
   }
 
@@ -87,7 +84,7 @@ export class Playback {
   sayWord(word: string, slow = false) {
     if (!word) return;
     this.run++;
-    this.sound.speak(bare(word), slow ? 0.55 : 0.85, null);
+    this.sound.speak(wordForVoice(bare(word)), slow ? 0.55 : 0.85, null);
   }
 
   /** A word as it was said, cut out of my take. */
