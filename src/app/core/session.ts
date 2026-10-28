@@ -8,6 +8,15 @@ import { MIC_LOST, micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
 import { bare, splitText } from './split';
 
+/** a part's tries as they go on screen with it: its newest in full, and what went wrong loading them */
+interface Tries {
+  history: AttemptSummary[];
+  attempt: Attempt | null;
+  failed: string | null;
+}
+
+const UNPRACTISED: Tries = { history: [], attempt: null, failed: null };
+
 /** The text open for practice: its parts, the part being practised, its tries, and recording a new one. */
 @Injectable({ providedIn: 'root' })
 export class Session {
@@ -59,6 +68,8 @@ export class Session {
   /** counts the opens and builds begun: one that finds a newer one begun (another text opened, Home, a talk) gives
    * way to it */
   private builds = 0;
+  /** the part being gone to while its tries load (see goTo) */
+  private going: number | null = null;
   /** counts the times the part shown, or the try on it, changed: a part's tries or a try that land after such a
    * change are not what is shown any more, and are dropped */
   private shows = 0;
@@ -180,8 +191,8 @@ export class Session {
   }
 
   /** Split a text and go to a part: the saved one, or the one holding word w0. The text, its parts, their scores and
-   * the part go on screen together once all are in, so the new words never show with the try of the part left, nor
-   * a part number past the end of the new parts (no part at all). */
+   * the part with its newest try go on screen together once all are in, so the new words never show with the try of
+   * the part left, nor a part number past the end of the new parts (no part at all). */
   private async build(text: TextItem, mode: Mode, savedIndex: string | null, w0?: number) {
     const build = ++this.builds;
     const parts = await this.whileLoading(splitText(text.text, mode));
@@ -195,21 +206,25 @@ export class Session {
       failed = errorMessage(error);
     }
     if (build !== this.builds) return;
+    let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
+    if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
+    // the part's newest try comes with it (see goTo)
+    const part = parts[partIndex];
+    const tries = part && scores[part.key] ? await this.whileLoading(this.triesOf(text, part, () => build === this.builds)) : UNPRACTISED;
+    if (build !== this.builds) return;
     // a take under way (none should be: no take starts while loading) is of the part still shown, so it is dropped
     // rather than filed where the user was not reading
     if (this.takeUnderWay()) await this.dropTake();
     if (build !== this.builds) return;
-    let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
-    if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     this.openId.set(text.id);
     this.view.set('practice');
     this.parts.set(parts);
     this.scores.set(scores);
-    // in the same moment: the part, without the try of the part left
-    const going = this.goTo(partIndex);
-    // after goTo, which clears the error of the part left
+    // in the same moment: the part with its own try, not the try of the part left
+    this.shows++;
+    this.put(partIndex, tries);
+    // after put, which clears the error of the part left
     if (failed) this.failure.set(failed);
-    await going;
   }
 
   async select(partIndex: number) {
@@ -221,31 +236,45 @@ export class Session {
     await this.goTo(partIndex);
   }
 
-  /** Show part `partIndex` of the open text without a try, and load its last one. */
+  /** Go to part `partIndex` of the open text. A practised part goes on screen once its newest try is in, the two
+   * together: shown without it first, the part flashed the "How it works" card and a chart with no try on it. */
   private async goTo(partIndex: number) {
     const text = this.text()!;
-    const parts = this.parts();
+    const part = this.parts()[partIndex];
     const show = ++this.shows;
-    this.index.set(partIndex);
-    this.result.set(null);
-    this.history.set([]);
-    this.selected.set(null);
-    // what went wrong was on the part left (a take that failed, the microphone)
-    this.failure.set(null);
-    writeSetting(`part:${text.id}:${text.mode}`, String(partIndex));
-    const part = parts[partIndex];
-    if (!this.scores()[part.key]) return;
+    // nothing to wait for
+    if (!this.scores()[part.key]) return this.put(partIndex, UNPRACTISED);
+    this.going = partIndex;
+    // the part shown stays until then, so no take starts meanwhile: it would be of the part being left
+    const tries = await this.whileLoading(this.triesOf(text, part, () => show === this.shows));
+    // the user moved on again while the tries loaded: these are not the tries to show
+    if (show === this.shows) this.put(partIndex, tries);
+  }
+
+  /** A part's tries, and its newest in full, while `still()` holds; what went wrong if they can't be loaded. */
+  private async triesOf(text: TextItem, part: Part, still: () => boolean): Promise<Tries> {
+    let history: AttemptSummary[] = [];
     try {
-      const history = await this.engine.attempts(text.id, part.text);
-      // the user moved on while the tries loaded, or a new take of the part was scored meanwhile: these are not
-      // the tries to show
-      if (show !== this.shows || !history.length) return;
-      this.history.set(history);
-      const attempt = await this.engine.attempt(text.id, part.text, history[0].id);
-      if (show === this.shows) this.show(attempt);
+      history = await this.engine.attempts(text.id, part.text);
+      const attempt = history.length && still() ? await this.engine.attempt(text.id, part.text, history[0].id) : null;
+      return { history, attempt, failed: null };
     } catch (error) {
-      if (show === this.shows) this.failure.set(errorMessage(error));
+      return { history, attempt: null, failed: errorMessage(error) };
     }
+  }
+
+  /** Put part `partIndex` of the open text on screen with its tries, all in the same moment. */
+  private put(partIndex: number, tries: Tries) {
+    const text = this.text()!;
+    this.going = null;
+    this.index.set(partIndex);
+    this.history.set(tries.history);
+    this.selected.set(null);
+    // what went wrong was on the part left (a take that failed, the microphone), unless the tries would not load
+    this.failure.set(tries.failed);
+    if (tries.attempt) this.show(tries.attempt);
+    else this.result.set(null);
+    writeSetting(`part:${text.id}:${text.mode}`, String(partIndex));
   }
 
   /** Show a try, and load its waveform. */
@@ -258,12 +287,13 @@ export class Session {
       .catch(() => {});
   }
 
+  /** the part after the one being gone to, or shown: keys pressed quickly step on from each other */
   next() {
-    this.select(this.index() + 1);
+    this.select((this.going ?? this.index()) + 1);
   }
 
   previous() {
-    this.select(this.index() - 1);
+    this.select((this.going ?? this.index()) - 1);
   }
 
   async showAttempt(id: string) {
@@ -363,6 +393,11 @@ export class Session {
         },
       }));
       this.library.loadTexts();
+      // on the way to a part (see goTo): the tries it is loading may be from before the take, so they are loaded again
+      if (this.going != null) {
+        if (this.parts()[this.going] === part) void this.goTo(this.going);
+        return;
+      }
       if (this.part() !== part) return;
       // the take is the part's newest try: a list of its tries on its way from before is stale
       const show = ++this.shows;
