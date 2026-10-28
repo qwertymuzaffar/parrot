@@ -89,7 +89,8 @@ function pcm16(blocks: Float32Array[]) {
 @Injectable({ providedIn: 'root' })
 export class Recorder {
   readonly recording = signal(false);
-  /** a take is waiting for the microphone to settle (see Settling) */
+  /** a take is getting going, from the click until it records: the microphone opening (the permission prompt with
+   * it, the first time), settling (see Settling) and its first sound coming through */
   readonly preparing = signal(false);
   /** who the take is for, from the click that starts it until it stops: only they stop it */
   readonly owner = signal<TakeFor | null>(null);
@@ -292,6 +293,8 @@ export class Recorder {
     clearTimeout(this.idle);
     this.capturing = true;
     this.owner.set(owner);
+    // said from the click: opening the microphone can take a second or more, and the take looked idle meanwhile
+    this.preparing.set(true);
     this.onLost = lost ?? null;
     // the microphone going while the take gets ready fails it at once, as a microphone that won't start does
     const gone = new Promise<never>((_, reject) => (this.cut = reject));
@@ -302,9 +305,7 @@ export class Recorder {
       if (take !== this.take) return;
       // the capture comes up quiet and switches to its real level a few seconds in: a take must not start before
       if (!this.settling!.settled) {
-        this.preparing.set(true);
         await until(Promise.race([this.settling!.done(), sleep(SETTLE_MAX_MS + 1000)]));
-        this.preparing.set(false);
         if (take !== this.take) return;
       }
       // a resume WebKit never answers would otherwise hold the take for good
@@ -343,6 +344,7 @@ export class Recorder {
     let peak100 = 0;
     let last = t0;
     this.trace.set([]);
+    this.preparing.set(false);
     this.recording.set(true);
     this.timer = window.setInterval(() => {
       this.elapsed.set((performance.now() - t0) / 1000);

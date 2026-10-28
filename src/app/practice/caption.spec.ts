@@ -41,7 +41,7 @@ function shownSession() {
     loading: signal(false),
     recording: signal(false),
     error: signal<string | null>(null),
-    selected: signal(null),
+    selected: signal<number | null>(null),
     peaks: signal(null),
     bars: 92,
   };
@@ -92,11 +92,43 @@ describe('the caption under the part', () => {
     expect(caption()).toMatch(/^Your take· 2.0 s · try 1/);
   });
 
+  it('numbers the try shown by its place among the tries, not by how many there are', async () => {
+    const fixture = await render();
+    session.history.set([
+      { id: 't3', when: TRY.when, score: 90, wpm: 150, duration: 2.5 },
+      { id: 't2', when: TRY.when, score: 80, wpm: 145, duration: 2.2 },
+      { id: TRY.id, when: TRY.when, score: TRY.score, wpm: TRY.wpm, duration: TRY.duration },
+    ]);
+    await fixture.whenStable();
+    expect(caption()).toMatch(/^Your take· 2.0 s · try 1/);
+    session.result.set({ ...TRY, id: 't3', duration: 2.5 });
+    await fixture.whenStable();
+    expect(caption()).toMatch(/^Your take· 2.5 s · try 3/);
+  });
+
   it('says why a take failed, though the try before it is still shown', async () => {
     const fixture = await render();
     session.error.set('Nothing was heard in the recording. Is the microphone on?');
     await fixture.whenStable();
     expect(caption()).toBe('Nothing was heard in the recording. Is the microphone on?');
+    expect([!!document.querySelector('.card.score'), document.querySelector('.heard-line')?.textContent]).toEqual([
+      true,
+      'HeardHow are you?',
+    ]);
+  });
+
+  it('shows nothing of the try before while a new take is scored', async () => {
+    const fixture = await render();
+    session.selected.set(1);
+    session.checking.set(true);
+    await fixture.whenStable();
+    expect(caption()).toBe('Listening to your take…');
+    const cards = [...document.querySelectorAll('.cards > *')].map((card) => card.className.replace(/ng-\S+/g, '').trim());
+    expect([cards, document.querySelector('.heard-line'), document.querySelector('.w.sel')]).toEqual([
+      ['card hint-card listening', 'keys'],
+      null,
+      null,
+    ]);
   });
 
   // not the caption, but the screen as it renders here: the dock under it
