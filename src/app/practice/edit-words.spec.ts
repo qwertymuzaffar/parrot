@@ -13,7 +13,7 @@ describe('editing the words of a text', () => {
     text: signal({ id: 'abcdef0123', text: 'Hello there. How are you?' }),
     index: signal(1),
     open: vi.fn(),
-    checking: signal(false),
+    checkingText: signal(false),
   };
   const library = { editText: vi.fn() };
   const recorder = { owner: signal<string | null>(null) };
@@ -167,14 +167,14 @@ describe('editing the words of a text', () => {
   it('waits while a take is recorded or checked, which would be filed under the words as they were', async () => {
     const { fixture, element, save } = await editor();
     expect(fixture.componentInstance.taking()).toBe(false);
-    for (const busy of [() => session.checking.set(true), () => wordPractice.checking.set(true), () => recorder.owner.set('part')]) {
+    for (const busy of [() => session.checkingText.set(true), () => wordPractice.checking.set(true), () => recorder.owner.set('part')]) {
       busy();
       expect(fixture.componentInstance.taking()).toBe(true);
       save();
       await fixture.whenStable();
       expect(library.editText).not.toHaveBeenCalled();
       expect(element.querySelector('[role=alert]')!.textContent).toContain('A take is being checked');
-      session.checking.set(false);
+      session.checkingText.set(false);
       wordPractice.checking.set(false);
       recorder.owner.set(null);
     }

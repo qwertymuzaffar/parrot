@@ -436,6 +436,7 @@ function practiceApp() {
     compareWord: (wordIndex: number) => playback.compareWord(shown(), wordIndex, session.words()[wordIndex]),
     toggleRecord: () => session.toggleRecord(),
     checking: () => session.checking(),
+    checkingText: () => session.checkingText(),
     recording: () => session.recording(),
     playWordTry: (attempt: Attempt) => playback.playWordTry(attempt),
     loading: () => session.loading(),
@@ -1080,6 +1081,33 @@ describe('the practice state', () => {
       await settle();
       // the try is the first text's, shown when it is opened: none of it in this one
       expect([app.text()?.id, app.scores(), app.result(), app.error()]).toEqual(['b0b0b0b0b0', {}, null, null]);
+    });
+
+    it('is checking a take only on its own part: another part or text can be recorded meanwhile', async () => {
+      engine.library.push(engine.item({ id: 'b0b0b0b0b0', title: 'Other', text: 'Good morning. See you soon.' }));
+      await app.loadTexts();
+      engine.nextCheck = attempt('t1', 'How are you?', 80);
+      await app.toggleRecord();
+      const release = engine.hold('check How are you?');
+      const stopping = app.toggleRecord();
+      await vi.waitFor(() => expect(engine.calls).toContain('check How are you?'));
+      expect([app.checking(), app.checkingText()]).toEqual([true, true]);
+      // another part of the text: its own take may be recorded, but the words still wait for the one being scored
+      await app.select(2);
+      expect([app.checking(), app.checkingText()]).toEqual([false, true]);
+      // another text: nothing of it is being checked
+      await app.open('b0b0b0b0b0', 0);
+      await settle();
+      expect([app.text()?.id, app.checking(), app.checkingText()]).toEqual(['b0b0b0b0b0', false, false]);
+      await app.toggleRecord();
+      expect(app.recording()).toBe(true);
+      await app.toggleRecord();
+      // the take of the first text is still filed with it, and shows there once scored
+      release();
+      await stopping;
+      await app.open(ID, 1);
+      await settle();
+      expect([app.checking(), app.checkingText(), app.result()?.id]).toEqual([false, false, 't1']);
     });
 
     it('reports a take that could not be scored', async () => {
