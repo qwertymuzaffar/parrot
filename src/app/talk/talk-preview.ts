@@ -116,7 +116,7 @@ import { stopNote } from './talk-card';
                 </button>
               </div>
               <label class="name">
-                <input type="checkbox" [checked]="names.has(chosen.bare)" (change)="names.set(chosen.bare, $any($event.target).checked)" />
+                <input type="checkbox" [checked]="names.has(chosen.bare)" (change)="markName(chosen.bare, $any($event.target))" />
                 <span><b>A name</b>: never counted as misheard, in any text</span>
               </label>
             </section>
@@ -395,6 +395,13 @@ export class TalkPreview {
 
   protected select(wordIndex: number) {
     this.selected.set(this.selected() === wordIndex ? null : wordIndex);
+  }
+
+  protected async markName(word: string, box: HTMLInputElement) {
+    await this.names.set(word, box.checked);
+    // a mark that failed leaves the list as it was, so the binding has nothing new to show: the box is put back by hand
+    const chosen = this.word();
+    box.checked = !!chosen && this.names.has(chosen.bare);
   }
 
   protected play() {
