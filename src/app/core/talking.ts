@@ -36,8 +36,9 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export type TalkState = 'idle' | 'recording' | 'stopping' | 'writing' | 'stopped' | 'preview' | 'keeping';
 
-/** Why a talk stopped: the speaker stopped it, it was quiet too long, or it reached the longest a talk can be. */
-export type StopReason = 'you' | 'quiet' | 'longest';
+/** Why a talk stopped: the speaker stopped it, it was quiet too long, it reached the longest a talk can be, or the
+ * microphone went. */
+export type StopReason = 'you' | 'quiet' | 'longest' | 'microphone';
 
 /** What the engine says when a talk had nothing to write down: writing it down again would say the same. */
 const NOTHING_IN_IT = /^(Nothing was heard|Parrot couldn't make out|Parrot got only silence)/;
@@ -142,7 +143,12 @@ export class Talking {
     this.started = false;
     this.sendFailed = null;
     try {
-      await this.recorder.start('free', (pcm, rate) => this.send(pcm, rate));
+      await this.recorder.start('free', {
+        sink: (pcm, rate) => this.send(pcm, rate),
+        lost: () => {
+          if (run === this.starts) void this.cutOff();
+        },
+      });
     } catch (error) {
       if (run !== this.starts) return;
       this.state.set('idle');
@@ -200,6 +206,17 @@ export class Talking {
   async stop(reason: StopReason = 'you') {
     if (!(await this.stopRecording()) || !(await this.sent())) return;
     this.stopReason.set(reason);
+    await this.writeDown();
+  }
+
+  /** The microphone went while the talk was recorded: the recorder has ended it, and what was said up to then is
+   * written down. */
+  private async cutOff() {
+    if (this.state() !== 'recording') return;
+    clearInterval(this.watch);
+    this.state.set('stopping');
+    if (!(await this.sent())) return;
+    this.stopReason.set('microphone');
     await this.writeDown();
   }
 

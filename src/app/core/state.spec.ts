@@ -5,7 +5,7 @@ import { Engine, EngineError, TALK_CANCELLED } from './engine';
 import { Library } from './library';
 import { Activity, Attempt, LeftTalk, Mode, PartScore, Talk, TalkProgress, TextItem, WordStatus } from './models';
 import { Playback } from './playback';
-import { Recorder, Sink, TakeFor } from './recorder';
+import { MIC_LOST, Recorder, Sink, TakeFor, TakeHooks } from './recorder';
 import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey, splitKnown } from './split';
@@ -342,12 +342,23 @@ class FakeRecorder {
   /** how long the take has gone without sound (ms) */
   quiet = 0;
   private sink: Sink | null = null;
+  private lost: (() => void) | null = null;
   warm() {}
-  async start(owner: TakeFor, sink?: Sink) {
+  async start(owner: TakeFor, { sink, lost }: TakeHooks = {}) {
     if (!this.micAllowed) throw new Error('Permission denied');
     this.owner.set(owner);
     this.recording.set(true);
     this.sink = sink ?? null;
+    this.lost = lost ?? null;
+  }
+  /** the microphone is unplugged in the middle of the take: it ends there, with the talk's last sound sent on */
+  unplug() {
+    this.recording.set(false);
+    this.owner.set(null);
+    this.say(1);
+    this.sink = null;
+    this.lost?.();
+    this.lost = null;
   }
   /** `seconds` of a talk recorded, sent on as the recorder sends it */
   say(seconds: number) {
@@ -359,6 +370,7 @@ class FakeRecorder {
   async stop() {
     this.recording.set(false);
     this.owner.set(null);
+    this.lost = null;
     if (this.sink) {
       this.say(1);
       this.sink = null;
@@ -1094,6 +1106,17 @@ describe('the practice state', () => {
       expect(app.error()).toBe('No microphone: Permission denied. Allow Parrot to use the microphone.');
     });
 
+    it('drops a take, unscored, when the microphone is unplugged in the middle of it, and says so', async () => {
+      await app.toggleRecord();
+      recorder.unplug();
+      expect([app.recording(), app.checking(), app.error()]).toEqual([false, false, MIC_LOST]);
+      expect(engine.calls.some((call) => call.startsWith('check'))).toBe(false);
+      // the next take starts as any other
+      engine.nextCheck = attempt('t1', 'How are you?', 80);
+      await app.toggleRecord();
+      expect([app.recording(), app.error()]).toEqual([true, null]);
+    });
+
     it('scores a take against the part it was started on: moving on is refused meanwhile', async () => {
       engine.nextCheck = attempt('t1', 'How are you?', 80);
       await app.toggleRecord();
@@ -1307,6 +1330,14 @@ describe('the practice state', () => {
       expect([app.result()?.id, app.history().map((summary) => summary.id), app.selected()]).toEqual(['t1', ['t1'], 1]);
       expect([app.scores(), app.progress()]).toEqual([scores, progress]);
       expect(engine.calls.filter((call) => call === 'texts').length).toBe(texts);
+    });
+
+    it('drops a word try, unscored, when the microphone is unplugged in the middle of it, and says so', async () => {
+      await choose(1);
+      await words.toggleRecord();
+      recorder.unplug();
+      expect([words.recording(), words.checking(), words.error()]).toEqual([false, false, MIC_LOST]);
+      expect(engine.calls.some((call) => call.startsWith('checkWord'))).toBe(false);
     });
 
     it('reports a word try that could not be scored', async () => {
@@ -1665,6 +1696,21 @@ describe('the practice state', () => {
       expect(talking.left()).toBe(0);
       await vi.advanceTimersByTimeAsync(300);
       expect([talking.state(), talking.stopReason()]).toEqual(['preview', 'longest']);
+    });
+
+    it('stops when the microphone is unplugged, and writes down what was said up to then', async () => {
+      await talking.start();
+      recorder.say(2);
+      recorder.unplug();
+      await vi.waitFor(() => expect(talking.state()).toBe('preview'));
+      expect([talking.stopReason(), talking.talk(), talking.failure()]).toEqual(['microphone', written, null]);
+      expect(engine.calls.filter((call) => call.startsWith('talk'))).toEqual([
+        'talkStart 100',
+        'talkFeed 200',
+        'talkFeed 100',
+        'talkStop',
+        'talkStop done',
+      ]);
     });
 
     it('with nothing in it goes back to the start and says so', async () => {
