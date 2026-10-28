@@ -220,6 +220,8 @@ export class Practice {
 
   protected key(event: KeyboardEvent) {
     this.recorder.warm();
+    // a control that took the key for itself (the texts column's edge takes the arrows) keeps it
+    if (event.defaultPrevented) return;
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
     // Space presses the button that has focus, as everywhere else: it means Listen only away from the controls

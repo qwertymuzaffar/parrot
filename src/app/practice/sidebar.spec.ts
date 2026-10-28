@@ -69,6 +69,18 @@ describe('the texts column', () => {
     expect(kept()).toBe('200');
   });
 
+  it('ends a drag whose pointer is taken away, and keeps the width it had then', () => {
+    show();
+    const handle = edge()!;
+    handle.dispatchEvent(new MouseEvent('pointerdown', { clientX: 500, button: 0, bubbles: true }));
+    handle.dispatchEvent(new MouseEvent('pointermove', { clientX: 580, bubbles: true }));
+    handle.dispatchEvent(new MouseEvent('lostpointercapture', { bubbles: true }));
+    handle.dispatchEvent(new MouseEvent('pointermove', { clientX: 640, bubbles: true }));
+    fixture.detectChanges();
+    expect(width()).toBe(316);
+    expect(kept()).toBe('316');
+  });
+
   it('is as wide as it was left at the next start', () => {
     localStorage.setItem('parrot.texts-width', '320');
     show();

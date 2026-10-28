@@ -89,6 +89,7 @@ function kept(): number | null {
         (pointermove)="drag($event)"
         (pointerup)="release()"
         (pointercancel)="release()"
+        (lostpointercapture)="release()"
         (dblclick)="reset()"
         (keydown)="key($event)"
       ></div>

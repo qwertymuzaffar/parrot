@@ -76,6 +76,12 @@ describe('the practice screen', () => {
     expect(session.next).toHaveBeenCalled();
   });
 
+  it('leaves a key to a control that took it for itself', () => {
+    button.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+    expect(press(button, 'ArrowRight')).toBe(true);
+    expect(session.next).not.toHaveBeenCalled();
+  });
+
   it('says how each word came out and each part scored, which the screen shows in colour', () => {
     const word = (w: string, status: WordStatus, heard: string | null = null): WordResult => ({
       w,
