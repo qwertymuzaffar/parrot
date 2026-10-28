@@ -113,16 +113,29 @@ describe('sound', () => {
     };
     let freed: string[];
     let revoke: typeof URL.revokeObjectURL;
+    /** the next cut waits for this to be called (an engine round trip, or decoding the whole take) */
+    let finishCut: (() => void) | null;
+    let holdCut: boolean;
+    /** the cuts fail, as for a take whose recording is missing or damaged */
+    let failCut: boolean;
 
     beforeEach(() => {
       freed = [];
       revoke = URL.revokeObjectURL;
       URL.revokeObjectURL = (url: string) => freed.push(url);
       let cuts = 0;
+      finishCut = null;
+      holdCut = failCut = false;
+      const cut = async () => {
+        const url = `blob:cut-${++cuts}`;
+        if (holdCut) await new Promise<void>((resolve) => (finishCut = resolve));
+        if (failCut) throw new DOMException('Unable to decode audio data', 'EncodingError');
+        return url;
+      };
       TestBed.configureTestingModule({
         providers: [
           { provide: Engine, useValue: { audioUrl: (path: string) => `audio:${path}` } },
-          { provide: Clips, useValue: { cut: async () => `blob:cut-${++cuts}` } },
+          { provide: Clips, useValue: { cut } },
         ],
       });
     });
@@ -139,6 +152,37 @@ describe('sound', () => {
       playback.stop();
       await settle();
       expect([freed, playback.nowMine()]).toEqual([['blob:cut-1', 'blob:cut-2'], null]);
+    });
+
+    it('still being cut when stopped is dropped, and never cuts off what was played meanwhile', async () => {
+      const playback = TestBed.inject(Playback);
+      const sound = TestBed.inject(Sound);
+      const [takeAudio, clipAudio] = audios;
+      holdCut = true;
+      playback.playMyWord(take, 1);
+      playback.stop();
+      finishCut!();
+      await settle();
+      expect([clipAudio.src, freed, playback.nowMine()]).toEqual(['', ['blob:cut-1'], null]);
+
+      // a whole take started while the word was being cut goes on playing
+      playback.playMyWord(take, 2);
+      playback.toggleMine(take);
+      finishCut!();
+      await settle();
+      expect([clipAudio.src, freed, takeAudio.paused, sound.playing()]).toEqual(['', ['blob:cut-1', 'blob:cut-2'], false, 'mine']);
+    });
+
+    it('that cannot be cut leaves no word lit, and a comparison of it stops there', async () => {
+      const playback = TestBed.inject(Playback);
+      const speak = vi.spyOn(TestBed.inject(Sound), 'speak');
+      failCut = true;
+      await playback.playMyWord(take, 1).catch(() => {});
+      expect(playback.nowMine()).toBeNull();
+      // and quietly: nothing is left to fail unhandled in the window
+      await expect(playback.playMyWord(take, 2)).resolves.toBeUndefined();
+      await playback.compareWord(take, 1, 'are');
+      expect([playback.nowMine(), speak.mock.calls.length]).toEqual([null, 0]);
     });
   });
 });
