@@ -8,6 +8,8 @@ export class EngineError extends Error {}
 
 /** What the engine says when writing down a talk was cancelled (src-tauri/src/talk.rs). */
 export const TALK_CANCELLED = 'the writing-down was cancelled';
+/** What it says when there is no talk to write down, or its recording has gone (src-tauri/src/talk.rs). */
+export const TALK_GONE = "the talk's recording is no longer there";
 
 export interface EngineInfo {
   data: string;
