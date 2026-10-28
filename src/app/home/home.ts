@@ -54,6 +54,9 @@ export class Home {
   protected adding = signal(false);
   protected renaming = signal<string | null>(null);
   protected confirming = signal<string | null>(null);
+  /** the texts whose delete is with the engine: their cards don't open meanwhile, or the text would open and then
+   * vanish from under the practice screen */
+  protected deleting = signal<ReadonlySet<string>>(new Set());
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
 
   protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
@@ -139,6 +142,7 @@ export class Home {
   }
 
   protected continue(card: Card) {
+    if (this.deleting().has(card.t.id)) return;
     this.session.open(card.t.id, card.nextIndex);
   }
 
@@ -160,7 +164,13 @@ export class Home {
 
   protected async remove(text: TextItem) {
     this.confirming.set(null);
-    await this.library.remove(text.id);
+    this.deleting.update((ids) => new Set(ids).add(text.id));
+    try {
+      await this.library.remove(text.id);
+    } finally {
+      // gone, or kept if the engine wouldn't delete it (the error says why): its card opens again
+      this.deleting.update((ids) => new Set([...ids].filter((id) => id !== text.id)));
+    }
   }
 
   protected when(iso: string | null) {
