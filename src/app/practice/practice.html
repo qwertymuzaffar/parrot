@@ -181,11 +181,10 @@
       <button class="btn compare" [disabled]="!take" (click)="compare()" title="Your take, then the reference">
         <app-icon name="swap" [size]="16" /> <span class="label">Mine, then correct</span>
       </button>
-      @if (playback.playing()) {
-        <button class="btn ghost square stop" (click)="playback.stop()" aria-label="Stop (Esc)">
-          <app-icon name="stop" [size]="15" />
-        </button>
-      }
+      <!-- always there, hidden while nothing plays: its room is kept, so the record button doesn't move when it shows -->
+      <button class="btn ghost square stop" [class.idle]="!playback.playing()" (click)="playback.stop()" aria-label="Stop (Esc)">
+        <app-icon name="stop" [size]="15" />
+      </button>
     </div>
   </footer>
 </main>

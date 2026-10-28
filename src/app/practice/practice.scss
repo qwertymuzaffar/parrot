@@ -424,6 +424,10 @@ header {
     font-size: 12px;
     font-weight: 600;
   }
+  // hidden (so not focused or read out) while nothing plays, its room kept
+  .stop.idle {
+    visibility: hidden;
+  }
 }
 
 // a dock button reduced to its icon: its label stays for screen readers, and its title for the pointer
@@ -440,13 +444,10 @@ header {
   }
 }
 
-// "Mine, then correct" gives up its label in a narrower centre, or makes room for Stop while something plays
-@container centre (width < 700px) {
-  .dock:has(.stop) .compare {
-    @include icon-only;
-  }
-}
-@container centre (width < 660px) {
+// "Mine, then correct" gives up its label in a centre too narrow for it, Mine and Stop's room beside the record
+// button (about 330 px a side, with the dock's padding and gaps 830 px): wider than its side, it pushes the record
+// button off the centre
+@container centre (width < 840px) {
   .dock .compare {
     @include icon-only;
   }
