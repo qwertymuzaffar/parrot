@@ -6,7 +6,9 @@
   font-family: 'DM Sans';
   src: url('/fonts/dm-sans.woff2') format('woff2');
   font-weight: 100 1000;
-  font-display: swap;
+  // a file on the computer, preloaded by index.html: the first paint waits the moment it takes, where swap painted the
+  // system font first and reflowed every line into DM Sans a frame later
+  font-display: block;
 }
 
 :root {

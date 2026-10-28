@@ -316,11 +316,13 @@ import { stopNote } from './talk-card';
       font: inherit;
       line-height: 1.5;
     }
+    // as high as a button: the small ones of the confirm don't shrink the card under the pointer
     .go {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
+      min-height: 44px;
     }
     .ask {
       margin-right: auto;

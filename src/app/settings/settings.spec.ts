@@ -161,3 +161,71 @@ describe('Settings when the engine fails', () => {
     ]);
   });
 });
+
+describe('Settings: opening again', () => {
+  // jsdom has no modal dialogs
+  const showModal = HTMLDialogElement.prototype.showModal;
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+  });
+  afterAll(() => {
+    HTMLDialogElement.prototype.showModal = showModal;
+  });
+
+  it('keeps the engine and trash lines while they are asked again, then shows the new answers', async () => {
+    let answer = () => {};
+    let bytes = 2_000_000;
+    const later = () => new Promise<void>((resolve) => (answer = resolve));
+    let waiting = Promise.resolve();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Updates, useValue: new FakeUpdates() },
+        {
+          provide: Engine,
+          useValue: {
+            info: async () => {
+              await waiting;
+              return { data: '/data', models: { whisper: true, aligner: true }, sizes: {} };
+            },
+            trashSize: async () => {
+              await waiting;
+              return bytes;
+            },
+            names: async () => [],
+          },
+        },
+        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+      ],
+    });
+    const fixture = TestBed.createComponent(Settings);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    const lines = () =>
+      [...element.querySelectorAll('section')]
+        .filter((each) => ['Speech engine', 'Texts and recordings'].includes(each.querySelector('.eyebrow')!.textContent!.trim()))
+        .flatMap((each) => [...each.querySelectorAll('p, button')].map((line) => line.textContent!.replace(/\s+/g, ' ').trim()));
+    const shown = [
+      'Ready, on this computer',
+      'Kept on this computer, in/data',
+      'A deleted text stays in the trash for 30 days, then Parrot erases it for good.',
+      'Open data folder',
+      'Empty trash · 2 MB',
+    ];
+    expect(lines()).toEqual(shown);
+
+    // opened with the engine slow to answer: everything stays as it was
+    waiting = later();
+    bytes = 5_000_000;
+    fixture.componentInstance.open();
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    expect(lines()).toEqual(shown);
+
+    answer();
+    await fixture.whenStable();
+    expect(lines()).toEqual([...shown.slice(0, -1), 'Empty trash · 5 MB']);
+  });
+});

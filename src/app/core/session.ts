@@ -4,7 +4,7 @@ import { Engine } from './engine';
 import { errorMessage, Library } from './library';
 import { Attempt, AttemptSummary, Mode, Part, PartScore, TextItem } from './models';
 import { Playback } from './playback';
-import { micError, Recorder } from './recorder';
+import { MIC_LOST, micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
 import { bare, splitText } from './split';
 
@@ -29,7 +29,17 @@ export class Session {
 
   readonly result = signal<Attempt | null>(null);
   readonly history = signal<AttemptSummary[]>([]);
-  readonly checking = signal(false);
+  /** the takes being scored, each by its text and part: only that part waits for its score, not every text */
+  private scoring = signal<{ textId: string; partKey: string }[]>([]);
+  /** a take of the part shown is being scored: the part says so, and its Record waits */
+  readonly checking = computed(() => {
+    const textId = this.openId();
+    const key = this.part()?.key;
+    return this.scoring().some((take) => take.textId === textId && take.partKey === key);
+  });
+  /** a take of a part of the open text is being scored: the text's words wait for it, or it would be filed under words
+   * the text no longer has */
+  readonly checkingText = computed(() => this.scoring().some((take) => take.textId === this.openId()));
   /** how many loads (a text's parts and scores, a mode's save) are under way */
   private loads = signal(0);
   /** a text or mode is loading, and the screen still shows the parts before. No take starts meanwhile: it would be of
@@ -318,7 +328,8 @@ export class Session {
     this.playback.stop();
     const taking = (this.taking = { text, part });
     try {
-      await this.recorder.start('part');
+      // the microphone going while the take is recorded ends it there: it is dropped, and the screen says why
+      await this.recorder.start('part', { lost: () => this.lost(taking) });
       // the screen moved on while the microphone got ready: a take of the part left is dropped, not filed there
       if (this.taking === taking && (this.text()?.id !== text.id || this.part() !== part)) return await this.dropTake();
       this.failure.set(null);
@@ -327,11 +338,17 @@ export class Session {
     }
   }
 
+  private lost(taking: { text: TextItem; part: Part }) {
+    if (this.taking === taking) this.taking = null;
+    this.failure.set(MIC_LOST);
+  }
+
   private async finishRecording() {
     const { text, part } = this.taking!;
     this.taking = null;
     // scoring from the click on, while the take's last moment is still being recorded
-    this.checking.set(true);
+    const scored = { textId: text.id, partKey: part.key };
+    this.scoring.update((takes) => [...takes, scored]);
     const blob = await this.recorder.stop();
     try {
       const attempt = await this.engine.check(text.id, part.text, blob);
@@ -360,7 +377,7 @@ export class Session {
     } catch (error) {
       if (this.text()?.id === text.id) this.failure.set(errorMessage(error));
     } finally {
-      this.checking.set(false);
+      this.scoring.update((takes) => takes.filter((take) => take !== scored));
     }
   }
 }

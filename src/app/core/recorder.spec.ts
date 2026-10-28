@@ -1,32 +1,45 @@
-import { audioContext, Recorder, Sink, TakeFor } from './recorder';
+import { audioContext, MIC_LOST, micError, Recorder, TakeFor, TakeHooks } from './recorder';
 import { Settling } from './settling';
 
-/** The recorder with the microphone stood in for: open at once, settled when the test says, sound when it says. */
+/** The recorder with the microphone stood in for: open at once, settled when the test says, sound when it says,
+ * unplugged when it says. */
 function microphone() {
   const recorder = new Recorder();
-  const settling = new Settling();
+  let settling = new Settling();
   const ctx = { state: 'running', sampleRate: 48000, close: vi.fn(), resume: vi.fn(async () => {}) };
   const inner = recorder as unknown as Record<string, unknown>;
+  let track = new EventTarget();
+  let opens = 0;
   inner['open'] = async () => {
+    if (inner['ctx']) return;
+    opens++;
+    track = new EventTarget();
+    const stream = { getTracks: () => [], getAudioTracks: () => [track] };
     inner['ctx'] = ctx;
     inner['settling'] = settling;
     inner['analyser'] = { fftSize: 4, getByteTimeDomainData: () => {} };
     inner['node'] = { disconnect: () => {} };
-    inner['stream'] = { getTracks: () => [] };
+    inner['stream'] = stream;
+    (inner['follow'] as (stream: unknown) => void).call(recorder, stream);
   };
   const capture = inner['capture'] as (samples: Float32Array, rate: number) => void;
   return {
     recorder,
     ctx,
     settled: () => (settling as unknown as { finish(): void }).finish(),
+    /** the next open's capture comes up afresh, to settle again */
+    unsettle: () => (settling = new Settling()),
+    /** the microphone is unplugged */
+    unplug: () => track.dispatchEvent(new Event('ended')),
+    opens: () => opens,
     /** a block of sound from the microphone */
     sound: () => capture.call(recorder, new Float32Array(128).fill(0.1), 48000),
     /** a block of a quiet room */
     quiet: () => capture.call(recorder, new Float32Array(128).fill(0.001), 48000),
     capturing: () => inner['capturing'] as boolean,
     /** start a take; the test then lets the microphone open with a timer tick */
-    start: (owner: TakeFor, sink?: Sink) => {
-      const started = recorder.start(owner, sink);
+    start: (owner: TakeFor, hooks?: TakeHooks) => {
+      const started = recorder.start(owner, hooks);
       started.catch(() => {});
       return started;
     },
@@ -120,7 +133,7 @@ describe('Recorder', () => {
     const mic = microphone();
     mic.settled();
     const sent: number[] = [];
-    const started = mic.start('free', (pcm, rate) => sent.push(pcm.length / rate));
+    const started = mic.start('free', { sink: (pcm, rate) => sent.push(pcm.length / rate) });
     await vi.advanceTimersByTimeAsync(0);
     mic.sound();
     await started;
@@ -148,7 +161,7 @@ describe('Recorder', () => {
     const mic = microphone();
     mic.settled();
     expect(mic.recorder.quietFor()).toBe(0);
-    const started = mic.start('free', () => {});
+    const started = mic.start('free', { sink: () => {} });
     await vi.advanceTimersByTimeAsync(0);
     mic.quiet();
     await started;
@@ -157,5 +170,88 @@ describe('Recorder', () => {
     expect(mic.recorder.quietFor()).toBeGreaterThanOrEqual(4000);
     mic.sound();
     expect(mic.recorder.quietFor()).toBeLessThan(10);
+  });
+
+  it('a take recorded when the microphone goes ends and says so, and the next take opens a microphone again', async () => {
+    const mic = microphone();
+    mic.settled();
+    const lost = vi.fn();
+    const started = mic.start('part', { lost });
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await started;
+    expect(mic.recorder.recording()).toBe(true);
+    mic.unplug();
+    expect(lost).toHaveBeenCalledOnce();
+    expect([mic.recorder.recording(), mic.recorder.owner(), mic.capturing(), mic.ctx.close.mock.calls.length]).toEqual([
+      false,
+      null,
+      false,
+      1,
+    ]);
+    // the next take asks for the microphone again, rather than taking silence from the one gone
+    const next = mic.start('part');
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await next;
+    expect([mic.opens(), mic.recorder.recording()]).toEqual([2, true]);
+  });
+
+  it('a talk keeps what was said up to the moment the microphone went', async () => {
+    const mic = microphone();
+    mic.settled();
+    const sent: number[] = [];
+    const lost = vi.fn();
+    const started = mic.start('free', { sink: (pcm) => sent.push(pcm.length), lost });
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await started;
+    for (let block = 0; block < 9; block++) mic.sound();
+    mic.unplug();
+    expect([sent, lost.mock.calls.length, mic.recorder.owner()]).toEqual([[1280], 1, null]);
+  });
+
+  it('a take getting ready when the microphone goes fails at once, saying so', async () => {
+    const mic = microphone();
+    mic.unsettle();
+    const lost = vi.fn();
+    const started = mic.start('word', { lost });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mic.recorder.preparing()).toBe(true);
+    mic.unplug();
+    const error = await started.catch((thrown: unknown) => thrown);
+    expect(micError(error)).toBe(MIC_LOST);
+    expect([lost.mock.calls.length, mic.recorder.preparing(), mic.recorder.owner(), mic.capturing()]).toEqual([0, false, null, false]);
+  });
+
+  it('a take being stopped when the microphone goes is kept, and one not under way is untouched by it', async () => {
+    const mic = microphone();
+    mic.settled();
+    const lost = vi.fn();
+    const started = mic.start('part', { lost });
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await started;
+    mic.sound();
+    const stopping = mic.recorder.stop();
+    mic.unplug();
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await stopping).size).toBeGreaterThan(44);
+    expect([lost.mock.calls.length, mic.ctx.close.mock.calls.length]).toEqual([0, 1]);
+    // the microphone kept open between takes is let go, so the next take opens one again
+    const next = mic.start('word');
+    await vi.advanceTimersByTimeAsync(0);
+    mic.sound();
+    await next;
+    const stopped = mic.recorder.stop();
+    await vi.advanceTimersByTimeAsync(250);
+    await stopped;
+    mic.unplug();
+    expect([mic.opens(), mic.ctx.close.mock.calls.length, lost.mock.calls.length]).toEqual([2, 2, 0]);
+    const third = mic.start('part');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mic.opens()).toBe(3);
+    mic.sound();
+    await third;
   });
 });

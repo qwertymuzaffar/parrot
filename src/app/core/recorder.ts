@@ -22,8 +22,26 @@ export type TakeFor = 'part' | 'word' | 'free';
 /** Where a talk's sound goes as it is recorded: 16-bit samples at the microphone's rate. */
 export type Sink = (pcm: Int16Array, rate: number) => void;
 
-/** What to say when the microphone would not start. */
-export const micError = (error: unknown) => `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`;
+/** What a take says when the microphone goes in the middle of it. */
+export const MIC_LOST = 'The microphone was disconnected.';
+
+/** A take that was getting ready when the microphone went. */
+class MicrophoneLost extends Error {
+  constructor() {
+    super(MIC_LOST);
+  }
+}
+
+/** What to say when the microphone would not start, or went as it did. */
+export const micError = (error: unknown) =>
+  error instanceof MicrophoneLost ? MIC_LOST : `No microphone: ${(error as Error).message}. Allow Parrot to use the microphone.`;
+
+/** What a take is given: where a talk's sound goes, and what to do if the microphone goes while it is recorded (the
+ * recorder has ended the take by then). */
+export interface TakeHooks {
+  sink?: Sink;
+  lost?: () => void;
+}
 
 /** how long a take goes on after Stop is clicked */
 const AFTER_STOP_MS = 250;
@@ -107,6 +125,10 @@ export class Recorder {
   private pendingSamples = 0;
   /** when the take last had sound in it (performance.now()) */
   private lastSound = 0;
+  /** fails the take getting ready, when the microphone goes meanwhile */
+  private cut: ((error: Error) => void) | null = null;
+  /** the take's owner, to be told if the microphone goes while it is recorded */
+  private onLost: (() => void) | null = null;
 
   /** Open the microphone and the capture (the slow part, a second or more the first time); it then stays open for
    * two minutes after a take, so the next take starts at once. */
@@ -158,6 +180,7 @@ export class Recorder {
       source.connect(this.analyser);
       this.ctx = ctx;
       this.node = node;
+      this.follow(stream);
     } catch (error) {
       // the microphone light would otherwise stay on with nothing listening
       stream.getTracks().forEach((track) => track.stop());
@@ -166,6 +189,40 @@ export class Recorder {
       throw error;
     }
     this.device.set(stream.getAudioTracks()[0]?.label ?? '');
+  }
+
+  /** Notice the microphone going (unplugged, or a Bluetooth headset switching profile): its source then gives only
+   * silence, and every take after it would be of that silence. */
+  private follow(stream: MediaStream) {
+    const track = stream.getAudioTracks()[0];
+    if (!track) return;
+    track.addEventListener('ended', () => this.lost(stream));
+    if (track.readyState === 'ended') this.lost(stream);
+  }
+
+  /** The microphone went: a take under way ends and says so, and the microphone is let go, so that the next take asks
+   * for one again (the one plugged in now) rather than recording silence. */
+  private lost(stream: MediaStream) {
+    if (stream !== this.stream) return;
+    // a take being stopped is kept: it has only lost its last moment
+    const owner = this.capturing && !this.stopping ? this.owner() : null;
+    const recording = this.recording();
+    const tell = this.onLost;
+    if (owner) {
+      this.take++;
+      if (recording) {
+        clearInterval(this.timer);
+        this.recording.set(false);
+        this.level.set(0);
+        // a talk keeps what was said up to here
+        this.send(this.ctx!.sampleRate);
+      } else {
+        this.cut?.(new MicrophoneLost());
+      }
+      this.giveUp();
+    }
+    this.close();
+    if (owner && recording) tell?.();
   }
 
   /** Each block of samples from the microphone: into the take, or into the half second kept before one. */
@@ -227,26 +284,32 @@ export class Recorder {
     this.sink?.(pcm, rate);
   }
 
-  /** Start a take for `owner`. A talk (`free`) gives `sink` its sound as it is recorded, from the half second before. */
-  async start(owner: TakeFor, sink?: Sink): Promise<void> {
+  /** Start a take for `owner`. A talk (`free`) gives `sink` its sound as it is recorded, from the half second before.
+   * `lost` is told if the microphone goes while the take is recorded; one going before then fails the start. */
+  async start(owner: TakeFor, { sink, lost }: TakeHooks = {}): Promise<void> {
     if (this.capturing) return; // a second click while the microphone opens
     const take = ++this.take;
     clearTimeout(this.idle);
     this.capturing = true;
     this.owner.set(owner);
+    this.onLost = lost ?? null;
+    // the microphone going while the take gets ready fails it at once, as a microphone that won't start does
+    const gone = new Promise<never>((_, reject) => (this.cut = reject));
+    gone.catch(() => {});
+    const until = <T>(work: Promise<T>) => Promise.race([work, gone]);
     try {
-      await this.open();
+      await until(this.open());
       if (take !== this.take) return;
       // the capture comes up quiet and switches to its real level a few seconds in: a take must not start before
       if (!this.settling!.settled) {
         this.preparing.set(true);
-        await Promise.race([this.settling!.done(), sleep(SETTLE_MAX_MS + 1000)]);
+        await until(Promise.race([this.settling!.done(), sleep(SETTLE_MAX_MS + 1000)]));
         this.preparing.set(false);
         if (take !== this.take) return;
       }
       // a resume WebKit never answers would otherwise hold the take for good
       const ctx = this.ctx!;
-      if (ctx.state !== 'running') await Promise.race([ctx.resume(), sleep(3000)]);
+      if (ctx.state !== 'running') await until(Promise.race([ctx.resume(), sleep(3000)]));
       if (take !== this.take) return;
     } catch (error) {
       if (take === this.take) this.giveUp();
@@ -263,8 +326,9 @@ export class Recorder {
     }
     this.preroll = [];
     const arrived = new Promise<boolean>((resolve) => (this.flowing = () => resolve(true)));
-    const sound = await Promise.race([arrived, sleep(3000).then(() => false)]);
+    const sound = await until(Promise.race([arrived, sleep(3000).then(() => false)]));
     if (take !== this.take) return;
+    this.cut = null;
     if (!sound) {
       // recording on would only make a silent take: say so now rather than after it
       this.giveUp();
@@ -306,6 +370,7 @@ export class Recorder {
     this.sink = null;
     this.pending = [];
     this.pendingSamples = 0;
+    this.cut = this.onLost = null;
   }
 
   /** Stop and return the take as a WAV file. A take stopped before it got going gives nothing, at once. */
@@ -322,12 +387,14 @@ export class Recorder {
     clearInterval(this.timer);
     this.recording.set(false);
     this.level.set(0);
+    this.onLost = null;
+    // the microphone may go in the moment after: the take is still kept
+    const rate = this.ctx!.sampleRate;
     // keep listening a moment after the click: a take stopped right as a word ends would lose its last sound, and a
     // short word with it (the owner stays set, so no other take starts meanwhile)
     await sleep(AFTER_STOP_MS);
     this.capturing = false;
     this.stopping = false;
-    const rate = this.ctx!.sampleRate;
     this.owner.set(null);
     this.idle = window.setTimeout(() => this.close(), IDLE_MS);
     if (this.sink) {
