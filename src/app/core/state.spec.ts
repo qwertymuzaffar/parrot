@@ -10,7 +10,7 @@ import { Session } from './session';
 import { Sound, Track } from './sound';
 import { bare, partKey, splitKnown } from './split';
 import { WordPractice } from './word-practice';
-import { LONGEST_TALK, QUIET_STOP_MS, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
+import { CANCEL_WAIT_MS, LONGEST_TALK, NOT_STOPPED, QUIET_STOP_MS, STOP_WAIT_MS, STOPPED_TAKING, Talking } from './talking';
 import { TriesChart } from '../practice/tries-chart';
 
 const TEXT = 'Hello there. How are you? I am fine.';
@@ -1608,6 +1608,46 @@ describe('the practice state', () => {
       await talking.discard();
       expect([talking.state(), engine.talk]).toEqual(['idle', null]);
       expect(engine.calls).toContain('talkDiscard');
+    });
+
+    it('stops waiting for a cancelled writing-down that never stops, keeping the talk to discard', async () => {
+      vi.useFakeTimers();
+      await talking.start();
+      recorder.say(2);
+      const release = engine.hold('talkStop done');
+      const stopping = talking.stop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect([talking.state(), talking.progress()]).toEqual(['writing', 0.5]);
+      talking.cancel();
+      await vi.advanceTimersByTimeAsync(CANCEL_WAIT_MS - 1);
+      expect(talking.state()).toBe('writing');
+      await vi.advanceTimersByTimeAsync(1);
+      expect([talking.state(), talking.failure()]).toEqual(['stopped', NOT_STOPPED]);
+      await talking.discard();
+      expect([talking.state(), engine.calls.includes('talkDiscard')]).toEqual(['idle', true]);
+      // the engine's answer, come late, changes nothing
+      release();
+      await stopping;
+      expect([talking.state(), talking.failure()]).toEqual(['idle', null]);
+    });
+
+    it('written down again after a cancel it gave up on, drops the answer of the one before', async () => {
+      vi.useFakeTimers();
+      await talking.start();
+      recorder.say(2);
+      const release = engine.hold('talkStop done');
+      const stopping = talking.stop();
+      await vi.advanceTimersByTimeAsync(0);
+      talking.cancel();
+      await vi.advanceTimersByTimeAsync(CANCEL_WAIT_MS);
+      expect(talking.state()).toBe('stopped');
+      const again = talking.writeDown();
+      await vi.advanceTimersByTimeAsync(0);
+      expect([talking.state(), talking.failure()]).toEqual(['writing', null]);
+      // the first one stops as cancelled, then the second one is written down
+      release();
+      await Promise.all([stopping, again]);
+      expect([talking.state(), talking.talk(), talking.failure()]).toEqual(['preview', written, null]);
     });
 
     it('stops itself after a long quiet, and at the longest a talk can be', async () => {
