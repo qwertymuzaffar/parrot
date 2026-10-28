@@ -1,4 +1,4 @@
-import { NO_ERRORS_SCHEMA, signal } from '@angular/core';
+import { NO_ERRORS_SCHEMA, signal, WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Attempt, Part } from '../core/models';
 import { Playback } from '../core/playback';
@@ -62,7 +62,7 @@ describe('the caption under the part', () => {
           useValue: {
             nowRef: signal(null),
             nowMine: signal(null),
-            playing: signal(null),
+            playing: signal<string | null>(null),
             paused: signal(false),
             rate: signal(1),
             voiceMissing: signal(false),
@@ -97,5 +97,16 @@ describe('the caption under the part', () => {
     session.error.set('Nothing was heard in the recording. Is the microphone on?');
     await fixture.whenStable();
     expect(caption()).toBe('Nothing was heard in the recording. Is the microphone on?');
+  });
+
+  // not the caption, but the screen as it renders here: the dock under it
+  it("keeps Stop's room in the dock while nothing plays, so the record button doesn't move when it shows", async () => {
+    const fixture = await render();
+    const playback = TestBed.inject(Playback) as unknown as { playing: WritableSignal<string | null> };
+    const stop = document.querySelector('.dock .stop')!;
+    expect(stop.classList.contains('idle')).toBe(true);
+    playback.playing.set('ref');
+    await fixture.whenStable();
+    expect([document.querySelector('.dock .stop'), stop.classList.contains('idle')]).toEqual([stop, false]);
   });
 });
