@@ -78,6 +78,12 @@ export class Practice {
     const previousScore = this.session.previousScore();
     return result && previousScore != null ? result.score - previousScore : null;
   });
+  /** which try of the part the one shown is, counting from the first: the newest is only one of them */
+  protected readonly tryNumber = computed(() => {
+    const history = this.session.history();
+    const shownIndex = history.findIndex((attempt) => attempt.id === this.result()?.id);
+    return shownIndex >= 0 ? history.length - shownIndex : history.length;
+  });
   protected readonly unit = computed(
     () => ({ whole: 'Text', sentences: 'Sentence', short: 'Part' })[this.session.text()?.mode ?? 'sentences'],
   );

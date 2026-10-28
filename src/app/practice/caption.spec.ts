@@ -92,6 +92,20 @@ describe('the caption under the part', () => {
     expect(caption()).toMatch(/^Your take· 2.0 s · try 1/);
   });
 
+  it('numbers the try shown by its place among the tries, not by how many there are', async () => {
+    const fixture = await render();
+    session.history.set([
+      { id: 't3', when: TRY.when, score: 90, wpm: 150, duration: 2.5 },
+      { id: 't2', when: TRY.when, score: 80, wpm: 145, duration: 2.2 },
+      { id: TRY.id, when: TRY.when, score: TRY.score, wpm: TRY.wpm, duration: TRY.duration },
+    ]);
+    await fixture.whenStable();
+    expect(caption()).toMatch(/^Your take· 2.0 s · try 1/);
+    session.result.set({ ...TRY, id: 't3', duration: 2.5 });
+    await fixture.whenStable();
+    expect(caption()).toMatch(/^Your take· 2.5 s · try 3/);
+  });
+
   it('says why a take failed, though the try before it is still shown', async () => {
     const fixture = await render();
     session.error.set('Nothing was heard in the recording. Is the microphone on?');
