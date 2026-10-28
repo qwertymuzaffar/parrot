@@ -1484,6 +1484,13 @@ describe('the practice state', () => {
         localStorage.removeItem('parrot.talkPrompts');
       });
 
+      it('is about anything when the set kept from before is gone', async () => {
+        localStorage.setItem('parrot.talkPrompts', 'gone');
+        const fresh = await startWith(left(written));
+        expect([fresh.prompts(), fresh.prompt()]).toEqual([null, null]);
+        localStorage.removeItem('parrot.talkPrompts');
+      });
+
       it('comes back to be checked if it was written down, or is discarded', async () => {
         const fresh = await startWith(left(written));
         fresh.checkUnfinished();

@@ -139,14 +139,24 @@ export function length(seconds: number) {
               Tell a story or answer an interview question, with nothing to read. Parrot writes down what you said and shows how each word
               came out.
             </p>
+            <!-- one chip always chosen: talking about anything is a choice in view, not a set turned off again -->
             <div class="sets" role="group" aria-label="Something to talk about">
+              <button
+                type="button"
+                class="chip"
+                [class.on]="talking.prompts() === null"
+                [attr.aria-pressed]="talking.prompts() === null"
+                (click)="talking.choosePrompts(null)"
+              >
+                Anything
+              </button>
               @for (set of sets; track set.key) {
                 <button
                   type="button"
                   class="chip"
                   [class.on]="talking.prompts() === set.key"
                   [attr.aria-pressed]="talking.prompts() === set.key"
-                  (click)="talking.choosePrompts(talking.prompts() === set.key ? null : set.key)"
+                  (click)="talking.prompts() !== set.key && talking.choosePrompts(set.key)"
                 >
                   {{ set.label }}
                 </button>

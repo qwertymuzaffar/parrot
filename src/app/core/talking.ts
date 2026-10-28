@@ -18,6 +18,11 @@ export const STOP_WAIT_MS = 10_000;
 /** What the card says then; the talk is kept as the engine has it, to write down or let go. */
 export const STOPPED_TAKING = 'The speech engine stopped taking the talk.';
 
+/** the key of a set of prompts there is, or null (talk about anything): a set kept by an earlier version may be gone */
+function knownSet(key: string | null) {
+  return PROMPT_SETS.some((set) => set.key === key) ? key : null;
+}
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -59,7 +64,7 @@ export class Talking {
   /** what was typed on the check screen of a talk left there: its words as corrected, and its title */
   readonly draft = signal<{ said: string; title: string } | null>(null);
   /** the set of prompts chosen to talk about (its key), remembered between runs; none to talk freely */
-  readonly prompts = signal<string | null>(readSetting<string>('talkPrompts', '') || null);
+  readonly prompts = signal<string | null>(knownSet(readSetting<string>('talkPrompts', '')));
   /** the prompt to talk about, from that set */
   readonly prompt = signal<string | null>(null);
   /** the prompt the talk was about, as it started: the title of the text it becomes. A talk left from an earlier run
@@ -95,7 +100,7 @@ export class Talking {
 
   /** Talk about a prompt from the set with `key`, or about anything (null). */
   choosePrompts(key: string | null) {
-    this.prompts.set(PROMPT_SETS.some((set) => set.key === key) ? key : null);
+    this.prompts.set(knownSet(key));
     writeSetting('talkPrompts', this.prompts() ?? '');
     this.prompt.set(null);
     this.anotherPrompt();
