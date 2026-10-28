@@ -4,7 +4,7 @@ import { Engine } from './engine';
 import { errorMessage, Library } from './library';
 import { Attempt, AttemptSummary, Mode, Part, PartScore, TextItem } from './models';
 import { Playback } from './playback';
-import { micError, Recorder } from './recorder';
+import { MIC_LOST, micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
 import { bare, splitText } from './split';
 
@@ -318,13 +318,19 @@ export class Session {
     this.playback.stop();
     const taking = (this.taking = { text, part });
     try {
-      await this.recorder.start('part');
+      // the microphone going while the take is recorded ends it there: it is dropped, and the screen says why
+      await this.recorder.start('part', { lost: () => this.lost(taking) });
       // the screen moved on while the microphone got ready: a take of the part left is dropped, not filed there
       if (this.taking === taking && (this.text()?.id !== text.id || this.part() !== part)) return await this.dropTake();
       this.failure.set(null);
     } catch (error) {
       this.failure.set(micError(error));
     }
+  }
+
+  private lost(taking: { text: TextItem; part: Part }) {
+    if (this.taking === taking) this.taking = null;
+    this.failure.set(MIC_LOST);
   }
 
   private async finishRecording() {

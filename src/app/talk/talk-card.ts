@@ -8,6 +8,7 @@ import { PROMPT_SETS } from './prompts';
 export function stopNote(reason: StopReason | null) {
   if (reason === 'quiet') return 'Stopped after 2 quiet minutes.';
   if (reason === 'longest') return `Stopped at the ${LONGEST_TALK / 60}-minute limit.`;
+  if (reason === 'microphone') return 'Stopped when the microphone was disconnected.';
   return '';
 }
 
