@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -33,7 +34,7 @@ import { WordCard } from './word-card';
   templateUrl: './practice.html',
   styleUrl: './practice.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown)': 'key($event)', '(document:pointerdown)': 'recorder.warm()', '(window:resize)': 'fit()' },
+  host: { '(document:keydown)': 'key($event)', '(document:pointerdown)': 'recorder.warm()' },
 })
 export class Practice {
   protected session = inject(Session);
@@ -42,8 +43,10 @@ export class Practice {
   private words = inject(WordPractice);
   protected names = inject(Names);
   private injector = inject(Injector);
+  private destroyRef = inject(DestroyRef);
   readonly settings = output<void>();
   protected band = band;
+  private centre = viewChild<ElementRef<HTMLElement>>('centre');
   private stepper = viewChild<ElementRef<HTMLElement>>('stepper');
   private sentence = viewChild<ElementRef<HTMLElement>>('sentence');
   private wordCard = viewChild(WordCard, { read: ElementRef });
@@ -90,6 +93,14 @@ export class Practice {
       this.size();
       this.result();
       queueMicrotask(() => this.fit());
+    });
+    // and fitted again whenever the centre changes size: the window resized, or the texts column dragged
+    afterNextRender(() => {
+      const centre = this.centre()?.nativeElement;
+      if (!centre || typeof ResizeObserver === 'undefined') return;
+      const watcher = new ResizeObserver(() => this.fit());
+      watcher.observe(centre);
+      this.destroyRef.onDestroy(() => watcher.disconnect());
     });
     // keep the current part in view in the stepper
     effect(() => {
@@ -209,6 +220,8 @@ export class Practice {
 
   protected key(event: KeyboardEvent) {
     this.recorder.warm();
+    // a control that took the key for itself (the texts column's edge takes the arrows) keeps it
+    if (event.defaultPrevented) return;
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
     // Space presses the button that has focus, as everywhere else: it means Listen only away from the controls

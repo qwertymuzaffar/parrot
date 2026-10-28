@@ -1,7 +1,7 @@
 :host {
   display: grid;
-  // the texts column gives up a little room in narrow windows (236 px from a 1240 px window up)
-  grid-template-columns: clamp(200px, 19.1vw, 236px) minmax(0, 1fr) 332px;
+  // the texts column sets its own width (a fifth of the window, or what it was dragged to: see Sidebar)
+  grid-template-columns: auto minmax(0, 1fr) 332px;
   height: 100%;
   overflow: hidden;
 }

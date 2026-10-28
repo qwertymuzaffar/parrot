@@ -14,3 +14,11 @@ export function writeSetting(key: string, value: string) {
     /* private mode or storage blocked: the setting just isn't remembered */
   }
 }
+
+export function forgetSetting(key: string) {
+  try {
+    localStorage.removeItem('parrot.' + key);
+  } catch {
+    /* nothing was kept, then */
+  }
+}

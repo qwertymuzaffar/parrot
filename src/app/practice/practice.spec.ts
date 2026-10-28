@@ -76,6 +76,12 @@ describe('the practice screen', () => {
     expect(session.next).toHaveBeenCalled();
   });
 
+  it('leaves a key to a control that took it for itself', () => {
+    button.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+    expect(press(button, 'ArrowRight')).toBe(true);
+    expect(session.next).not.toHaveBeenCalled();
+  });
+
   it('says how each word came out and each part scored, which the screen shows in colour', () => {
     const word = (w: string, status: WordStatus, heard: string | null = null): WordResult => ({
       w,
@@ -111,5 +117,58 @@ describe('the practice screen', () => {
     // a try from before 0.4 has no pauses
     session.result.set({ words: [] } as unknown as Attempt);
     expect(labels.pauseAfter(1)).toBeNull();
+  });
+});
+
+/** The sentence is fitted to its box again whenever the centre changes size, so a texts column dragged wider refits
+ * it as a resized window does. */
+describe('the practice screen when the centre changes size', () => {
+  let watch: ResizeObserverCallback | undefined;
+
+  beforeEach(() => {
+    watch = undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          watch = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: Session,
+          useValue: {
+            recording: signal(false),
+            result: signal(null),
+            previousScore: signal(null),
+            text: signal(null),
+            words: signal([]),
+            index: signal(0),
+            selected: signal(null),
+            part: signal({ text: '' }),
+          },
+        },
+        { provide: Names, useValue: { has: () => false } },
+        { provide: Playback, useValue: {} },
+        { provide: Recorder, useValue: { warm: vi.fn(), owner: signal(null) } },
+        { provide: WordPractice, useValue: { checking: signal(false) } },
+      ],
+    });
+    TestBed.overrideComponent(Practice, { set: { imports: [], template: '<main #centre><p #sentence>Hello there.</p></main>' } });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('fits the sentence again', () => {
+    const fixture = TestBed.createComponent(Practice);
+    fixture.detectChanges();
+    expect(watch).toBeDefined();
+    const fit = vi.spyOn(fixture.componentInstance as unknown as { fit(): void }, 'fit');
+    watch!([], {} as ResizeObserver);
+    expect(fit).toHaveBeenCalled();
   });
 });
