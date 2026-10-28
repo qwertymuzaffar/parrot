@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { appConfig } from '../app.config';
 import { DemoEngine } from './demo-engine';
-import { Engine, EngineError, TALK_CANCELLED } from './engine';
+import { Engine, EngineError, TALK_CANCELLED, TALK_GONE } from './engine';
 import { partKey, sentences } from './split';
 
 describe('DemoEngine', () => {
@@ -104,7 +104,7 @@ describe('DemoEngine', () => {
 
   it('cancels writing down a talk, keeping it, and discards it', async () => {
     const engine = new DemoEngine();
-    await expect(engine.talkStop(() => {})).rejects.toThrow('there is no talk');
+    await expect(engine.talkStop(() => {})).rejects.toThrow(TALK_GONE);
     await engine.talkStart(8000);
     await expect(engine.talkStop(() => {})).rejects.toThrow('Nothing was heard');
     await engine.talkFeed(new Int16Array(800));
@@ -113,7 +113,7 @@ describe('DemoEngine', () => {
     await expect(stopping).rejects.toThrow(TALK_CANCELLED);
     expect((await engine.talkStop(() => {})).heard).toContain('Berlin');
     await engine.talkDiscard();
-    await expect(engine.talkStop(() => {})).rejects.toThrow('there is no talk');
+    await expect(engine.talkStop(() => {})).rejects.toThrow(TALK_GONE);
     await expect(engine.talkFeed(new Int16Array(1))).rejects.toThrow('no talk is being recorded');
   });
 

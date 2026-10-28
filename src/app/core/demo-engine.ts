@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { wav } from './clips';
-import { Engine, EngineError, EngineInfo, TALK_CANCELLED } from './engine';
+import { Engine, EngineError, EngineInfo, TALK_CANCELLED, TALK_GONE } from './engine';
 import {
   Activity,
   Attempt,
@@ -329,7 +329,7 @@ export class DemoEngine extends Engine {
   /** Writes down the same few sentences whatever was said, a quarter of the talk every quarter second. */
   async talkStop(onProgress: (progress: TalkProgress) => void): Promise<Talk> {
     const talk = this.talk;
-    if (!talk) throw new EngineError('there is no talk to write down');
+    if (!talk) throw new EngineError(TALK_GONE);
     if (!talk.samples) throw new EngineError('Nothing was heard in the recording. Is the microphone on?');
     this.cancelled = false;
     const total = Math.round((talk.samples / talk.rate) * 100) / 100;
