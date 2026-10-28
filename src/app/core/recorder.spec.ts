@@ -63,6 +63,30 @@ describe('Recorder', () => {
     expect(made).toEqual([{ sampleRate: 48000 }, { sampleRate: 48000 }, undefined]);
   });
 
+  it('says a take is getting ready from the click until it records, or until it gives up', async () => {
+    const mic = microphone();
+    const started = mic.start('part');
+    // the microphone still opening
+    expect([mic.recorder.preparing(), mic.recorder.recording()]).toEqual([true, false]);
+    await vi.advanceTimersByTimeAsync(0);
+    mic.settled();
+    await vi.advanceTimersByTimeAsync(0);
+    // settled, and waiting for its first sound
+    expect([mic.recorder.preparing(), mic.recorder.recording()]).toEqual([true, false]);
+    mic.sound();
+    await started;
+    expect([mic.recorder.preparing(), mic.recorder.recording()]).toEqual([false, true]);
+    const stopping = mic.recorder.stop();
+    await vi.advanceTimersByTimeAsync(300);
+    await stopping;
+    // no sound comes through
+    const silent = mic.start('part');
+    expect(mic.recorder.preparing()).toBe(true);
+    await vi.advanceTimersByTimeAsync(3100);
+    await expect(silent).rejects.toThrow('no sound came through');
+    expect([mic.recorder.preparing(), mic.recorder.owner()]).toEqual([false, null]);
+  });
+
   it('a take stopped while the microphone is still preparing gives up quietly and keeps the microphone', async () => {
     const mic = microphone();
     const started = mic.start('word');
