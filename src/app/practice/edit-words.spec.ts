@@ -76,6 +76,15 @@ describe('editing the words of a text', () => {
     expect(dialog.open).toBe(false);
   });
 
+  it('opens with the cursor in the words, and closes on Esc while nothing is being saved', async () => {
+    const { textarea, dialog } = await editor();
+    // showModal focuses the first element marked autofocus (jsdom has no showModal of its own to do it)
+    expect(dialog.querySelector('[autofocus]')).toBe(textarea);
+    const escape = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+  });
+
   it('says why the words could not be changed, and keeps them to try again', async () => {
     library.editText.mockRejectedValue(new EngineError('the speech engine is not running'));
     const { fixture, element, textarea, save, dialog } = await editor();
