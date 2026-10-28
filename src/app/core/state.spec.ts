@@ -993,6 +993,20 @@ describe('the practice state', () => {
       expect([sound.log.length, app.nowMine()]).toEqual([2, 2]);
     });
 
+    it('spells out an abbreviation for the voice, still lighting the word as written, and says a lone I as a word', () => {
+      const playback = TestBed.inject(Playback);
+      void playback.playReference('so I asked the GSA product owner');
+      expect(sound.log).toEqual(['speak "so I asked the G S A product owner" at 1']);
+      // the voice reaches the S of "G S A": the word lit is GSA, the fifth as written
+      sound.onWord?.(17);
+      expect(playback.nowRef()).toBe(4);
+      sound.onWord?.(21);
+      expect(playback.nowRef()).toBe(5);
+      playback.sayWord('I');
+      playback.sayWord('GSA,');
+      expect(sound.log.slice(1)).toEqual(['speak "I." at 0.85', 'speak "G S A" at 0.85']);
+    });
+
     it('says a word alone, slower on request, without its punctuation', () => {
       app.sayWord(2);
       app.sayWord(2, true);
