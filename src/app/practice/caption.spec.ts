@@ -41,7 +41,7 @@ function shownSession() {
     loading: signal(false),
     recording: signal(false),
     error: signal<string | null>(null),
-    selected: signal(null),
+    selected: signal<number | null>(null),
     peaks: signal(null),
     bars: 92,
   };
@@ -111,6 +111,24 @@ describe('the caption under the part', () => {
     session.error.set('Nothing was heard in the recording. Is the microphone on?');
     await fixture.whenStable();
     expect(caption()).toBe('Nothing was heard in the recording. Is the microphone on?');
+    expect([!!document.querySelector('.card.score'), document.querySelector('.heard-line')?.textContent]).toEqual([
+      true,
+      'HeardHow are you?',
+    ]);
+  });
+
+  it('shows nothing of the try before while a new take is scored', async () => {
+    const fixture = await render();
+    session.selected.set(1);
+    session.checking.set(true);
+    await fixture.whenStable();
+    expect(caption()).toBe('Listening to your take…');
+    const cards = [...document.querySelectorAll('.cards > *')].map((card) => card.className.replace(/ng-\S+/g, '').trim());
+    expect([cards, document.querySelector('.heard-line'), document.querySelector('.w.sel')]).toEqual([
+      ['card hint-card listening', 'keys'],
+      null,
+      null,
+    ]);
   });
 
   // not the caption, but the screen as it renders here: the dock under it

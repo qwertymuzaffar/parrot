@@ -30,6 +30,9 @@ pub const STRETCH: f64 = 25.0;
 const LIVE_STRETCH: f64 = 12.0;
 
 pub const CANCELLED: &str = "the writing-down was cancelled";
+/// There is no talk to write down, or its recording has gone from talks/: writing it down again would say the same,
+/// so the interface lets it go.
+pub const GONE: &str = "the talk's recording is no longer there";
 const DISCARDED: &str = "the talk was discarded while it was being written down";
 const NO_WORDS: &str = "Parrot couldn't make out any words. Speak a little closer to the microphone, and try again.";
 
@@ -370,7 +373,7 @@ impl Talks {
             self.heard.wait_while(current, |current| current.as_ref().is_some_and(|talk| talk.live.busy)).unwrap_or_else(PoisonError::into_inner);
         // the lock is let go while waiting: a talk discarded meanwhile (or another started) is not this one's to write
         let talk = current.as_mut().filter(|talk| Some(talk.generation) == generation);
-        let talk = talk.ok_or(if generation.is_some() { DISCARDED } else { "there is no talk to write down" })?;
+        let talk = talk.ok_or(if generation.is_some() { DISCARDED } else { GONE })?;
         if let Some(writer) = talk.writer.take() {
             writer.finalize().map_err(|error| error.to_string())?;
         }
@@ -381,7 +384,8 @@ impl Talks {
         }
         let live = std::mem::take(&mut talk.live);
         let mut trim = None;
-        let pcm = audio::read_wav_file(&talk.path)?;
+        // a recording removed since (by hand, or by something tidying up) can't be read now or ever
+        let pcm = audio::read_wav_file(&talk.path).map_err(|error| if talk.path.exists() { error } else { GONE.into() })?;
         let pcm = if talk.cleaned {
             pcm
         } else {
@@ -1250,6 +1254,27 @@ mod tests {
         talks.discard().unwrap();
         assert!(talks.left().is_none());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_talk_left_whose_recording_has_gone_says_so() {
+        let (talks, dir) = talks("gone");
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 5.0)).unwrap();
+        quit(talks);
+        let talks = Talks::open(dir.clone());
+        assert!(talks.left().is_some());
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|extension| extension == "wav") {
+                fs::remove_file(path).unwrap();
+            }
+        }
+        let listener = Stretches { heard: "hello there", lengths: RefCell::new(vec![]) };
+        assert_eq!(talks.write_down(&listener, |_, _| {}).unwrap_err(), GONE);
+        talks.discard().unwrap();
+        assert_eq!(talks.write_down(&listener, |_, _| {}).unwrap_err(), GONE, "no talk at all");
         let _ = fs::remove_dir_all(dir);
     }
 

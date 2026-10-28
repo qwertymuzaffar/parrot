@@ -28,6 +28,12 @@ import { Waveform } from './waveform';
 import { EditWords } from './edit-words';
 import { WordCard } from './word-card';
 
+/** Keys typed into a field are the field's: a box to tick or a button keeps the shortcuts, as any other control does. */
+function typing(el: HTMLElement) {
+  if (el.tagName === 'INPUT') return !['checkbox', 'button', 'submit', 'reset'].includes((el as HTMLInputElement).type);
+  return el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
+}
+
 @Component({
   selector: 'app-practice',
   imports: [EditWords, Icon, ScoreRing, Sidebar, TriesChart, Waveform, WordCard],
@@ -62,8 +68,10 @@ export class Practice {
 
   /** a take of the part is being recorded (a word said alone is recorded in its card) */
   protected readonly recording = this.session.recording;
-  /** the try shown, unless a new one is being recorded */
-  protected readonly result = computed(() => (this.recording() ? null : this.session.result()));
+  /** a new take of the part is being recorded or scored: the try before it is not what the screen is about */
+  protected readonly newTake = computed(() => this.recording() || this.session.checking());
+  /** the try shown, unless a new one is being recorded or scored (one that fails to score leaves the try before) */
+  protected readonly result = computed(() => (this.newTake() ? null : this.session.result()));
   /** a take being recorded or checked: the words can't be edited until it is filed (EditWords waits for it too) */
   protected readonly taking = computed(() => !!this.recorder.owner() || this.session.checkingText() || this.words.checking());
   protected readonly counts = computed(() => {
@@ -229,9 +237,9 @@ export class Practice {
     // a control that took the key for itself (the texts column's edge takes the arrows) keeps it
     if (event.defaultPrevented) return;
     const el = event.target as HTMLElement;
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || event.metaKey || event.ctrlKey || event.altKey) return;
-    // Space presses the button that has focus, as everywhere else: it means Listen only away from the controls
-    if (event.key === ' ' && el.closest?.('button, a[href], [role="button"]')) return;
+    if (typing(el) || event.metaKey || event.ctrlKey || event.altKey) return;
+    // Space presses the button or ticks the box that has focus, as everywhere else: it means Listen only away from the controls
+    if (event.key === ' ' && el.closest?.('button, a[href], [role="button"], input')) return;
     if (document.querySelector('dialog[open]')) return;
     const action = this.shortcuts[event.key];
     if (!action) return;
