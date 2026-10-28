@@ -36,12 +36,14 @@ const SAID_AS_WORDS = new Set([
 
 /** a word of two to four capitals, maybe with a plural or possessive s, in whatever punctuation surrounds it */
 const ABBREVIATION = /^([("“‘']*)([A-Z]{2,4})(s|'s|’s)?([.,;:!?)"”’']*)$/;
+/** a number in Roman numerals ("World War II", "Henry VIII"): the voice reads it as the number, spelled it would not */
+const ROMAN = /^[IVX]+$/;
 
 /** An abbreviation in capitals spelled out with spaces ("GSA" → "G S A", "APIs" → "A P I's"), so that a voice that
  * doesn't know it says its letters rather than reading it as a word. Any other word is left as it is. */
 function spelled(word: string) {
   const match = ABBREVIATION.exec(word);
-  if (!match || SAID_AS_WORDS.has(match[2])) return word;
+  if (!match || SAID_AS_WORDS.has(match[2]) || ROMAN.test(match[2])) return word;
   const [, before, letters, s, after] = match;
   return before + letters.split('').join(' ') + (s ? "'s" : '') + after;
 }

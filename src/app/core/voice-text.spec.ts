@@ -13,6 +13,12 @@ describe('the text the voice is given', () => {
     expect(forVoice('I use iOS and SaaS at UNICEF').spoken).toBe('I use iOS and SaaS at UNICEF');
   });
 
+  it('leaves a number in Roman numerals for the voice to read as the number', () => {
+    expect(forVoice('After World War II, Henry VIII and chapter IV of the CV').spoken).toBe(
+      'After World War II, Henry VIII and chapter IV of the C V',
+    );
+  });
+
   it('leaves a text written all in capitals as it is', () => {
     expect(forVoice('STOP THE CAR NOW').spoken).toBe('STOP THE CAR NOW');
   });
