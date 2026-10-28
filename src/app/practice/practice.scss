@@ -518,12 +518,20 @@ header {
 
 // ---- right column
 
+// the room for the window buttons stays outside the scroll box: the cards scroll under the strip's line, not up over it
 .right {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: calc(18px + var(--titlebar)) 18px 14px 0;
+  padding-top: var(--titlebar);
   min-height: 0;
+}
+.cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 14px 0;
   overflow: auto;
 }
 
