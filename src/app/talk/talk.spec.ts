@@ -81,6 +81,9 @@ describe('Just talk', () => {
     stop: vi.fn(),
   };
 
+  /** marking a name that fails leaves the list as it was, as this one always does */
+  const names = { has: (each: string) => ['Alex', 'here'].includes(each), set: vi.fn() };
+
   beforeEach(() => {
     vi.clearAllMocks();
     talking = standIn();
@@ -89,7 +92,7 @@ describe('Just talk', () => {
         { provide: Talking, useValue: talking },
         { provide: Recorder, useValue: recorder },
         { provide: Playback, useValue: playback },
-        { provide: Names, useValue: { has: (each: string) => ['Alex', 'here'].includes(each), set: vi.fn() } },
+        { provide: Names, useValue: names },
         { provide: Engine, useValue: {} },
       ],
     });
@@ -341,6 +344,17 @@ describe('Just talk', () => {
       expect(playback.compareWord.mock.calls[0].slice(1)).toEqual([3, 'three']);
       // played back from the talk's own recording
       expect(playback.compareWord.mock.calls[0][0].audio).toBe('talks/20261021-100000.wav');
+    });
+
+    it('unticks "A name" again when the word could not be marked', async () => {
+      const preview = await render(TalkPreview);
+      preview.element.querySelectorAll<HTMLButtonElement>('.words .w')[3].click();
+      await preview.update();
+      const box = preview.element.querySelector<HTMLInputElement>('.word .name input')!;
+      box.click();
+      await preview.update();
+      expect(names.set).toHaveBeenCalledWith('three', true);
+      expect(box.checked).toBe(false);
     });
 
     it('keeps what was said, as corrected, with its title', async () => {

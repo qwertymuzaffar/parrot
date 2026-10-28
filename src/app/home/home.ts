@@ -17,6 +17,7 @@ import { sentences, shortRanges, splitKnown, splitText } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
+import { HomeState } from './home-state';
 import { TalkCard } from '../talk/talk-card';
 import { Logo } from '../shared/logo';
 import { ringDash } from '../shared/ring';
@@ -47,9 +48,11 @@ export class Home {
   protected Math = Math;
 
   protected query = signal('');
-  protected draft = signal('');
-  protected draftTitle = signal('');
-  protected draftMode = signal<Mode>('sentences');
+  /** the text being written, kept when Home goes (a text opened, a talk checked) and back with it */
+  private kept = inject(HomeState);
+  protected draft = this.kept.draft;
+  protected draftTitle = this.kept.draftTitle;
+  protected draftMode = this.kept.draftMode;
   /** the draft is with the engine, being added */
   protected adding = signal(false);
   protected renaming = signal<string | null>(null);
@@ -58,6 +61,7 @@ export class Home {
    * vanish from under the practice screen */
   protected deleting = signal<ReadonlySet<string>>(new Set());
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
+  private textsColumn = viewChild.required<ElementRef<HTMLElement>>('textsColumn');
 
   protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
   /** how many parts each way of practising would give the draft */
@@ -120,6 +124,15 @@ export class Home {
   });
 
   protected readonly practisedParts = computed(() => this.library.texts().reduce((total, text) => total + text.practised, 0));
+
+  constructor() {
+    // back on Home, the texts are scrolled to where they were left (their cards are there from the first frame)
+    afterNextRender(() => {
+      const column = this.textsColumn().nativeElement;
+      column.scrollTop = this.kept.scroll;
+      column.addEventListener('scroll', () => (this.kept.scroll = column.scrollTop), { passive: true });
+    });
+  }
 
   protected ring(card: Card) {
     const total = card.parts.length || 1;

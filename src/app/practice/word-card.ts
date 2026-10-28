@@ -87,7 +87,7 @@ import { SoundUnits } from './sound-units';
     }
 
     <label class="name">
-      <input type="checkbox" [checked]="isName()" (change)="markName($any($event.target).checked)" />
+      <input type="checkbox" [checked]="isName()" (change)="markName($any($event.target))" />
       <span><b>A name</b>: never counted as misheard, in any text{{ isName() ? ', from your next reading on' : '' }}</span>
     </label>
     @if (names.error(); as error) {
@@ -467,8 +467,10 @@ export class WordCard {
 
   protected readonly isName = computed(() => this.names.has(this.raw()));
 
-  protected markName(name: boolean) {
-    void this.names.set(this.raw(), name);
+  protected async markName(box: HTMLInputElement) {
+    await this.names.set(this.raw(), box.checked);
+    // a mark that failed leaves the list as it was, so the binding has nothing new to show: the box is put back by hand
+    box.checked = this.isName();
   }
 
   protected sayWord(slow = false) {

@@ -24,9 +24,11 @@ export const STUCK_MS = 15_000;
           Fix a word, or add or remove some. The tries of each part you change are scored again from their recordings, against its words
           now; the other parts keep theirs as they are.
         </p>
+        <!-- the words are what the dialog is for: it opens with the cursor in them, not on Close -->
         <textarea
           class="field"
           aria-label="The text"
+          autofocus
           [value]="words()"
           [disabled]="busy()"
           (input)="words.set($any($event.target).value)"
