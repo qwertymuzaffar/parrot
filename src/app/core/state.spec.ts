@@ -1450,6 +1450,13 @@ describe('the practice state', () => {
 
       /** A new run of Parrot with `leftTalk` left from the one before: the talk flow asks the engine as it starts. */
       async function startWith(leftTalk: LeftTalk) {
+        const fresh = runWith(leftTalk);
+        await settle();
+        return fresh;
+      }
+
+      /** the same, before the engine has answered */
+      function runWith(leftTalk: LeftTalk) {
         engine.left = leftTalk;
         engine.talk = { rate: 16000, samples: 180 * 16000, written: !!leftTalk.heard };
         TestBed.resetTestingModule();
@@ -1461,10 +1468,15 @@ describe('the practice state', () => {
             { provide: Recorder, useValue: recorder },
           ],
         });
-        const fresh = TestBed.inject(Talking);
-        await settle();
-        return fresh;
+        return TestBed.inject(Talking);
       }
+
+      it('is known once the engine has answered, for the first screen to wait on', async () => {
+        const fresh = runWith(left(null));
+        expect(fresh.unfinished()).toBeNull();
+        await fresh.asked;
+        expect(fresh.unfinished()).toEqual(left(null));
+      });
 
       it('is offered, waits for Start talking, and is written down', async () => {
         const fresh = await startWith(left(null));

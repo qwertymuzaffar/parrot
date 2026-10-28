@@ -70,6 +70,9 @@ export class Talking {
   /** the prompt the talk was about, as it started: the title of the text it becomes. A talk left from an earlier run
    * has none, as that run's prompt isn't known. */
   readonly about = signal<string | null>(null);
+  /** settles once the engine has said whether a talk was left from the last run, answered or not: the first screen
+   * waits for it, so the card doesn't offer a new talk and then swap it for the one left */
+  readonly asked: Promise<void>;
 
   readonly preparing = computed(() => this.recorder.preparing() && this.recorder.owner() === 'free');
   readonly recording = computed(() => this.recorder.recording() && this.recorder.owner() === 'free');
@@ -92,8 +95,10 @@ export class Talking {
     this.session.whenOpening(() => this.away());
     this.anotherPrompt();
     // asked once, at the start: a talk can only be left by an earlier run
-    this.engine.talkLeft().then(
-      (left) => this.state() === 'idle' && this.unfinished.set(left),
+    this.asked = this.engine.talkLeft().then(
+      (left) => {
+        if (this.state() === 'idle') this.unfinished.set(left);
+      },
       () => {},
     );
   }
