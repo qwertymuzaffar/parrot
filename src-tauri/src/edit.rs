@@ -16,7 +16,7 @@ use std::path::PathBuf;
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
     let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
-    let new = store::norm(new_text);
+    let new = store::clean(new_text);
     if new.is_empty() {
         return Err("the text is empty".into());
     }
@@ -38,62 +38,86 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     let mode = store.text(id)?.mode;
     let modes: Vec<&str> = std::iter::once(mode.as_str()).chain(text::MODES).collect();
 
-    // the parts tried that are no longer parts of the text: their tries, and the part they became
-    let mut changed: Vec<(PathBuf, Vec<Attempt>, String)> = vec![];
-    for entry in fs::read_dir(&dir).map_err(crate::disk::said)?.flatten() {
-        let path = entry.path();
-        if !entry.file_name().to_string_lossy().starts_with("p-") || !path.is_dir() {
-            continue;
+    // the parts tried that are no longer parts of the text: their tries not in `seen`, and the part they became
+    let moving = |seen: &[(PathBuf, String)]| -> Result<Vec<(PathBuf, Vec<Attempt>, String)>, String> {
+        let mut changed = vec![];
+        for entry in fs::read_dir(&dir).map_err(crate::disk::said)?.flatten() {
+            let path = entry.path();
+            if !entry.file_name().to_string_lossy().starts_with("p-") || !path.is_dir() {
+                continue;
+            }
+            let all = Store::read_attempts(&path);
+            let Some(first) = all.first() else { continue };
+            let part = store::norm(&first.text);
+            let tries: Vec<Attempt> = all.iter().filter(|attempt| !seen.iter().any(|(dir, id)| *dir == path && *id == attempt.id)).cloned().collect();
+            if tries.is_empty() {
+                continue;
+            }
+            let part_words: Vec<&str> = part.split_whitespace().collect();
+            let Some(start) = find(&old_words, &part_words) else { continue };
+            let range = start..start + part_words.len();
+            // practised whole, in sentences or in short parts: the part becomes one of the same in the new text
+            let kind = modes.iter().copied().find(|mode| text::parts(&old_words, mode).contains(&range)).unwrap_or(&mode);
+            let new_parts = text::parts(&new_words, kind);
+            if new_parts.iter().any(|part| new_words[part.clone()] == part_words[..]) {
+                continue;
+            }
+            let now = map_range(&ops, range);
+            // the part of the new text its words went to, most of them: a full stop taken out joins two sentences into
+            // one, which takes the tries of both; one put in splits a sentence, whose tries go with its larger half.
+            // A part whose words are all gone keeps its tries where they were.
+            let overlap = |part: &std::ops::Range<usize>| part.end.min(now.end).saturating_sub(part.start.max(now.start));
+            let Some(became) = new_parts.iter().filter(|part| overlap(part) > 0).min_by_key(|part| std::cmp::Reverse(overlap(part))) else {
+                continue;
+            };
+            changed.push((path, tries, new_words[became.clone()].join(" ")));
         }
-        let tries = Store::read_attempts(&path);
-        let Some(first) = tries.first() else { continue };
-        let part = store::norm(&first.text);
-        let part_words: Vec<&str> = part.split_whitespace().collect();
-        let Some(start) = find(&old_words, &part_words) else { continue };
-        let range = start..start + part_words.len();
-        // practised whole, in sentences or in short parts: the part becomes one of the same in the new text
-        let kind = modes.iter().copied().find(|mode| text::parts(&old_words, mode).contains(&range)).unwrap_or(&mode);
-        let new_parts = text::parts(&new_words, kind);
-        if new_parts.iter().any(|part| new_words[part.clone()] == part_words[..]) {
-            continue;
-        }
-        let now = map_range(&ops, range);
-        // the part of the new text its words went to, most of them: a full stop taken out joins two sentences into
-        // one, which takes the tries of both; one put in splits a sentence, whose tries go with its larger half.
-        // A part whose words are all gone keeps its tries where they were.
-        let overlap = |part: &std::ops::Range<usize>| part.end.min(now.end).saturating_sub(part.start.max(now.start));
-        let Some(became) = new_parts.iter().filter(|part| overlap(part) > 0).min_by_key(|part| std::cmp::Reverse(overlap(part))) else { continue };
-        changed.push((path, tries, new_words[became.clone()].join(" ")));
-    }
+        Ok(changed)
+    };
 
-    let total = changed.iter().map(|(_, tries, _)| tries.len()).sum();
+    let changed = moving(&[])?;
+    let mut total = changed.iter().map(|(_, tries, _)| tries.len()).sum();
     progress(0, total);
     let names = store.names();
     let mut scored = vec![];
     let mut done = 0;
-    for (old_dir, tries, part) in &changed {
-        for attempt in tries {
-            match rejudge(listener, store, attempt, part, &names)? {
-                Some(rejudged) => scored.push((old_dir, attempt, part, rejudged)),
-                None => log::warn!("kept try {} of {} where it was: its recording can't be read", attempt.id, old_dir.display()),
+    let mut rescore = |changed: Vec<(PathBuf, Vec<Attempt>, String)>, total: usize| -> Result<(), String> {
+        for (old_dir, tries, part) in changed {
+            for attempt in tries {
+                match rejudge(listener, store, &attempt, &part, &names)? {
+                    Some(rejudged) => scored.push((old_dir.clone(), attempt, part.clone(), rejudged)),
+                    None => log::warn!("kept try {} of {} where it was: its recording can't be read", attempt.id, old_dir.display()),
+                }
+                done += 1;
+                progress(done, total);
             }
-            done += 1;
-            progress(done, total);
         }
+        Ok(())
+    };
+    let seen: Vec<(PathBuf, String)> =
+        changed.iter().flat_map(|(dir, tries, _)| tries.iter().map(move |attempt| (dir.clone(), attempt.id.clone()))).collect();
+    rescore(changed, total)?;
+
+    // a take kept while the tries were scored (the user gave up waiting for the edit, and practised on) is in the
+    // folder of its part's words as they were: it is scored now too, and moves with the rest
+    let _filing = store::filing();
+    let late = moving(&seen)?;
+    if !late.is_empty() {
+        total += late.iter().map(|(_, tries, _)| tries.len()).sum::<usize>();
+        rescore(late, total)?;
     }
 
     // all scored: each try is filed under its part's words now (its recording linked there), then the text changes,
     // and only then do the tries as they were go. A failure on the way takes back what was filed, leaving the text
     // as it was; a crash leaves at worst a try twice, once where the text doesn't look, and the same edit made again
     // files the try over that copy rather than beside it.
-    let _filing = store::filing();
     let mut filed: Vec<PathBuf> = vec![];
     let mut moved: Vec<PathBuf> = vec![];
     // the tries in each part's new folder before this edit filed any there
     let mut there: HashMap<PathBuf, Vec<Attempt>> = HashMap::new();
     let filing = (|| {
         for (old_dir, old_attempt, part, mut attempt) in scored {
-            let new_dir = dir.join(format!("p-{}", store::sha(part)));
+            let new_dir = dir.join(format!("p-{}", store::sha(&part)));
             fs::create_dir_all(&new_dir).map_err(crate::disk::said)?;
             let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
             // the copy an edit cut short by a quit left of this try: the same try recorded at the same moment, as long
@@ -271,42 +295,74 @@ mod tests {
         fs::create_dir_all(store.data.join("texts")).unwrap();
         let id = store.add(text, Some("A text".into()), Some("sentences".into())).unwrap().id;
         for part in parts {
-            let dir = store.part_dir(&id, part).unwrap();
-            fs::create_dir_all(&dir).unwrap();
-            let try_id = Store::new_try(&dir, "20261020-101010").unwrap();
-            let file = dir.join(format!("{try_id}.wav"));
-            let tone: Vec<f32> = (0..32000).map(|index| 0.3 * (index as f32 * 0.09).sin()).collect();
-            audio::write_wav(&file, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
-            let words: Vec<WordResult> = part
-                .split_whitespace()
-                .enumerate()
-                .map(|(index, word)| WordResult {
-                    w: word.into(),
-                    t: Some([index as f64 * 0.4, index as f64 * 0.4 + 0.3]),
-                    score: Some(0.5),
-                    reference: None,
-                    status: WordStatus::Unclear,
-                    heard: None,
-                    extra: String::new(),
-                    letters: None,
-                })
-                .collect();
-            let attempt = Attempt {
-                id: try_id,
-                when: "2026-10-20T10:10:10".into(),
-                text: part.to_string(),
-                heard: part.to_string(),
-                words,
-                duration: 2.0,
-                wpm: 90,
-                score: 0,
-                audio: file.strip_prefix(&store.data).unwrap().to_string_lossy().into(),
-                pauses: vec![],
-                cut: None,
-            };
-            store.save_attempt(&dir, &attempt).unwrap();
+            add_try(&store, &id, part, "20261020-101010", "2026-10-20T10:10:10");
         }
         (store, id)
+    }
+
+    /// A try of `part` of the text `id`, two seconds of tone, recorded at `stamp` (`when`).
+    fn add_try(store: &Store, id: &str, part: &str, stamp: &str, when: &str) {
+        let dir = store.part_dir(id, part).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        let try_id = Store::new_try(&dir, stamp).unwrap();
+        let file = dir.join(format!("{try_id}.wav"));
+        let tone: Vec<f32> = (0..32000).map(|index| 0.3 * (index as f32 * 0.09).sin()).collect();
+        audio::write_wav(&file, &audio::Pcm { samples: tone, rate: 16000 }).unwrap();
+        let words: Vec<WordResult> = part
+            .split_whitespace()
+            .enumerate()
+            .map(|(index, word)| WordResult {
+                w: word.into(),
+                t: Some([index as f64 * 0.4, index as f64 * 0.4 + 0.3]),
+                score: Some(0.5),
+                reference: None,
+                status: WordStatus::Unclear,
+                heard: None,
+                extra: String::new(),
+                letters: None,
+            })
+            .collect();
+        let attempt = Attempt {
+            id: try_id,
+            when: when.into(),
+            text: part.to_string(),
+            heard: part.to_string(),
+            words,
+            duration: 2.0,
+            wpm: 90,
+            score: 0,
+            audio: file.strip_prefix(&store.data).unwrap().to_string_lossy().into(),
+            pauses: vec![],
+            cut: None,
+        };
+        store.save_attempt(&dir, &attempt).unwrap();
+    }
+
+    /// A listener that, as the edit first scores a try, lets a take be kept meanwhile (`take`): the user gave up
+    /// waiting for the edit and practised on.
+    struct TakeMeanwhile<'a> {
+        listener: Listener,
+        take: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
+    }
+
+    impl Listen for TakeMeanwhile<'_> {
+        fn align(&self, audio: &[f32], text: &str) -> Result<Vec<text::WordTime>, String> {
+            if let Some(take) = self.take.borrow_mut().take() {
+                take();
+            }
+            self.listener.align(audio, text)
+        }
+
+        fn transcribe(&self, audio: &[f32], words: &[text::WordTime]) -> Result<String, String> {
+            self.listener.transcribe(audio, words)
+        }
+    }
+
+    /// A take of `part` kept as keep_take keeps one: under the filing lock, in the folder of the part's words as the
+    /// text has them then.
+    fn keep_take(store: &Store, id: &str, part: &str) {
+        let _filing = store::filing();
+        add_try(store, id, part, "20261029-120000", "2026-10-29T12:00:00");
     }
 
     #[test]
@@ -366,6 +422,40 @@ mod tests {
     }
 
     #[test]
+    fn a_take_kept_while_the_tries_are_scored_moves_with_its_part() {
+        let (store, id) = store_with("meanwhile", "Hello there. How are you?", &["Hello there.", "How are you?"]);
+        let listener = TakeMeanwhile {
+            listener: Listener { heard: "how old are you", fail: false, texts: RefCell::new(vec![]) },
+            take: RefCell::new(Some(Box::new(|| keep_take(&store, &id, "How are you?")))),
+        };
+        let reported = RefCell::new(vec![]);
+        let item =
+            edit_text(&listener, &store, &id, "Hello there. How old are you?", |done, total| reported.borrow_mut().push((done, total))).unwrap();
+        let tries = store.attempts(&id, "How old are you?").unwrap();
+        assert_eq!(tries.iter().map(|attempt| attempt.when.as_str()).collect::<Vec<_>>(), ["2026-10-29T12:00:00", "2026-10-20T10:10:10"]);
+        assert!(tries.iter().all(|attempt| attempt.score == 100), "both scored against the words the part has now");
+        assert_eq!(*reported.borrow(), [(0, 1), (1, 1), (2, 2)]);
+        assert_eq!(item.scores.values().map(|part| part.tries).sum::<usize>(), 3);
+        let old = store.text_dir(&id).unwrap().join(format!("p-{}", store::sha("How are you?")));
+        assert!(!old.exists(), "nothing left under the words the text no longer has");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_first_take_of_a_part_kept_while_the_tries_are_scored_moves_with_it() {
+        let (store, id) = store_with("first-meanwhile", "Hello there. How are you?", &["Hello there."]);
+        let listener = TakeMeanwhile {
+            listener: Listener { heard: "hi there how old are you", fail: false, texts: RefCell::new(vec![]) },
+            take: RefCell::new(Some(Box::new(|| keep_take(&store, &id, "How are you?")))),
+        };
+        edit_text(&listener, &store, &id, "Hi there. How old are you?", |_, _| {}).unwrap();
+        assert_eq!(store.attempts(&id, "Hi there.").unwrap().len(), 1);
+        assert_eq!(store.attempts(&id, "How old are you?").unwrap().len(), 1, "the part's first take is with it");
+        assert_eq!(store.text(&id).unwrap().practised, 2, "both parts practised");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
     fn a_text_cannot_lose_all_its_words() {
         let (store, id) = store_with("wordless", "Hello there. How are you?", &["Hello there."]);
         let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
@@ -389,6 +479,16 @@ mod tests {
             edit_text(&listener, &store, &id, "Hello there. How are you, Привет?", |_, _| {}).unwrap().text,
             "Hello there. How are you, Привет?"
         );
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_byte_order_mark_pasted_into_the_words_is_left_out() {
+        let (store, id) = store_with("mark", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
+        // the words pasted over from a file that begins with one: the same words, so nothing changes
+        assert_eq!(edit_text(&listener, &store, &id, "\u{FEFF}Hello there. How are you?", |_, _| {}).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
         let _ = fs::remove_dir_all(&store.data);
     }
 

@@ -63,17 +63,26 @@ pub fn open(url: &str) -> Result<(), String> {
         return Err("Parrot opens only its own pages".into());
     }
     #[cfg(target_os = "macos")]
-    let mut opener = std::process::Command::new("open");
+    let opener = std::process::Command::new("open");
     // rundll32 rather than `cmd /C start`, so no shell reads the address
     #[cfg(target_os = "windows")]
-    let mut opener = {
+    let opener = {
         let mut command = std::process::Command::new("rundll32");
         command.arg("url.dll,FileProtocolHandler");
         command
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let mut opener = std::process::Command::new("xdg-open");
-    opener.arg(url).spawn().map(|_| ()).map_err(|error| format!("Couldn't open the browser: {error}"))
+    let opener = std::process::Command::new("xdg-open");
+    launch(opener, url)
+}
+
+/// Hand `url` to `opener`. One that won't start is said plainly, with the address to go to by hand; the system's
+/// words are only for the log.
+fn launch(mut opener: std::process::Command, url: &str) -> Result<(), String> {
+    opener.arg(url).spawn().map(|_| ()).map_err(|error| {
+        log::warn!("could not open {url} in the browser: {error}");
+        format!("Parrot couldn't open your browser; the page is at {url}")
+    })
 }
 
 #[cfg(test)]
@@ -100,6 +109,13 @@ mod tests {
     fn says_so_when_the_answer_is_not_a_release() {
         assert!(release(br#"{"message": "Not Found"}"#).is_err());
         assert!(release(b"<html>").is_err());
+    }
+
+    #[test]
+    fn a_browser_that_will_not_start_is_said_plainly() {
+        let url = "https://github.com/qwertymuzaffar/parrot/releases/tag/v0.6.0";
+        let said = launch(std::process::Command::new("parrot-no-such-browser"), url).unwrap_err();
+        assert_eq!(said, format!("Parrot couldn't open your browser; the page is at {url}"));
     }
 
     /// Asks GitHub for real: cargo test --lib -- --ignored asks_github

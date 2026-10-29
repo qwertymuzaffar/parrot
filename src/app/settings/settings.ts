@@ -86,6 +86,9 @@ const MB = 1_000_000;
                 Asks GitHub for the latest version, only when you click.
               }
             </p>
+            @if (unopened(); as unopened) {
+              <p class="bad" role="alert">{{ unopened }}</p>
+            }
           } @else if (!version.isLoading()) {
             <p class="hint">A development build: there is no version to check.</p>
           }
@@ -132,17 +135,19 @@ const MB = 1_000_000;
             @if (trash.status() !== 'loading') {
               @let bytes = trashBytes();
               @if (bytes != null) {
-                <p class="hint" tabindex="-1" #trashLine>A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+                <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
               }
               <div class="acts" #trashActs>
                 @if (emptying() && bytes) {
-                  <span class="ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
-                  <button class="btn ghost small" (click)="askEmpty(false)" #keepTrash>Keep</button>
-                  <button class="btn danger small" (click)="emptyTrash()">Empty</button>
+                  <span class="ask" id="trash-ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
+                  <!-- described by the question, so a screen reader landing on either one reads it too -->
+                  <button class="btn ghost small" (click)="askEmpty(false)" aria-describedby="trash-ask" #keepTrash>Keep</button>
+                  <button class="btn danger small" (click)="emptyTrash()" aria-describedby="trash-ask">Empty</button>
                 } @else {
                   <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
                   @if (bytes != null) {
-                    <button class="btn small" [disabled]="!bytes" (click)="askEmpty(true)" #trashButton>
+                    <!-- aria-disabled rather than disabled once empty, so focus can stay on it as it says so -->
+                    <button class="btn small" [attr.aria-disabled]="!bytes || null" (click)="bytes && askEmpty(true)" #trashButton>
                       <app-icon name="trash" [size]="15" />
                       {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
                     </button>
@@ -154,7 +159,7 @@ const MB = 1_000_000;
               }
             }
             @if (failure(); as failure) {
-              <p class="bad">{{ failure }}</p>
+              <p class="bad" role="alert">{{ failure }}</p>
             }
           </section>
         }
@@ -286,7 +291,6 @@ export class Settings {
   private namesHeading = viewChild.required<ElementRef<HTMLElement>>('namesHeading');
   private trashActs = viewChild<ElementRef<HTMLElement>>('trashActs');
   private trashButton = viewChild<ElementRef<HTMLButtonElement>>('trashButton');
-  private trashLine = viewChild<ElementRef<HTMLElement>>('trashLine');
   private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
@@ -301,14 +305,24 @@ export class Settings {
 
   /** Ask GitHub for the latest release: only ever on this click. */
   protected async checkForUpdates(current: string) {
+    this.unopened.set(null);
     this.update.set({ state: 'checking' });
     this.update.set(await this.updates.check(current));
   }
 
+  /** why the release's page didn't open in the browser, if it didn't */
+  protected unopened = signal<string | null>(null);
+
   /** The link opens in the system browser, not in the app. */
-  protected openRelease(event: MouseEvent) {
+  protected async openRelease(event: MouseEvent) {
     event.preventDefault();
-    this.updates.open((event.currentTarget as HTMLAnchorElement).href).catch(() => {});
+    const url = (event.currentTarget as HTMLAnchorElement).href;
+    try {
+      await this.updates.open(url);
+      this.unopened.set(null);
+    } catch (error) {
+      this.unopened.set(typeof error === 'string' ? error : `Parrot couldn't open your browser; the page is at ${url}`);
+    }
   }
   /** the bytes in the trash: only the desktop app has one */
   protected trash = resource({ loader: () => this.engine.trashSize() });
@@ -366,13 +380,9 @@ export class Settings {
     } catch (error) {
       this.failure.set(errorMessage(error));
     }
-    // emptied, its button can't be pressed (The trash is empty): focus goes to the line about the trash instead.
-    // Not emptied, Empty trash is there to try again
-    if (!hadFocus) return;
-    refocus(() => {
-      const button = this.trashButton()?.nativeElement;
-      return button && !button.disabled ? button : this.trashLine()?.nativeElement;
-    }, this.injector);
+    // focus goes back to the trash's button: emptied, it says so (The trash is empty), and not emptied, it is there to
+    // try again
+    if (hadFocus) refocus(() => this.trashButton()?.nativeElement, this.injector);
   }
 
   protected size(bytes: number) {
