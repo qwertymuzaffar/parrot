@@ -318,38 +318,37 @@ fn undotted(text: &str) -> String {
     out
 }
 
+/// Whether raw word `word`, with `next` after it ("" for none), goes on the run of number words `run` (or, with an
+/// empty run, begins one): it decides only from these, so a run is the same in the first words of a text as in all of
+/// it, up to its last word.
+fn joins(word: &str, next: &str, run: &[String]) -> bool {
+    numeric(word)
+        || (word == "a" && SCALES.contains_key(next) && run.is_empty())
+        || (word == "and" && !run.is_empty() && numeric(next))
+        || (word == "point" && !run.is_empty() && (UNITS.contains_key(next) || is_digits(next)))
+        || (word == "second" && run.last().is_some_and(|last| TENS.contains_key(last.as_str())))
+}
+
 /// The tokens of `words` (raw words): each run of number words or digits joined into one "#digits" token. Each
 /// token comes with the index of the word it starts at.
 fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
     let mut out = vec![];
     let mut word_index = 0;
     while word_index < words.len() {
-        let word = &words[word_index];
-        let nxt = words.get(word_index + 1).map(String::as_str).unwrap_or("");
-        let starts = numeric(word) || (word == "a" && SCALES.contains_key(nxt));
-        if !starts {
-            out.push((word_index, word.clone()));
-            word_index += 1;
-            continue;
-        }
         let start = word_index;
-        let mut run: Vec<String> = vec![];
         while word_index < words.len() {
-            let word = words[word_index].as_str();
-            let nxt = words.get(word_index + 1).map(String::as_str).unwrap_or("");
-            if numeric(word)
-                || (word == "a" && SCALES.contains_key(nxt) && run.is_empty())
-                || (word == "and" && !run.is_empty() && numeric(nxt))
-                || (word == "point" && !run.is_empty() && (UNITS.contains_key(nxt) || is_digits(nxt)))
-                || (word == "second" && run.last().is_some_and(|last| TENS.contains_key(last.as_str())))
-            {
-                run.push(word.to_string());
-                word_index += 1;
-            } else {
+            let next = words.get(word_index + 1).map(String::as_str).unwrap_or("");
+            if !joins(&words[word_index], next, &words[start..word_index]) {
                 break;
             }
+            word_index += 1;
         }
-        out.push((start, format!("#{}", compose(&run))));
+        if word_index == start {
+            out.push((start, words[start].clone()));
+            word_index += 1;
+        } else {
+            out.push((start, format!("#{}", compose(&words[start..word_index]))));
+        }
     }
     out
 }
@@ -357,8 +356,9 @@ fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
 /// Which word of `words` owns each token of them: numbers spelled over several words become one token ("nineteen
 /// fifty-nine"); a longer run of words can have fewer tokens ("two hundred and" is [#200, and], "two hundred and fifty"
 /// is [#250]), so the tokens a later word merges away are given back. The raw words are joined once, and for each
-/// word only the token or two at the end of the words so far are joined again, as they may join differently with
-/// nothing after them: tokenising every run of first words whole took 30 s at the end of a long talk.
+/// word only its last raw word is looked at again, as it may join differently with nothing after it: tokenising every
+/// run of first words whole took 30 s at the end of a long talk, and joining again the whole run of numbers the last
+/// word is in took 1.3 s in a run of 4,000.
 fn owners(words: &[&str]) -> Vec<usize> {
     let mut raw: Vec<String> = vec![];
     // how many raw words the first words have, up to each word
@@ -374,15 +374,29 @@ fn owners(words: &[&str]) -> Vec<usize> {
         let end = joined.get(token_index + 1).map_or(raw.len(), |&(next, _)| next);
         token_of[start..end].fill(token_index);
     }
+    // whether a token is a run of numbers, rather than a word on its own
+    let is_run = |token_index: usize| {
+        let start = joined[token_index].0;
+        joins(&raw[start], raw.get(start + 1).map_or("", String::as_str), &[])
+    };
     let mut owner: Vec<usize> = vec![];
     for (word_index, &raw_end) in raw_ends.iter().enumerate() {
-        // the tokens before the one the last raw word but one is in looked no further than the last raw word, as in
-        // the whole text, and stay as they are; from that one on they are joined again, the last with none after it
+        // up to the last raw word, the first words join as the whole text does (each raw word joins by itself, the
+        // one after it and the run before it); the last has nothing after it, so it may leave its run, or join the
+        // run before where in the whole text it began a token of its own
         let tokens_so_far = match raw_end {
             0 => 0,
             _ => {
-                let token_index = token_of[raw_end.saturating_sub(2)];
-                token_index + numbers_joined(&raw[joined[token_index].0..raw_end]).len()
+                let last = raw_end - 1;
+                let token_index = token_of[last];
+                let start = joined[token_index].0;
+                if start < last {
+                    token_index + if joins(&raw[last], "", &raw[start..last]) { 1 } else { 2 }
+                } else if token_index > 0 && is_run(token_index - 1) && joins(&raw[last], "", &raw[joined[token_index - 1].0..last]) {
+                    token_index
+                } else {
+                    token_index + 1
+                }
             }
         };
         owner.truncate(tokens_so_far);
@@ -947,10 +961,31 @@ mod tests {
             "twenty twenty twenty and twenty point five a",
             "— … 'twas NASA's two-thirds",
             "the 2nd and the twenty-second, twenty second, twenty seconds, a second",
+            // a run of numbers ending at a word that joins it only with a number, a unit or digits after it
+            "one two three and four and five and",
+            "one two three point five point",
+            "one two three point 5 then point six",
+            "twenty second twenty and second twenty-second and",
+            "a hundred a thousand and a a hundred and a",
+            "in 1990, 1991 and 1992, and then 1993 and",
         ] {
             let words: Vec<&str> = text.split_whitespace().collect();
             assert_eq!(owners(&words), by_prefix(&words), "{text}");
         }
+    }
+
+    #[test]
+    fn a_long_list_of_numbers_is_compared_with_what_was_heard_in_moments() {
+        // a list of years: commas don't end a run of numbers, so it is one token, which each word joined again whole
+        // (1.6 s in a release build for these 4,000)
+        let text = (0..4000).map(|index| format!("{},", 1900 + index % 100)).collect::<Vec<_>>().join(" ") + " and then";
+        let started = std::time::Instant::now();
+        let (wrong, extra) = heard_words(&text, &text);
+        assert!(started.elapsed().as_secs_f64() < 1.0, "{:?}", started.elapsed());
+        assert!(wrong.iter().all(Option::is_none) && extra.iter().all(String::is_empty));
+        let words: Vec<&str> = text.split_whitespace().collect();
+        // the run is owned by its first word; "and" and "then" by themselves
+        assert_eq!(owners(&words), [0, 4000, 4001]);
     }
 
     #[test]
