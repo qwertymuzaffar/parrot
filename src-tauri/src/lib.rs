@@ -376,6 +376,9 @@ async fn empty_trash(engine: State<'_, Shared>) -> Result<u64, String> {
     blocking(move || Ok(engine.store.empty_trash())).await
 }
 
+/// What the window says when the file manager won't start: Settings shows the data folder's path just above.
+const FOLDER_UNOPENED: &str = "Parrot couldn't open the data folder; it is at the path shown above";
+
 /// Show the data folder in the file manager. Only ever this folder, so the interface needs no permission to open paths.
 #[tauri::command]
 fn open_data_folder(engine: State<'_, Shared>) -> Result<(), String> {
@@ -386,8 +389,15 @@ fn open_data_folder(engine: State<'_, Shared>) -> Result<(), String> {
     } else {
         "xdg-open"
     };
-    let mut child =
-        std::process::Command::new(opener).arg(&engine.store.data).spawn().map_err(|error| format!("could not open the data folder: {error}"))?;
+    show_folder(opener, &engine.store.data)
+}
+
+/// Open `folder` with `opener`; the system's words, if it won't start, are only for the log.
+fn show_folder(opener: &str, folder: &Path) -> Result<(), String> {
+    let mut child = std::process::Command::new(opener).arg(folder).spawn().map_err(|error| {
+        log::warn!("could not open {} with {opener}: {error}", folder.display());
+        FOLDER_UNOPENED.to_string()
+    })?;
     // waited for elsewhere, so it doesn't linger as a zombie; explorer's exit code means nothing
     std::thread::spawn(move || child.wait());
     Ok(())
@@ -1127,6 +1137,11 @@ mod tests {
         let busy = Mutex::new(Some(2));
         let _held = busy.lock().unwrap();
         assert!(lock_unless_busy(&busy).is_none());
+    }
+
+    #[test]
+    fn a_file_manager_that_will_not_start_is_said_plainly() {
+        assert_eq!(show_folder("parrot-no-such-file-manager", Path::new("/tmp")), Err(FOLDER_UNOPENED.to_string()));
     }
 
     #[test]

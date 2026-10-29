@@ -86,6 +86,9 @@ const MB = 1_000_000;
                 Asks GitHub for the latest version, only when you click.
               }
             </p>
+            @if (unopened(); as unopened) {
+              <p class="bad" role="alert">{{ unopened }}</p>
+            }
           } @else if (!version.isLoading()) {
             <p class="hint">A development build: there is no version to check.</p>
           }
@@ -154,7 +157,7 @@ const MB = 1_000_000;
               }
             }
             @if (failure(); as failure) {
-              <p class="bad">{{ failure }}</p>
+              <p class="bad" role="alert">{{ failure }}</p>
             }
           </section>
         }
@@ -301,14 +304,24 @@ export class Settings {
 
   /** Ask GitHub for the latest release: only ever on this click. */
   protected async checkForUpdates(current: string) {
+    this.unopened.set(null);
     this.update.set({ state: 'checking' });
     this.update.set(await this.updates.check(current));
   }
 
+  /** why the release's page didn't open in the browser, if it didn't */
+  protected unopened = signal<string | null>(null);
+
   /** The link opens in the system browser, not in the app. */
-  protected openRelease(event: MouseEvent) {
+  protected async openRelease(event: MouseEvent) {
     event.preventDefault();
-    this.updates.open((event.currentTarget as HTMLAnchorElement).href).catch(() => {});
+    const url = (event.currentTarget as HTMLAnchorElement).href;
+    try {
+      await this.updates.open(url);
+      this.unopened.set(null);
+    } catch (error) {
+      this.unopened.set(typeof error === 'string' ? error : `Parrot couldn't open your browser; the page is at ${url}`);
+    }
   }
   /** the bytes in the trash: only the desktop app has one */
   protected trash = resource({ loader: () => this.engine.trashSize() });
