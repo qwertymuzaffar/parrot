@@ -633,6 +633,14 @@ describe('the practice state', () => {
       expect(app.index()).toBe(1);
     });
 
+    it('opens at the first part when the place it was left at is damaged', async () => {
+      for (const saved of ['abc', '-1', '1.5', '3']) {
+        localStorage.setItem(`parrot.part:${ID}:sentences`, saved);
+        await app.open(ID);
+        expect([saved, app.index(), app.words()]).toEqual([saved, 0, ['Hello', 'there.']]);
+      }
+    });
+
     it('shows the latest try of a part, its history and waveform', async () => {
       engine.tries['How are you?'] = [attempt('t1', 'How are you?', 60), attempt('t2', 'How are you?', 75, ['good', 'wrong', 'good'])];
       await app.open(ID, 1);
@@ -913,6 +921,27 @@ describe('the practice state', () => {
       engine.tries['How are you?'] = [attempt('t1', 'How are you?', 70, ['good', 'wrong', 'good'])];
       await app.open(ID, 1);
       await settle();
+    });
+
+    it('reads at the normal speed when the speed saved is damaged', async () => {
+      // the speed is read when Parrot starts
+      const started = (saved: string) => {
+        localStorage.setItem('parrot.rate', saved);
+        TestBed.resetTestingModule();
+        TestBed.configureTestingModule({
+          providers: [
+            { provide: Engine, useValue: engine },
+            { provide: Sound, useValue: sound },
+            { provide: Clips, useValue: new FakeClips() },
+          ],
+        });
+        return TestBed.inject(Playback);
+      };
+      for (const saved of ['abc', 'Infinity', '0', '5', '0.8']) expect([saved, started(saved).rate()]).toEqual([saved, 1]);
+      const playback = started('0.6');
+      expect(playback.rate()).toBe(0.6);
+      playback.playReference('How are you?');
+      expect(sound.log).toEqual(['speak "How are you?" at 0.6']);
     });
 
     it('reads the part at the chosen speed and lights up the word being spoken', async () => {

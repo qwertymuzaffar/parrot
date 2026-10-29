@@ -210,7 +210,8 @@ export class Session {
     }
     if (build !== this.builds) return;
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
-    if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
+    // a saved place that isn't one of the parts (damaged storage: 1.5, -1, abc) is the first part
+    if (!(Number.isInteger(partIndex) && partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     // the part's newest try comes with it (see goTo)
     const part = parts[partIndex];
     const tries = part && scores[part.key] ? await this.whileLoading(this.triesOf(text, part, () => build === this.builds)) : UNPRACTISED;

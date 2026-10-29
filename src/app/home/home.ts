@@ -90,14 +90,21 @@ export class Home {
     // a text split since is known now: its card is made
     this.splitting.status();
     return this.library.texts().flatMap((text): Card[] => {
-      const parts = splitKnown(text.text, text.mode);
-      if (!parts) return [];
-      // a cell per distinct part, as the practice screen counts them: the copies of a repeated sentence are one
-      const cells = distinctKeys(parts).map((key) => band(text.scores[key]?.last) || 'none');
-      const saved = Number(readSetting(`part:${text.id}:${text.mode}`, '0'));
-      const order = [...parts.keys()].map((partIndex) => (partIndex + saved) % parts.length);
-      const nextIndex = order.find((partIndex) => !text.scores[parts[partIndex].key]) ?? saved;
-      return [{ t: text, parts, cells, next: parts[nextIndex] ?? null, nextIndex }];
+      // one text that can't be shown leaves the others on Home, rather than none and "Nothing to practise yet"
+      try {
+        const parts = splitKnown(text.text, text.mode);
+        if (!parts) return [];
+        // a cell per distinct part, as the practice screen counts them: the copies of a repeated sentence are one
+        const cells = distinctKeys(parts).map((key) => band(text.scores[key]?.last) || 'none');
+        // the part it was left at, unless what was saved isn't one of its parts (damaged storage): the first
+        const kept = Number(readSetting(`part:${text.id}:${text.mode}`, '0'));
+        const saved = Number.isInteger(kept) && kept >= 0 && kept < parts.length ? kept : 0;
+        const order = [...parts.keys()].map((partIndex) => (partIndex + saved) % parts.length);
+        const nextIndex = order.find((partIndex) => !text.scores[parts[partIndex].key]) ?? saved;
+        return [{ t: text, parts, cells, next: parts[nextIndex] ?? null, nextIndex }];
+      } catch {
+        return [];
+      }
     });
   });
 
