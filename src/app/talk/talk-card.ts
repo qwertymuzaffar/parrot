@@ -193,7 +193,16 @@ export function length(seconds: number) {
             }
             <div class="go">
               <span class="hint">Up to {{ LONGEST_TALK / 60 }} minutes</span>
-              <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()" #lead>
+              <button
+                class="btn primary"
+                [disabled]="recorder.owner() != null"
+                (click)="talking.start()"
+                (pointerenter)="recorder.warm()"
+                (pointerleave)="recorder.cool()"
+                (focus)="recorder.warm()"
+                (blur)="recorder.cool()"
+                #lead
+              >
                 <app-icon name="mic" [size]="16" /> Start talking
               </button>
             </div>

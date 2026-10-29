@@ -50,9 +50,11 @@ function threeParts() {
 /** Focus as a keyboard user has it on the practice screen: the screen attached to the page, and Enter on a button. */
 describe('keyboard focus on the practice screen', () => {
   let session: ReturnType<typeof threeParts>;
+  const mic = { warm: vi.fn(), cool: vi.fn() };
 
   beforeEach(() => {
     session = threeParts();
+    vi.clearAllMocks();
     TestBed.configureTestingModule({
       providers: [
         { provide: Session, useValue: session },
@@ -71,7 +73,15 @@ describe('keyboard focus on the practice screen', () => {
         },
         {
           provide: Recorder,
-          useValue: { owner: signal(null), elapsed: signal(0), trace: signal([]), level: signal(0), device: signal(''), warm() {} },
+          useValue: {
+            owner: signal(null),
+            elapsed: signal(0),
+            trace: signal([]),
+            level: signal(0),
+            device: signal(''),
+            warm: mic.warm,
+            cool: mic.cool,
+          },
         },
         { provide: WordPractice, useValue: { checking: signal(false) } },
       ],
@@ -89,6 +99,20 @@ describe('keyboard focus on the practice screen', () => {
   }
 
   afterEach(() => document.body.replaceChildren());
+
+  it('opens the microphone only while on Record, not on a key or a click elsewhere', async () => {
+    await render();
+    const record = document.querySelector<HTMLButtonElement>('button.record')!;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    steps()[1].focus();
+    expect(mic.warm).not.toHaveBeenCalled();
+    record.dispatchEvent(new PointerEvent('pointerenter'));
+    record.dispatchEvent(new PointerEvent('pointerleave'));
+    record.focus();
+    record.blur();
+    expect([mic.warm.mock.calls.length, mic.cool.mock.calls.length]).toEqual([2, 2]);
+  });
 
   const steps = () => [...document.querySelectorAll<HTMLButtonElement>('.steps button')];
   /** Enter on a focused button: a key, then the click it makes */

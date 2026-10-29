@@ -68,7 +68,7 @@ describe('the caption under the part', () => {
             voiceMissing: signal(false),
           },
         },
-        { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0), warm() {} } },
+        { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0), warm() {}, cool() {} } },
         { provide: WordPractice, useValue: { checking: signal(false) } },
       ],
     });

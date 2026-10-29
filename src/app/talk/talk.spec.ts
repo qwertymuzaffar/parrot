@@ -69,7 +69,7 @@ const TALK: Talk = {
 
 describe('Just talk', () => {
   let talking: ReturnType<typeof standIn>;
-  const recorder = { owner: signal(null), level: signal(0.4), elapsed: signal(0) };
+  const recorder = { owner: signal(null), level: signal(0.4), elapsed: signal(0), warm: vi.fn(), cool: vi.fn() };
   const playback = {
     playing: signal(null),
     paused: signal(false),

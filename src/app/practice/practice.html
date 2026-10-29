@@ -169,6 +169,10 @@
       [attr.aria-busy]="session.loading() || session.checking() || null"
       [disabled]="!part || recorder.owner() === 'word'"
       (click)="session.toggleRecord()"
+      (pointerenter)="recorder.warm()"
+      (pointerleave)="recorder.cool()"
+      (focus)="recorder.warm()"
+      (blur)="recorder.cool()"
       [attr.aria-label]="recording() ? 'Stop recording (R)' : 'Record (R)'"
       [title]="recording() ? 'Stop (R)' : 'Record (R)'"
     >

@@ -41,7 +41,7 @@ function typing(el: HTMLElement) {
   templateUrl: './practice.html',
   styleUrl: './practice.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown)': 'key($event)', '(document:pointerdown)': 'recorder.warm()' },
+  host: { '(document:keydown)': 'key($event)' },
 })
 export class Practice {
   protected session = inject(Session);
@@ -266,7 +266,6 @@ export class Practice {
   };
 
   protected key(event: KeyboardEvent) {
-    this.recorder.warm();
     // a control that took the key for itself (the texts column's edge takes the arrows) keeps it
     if (event.defaultPrevented) return;
     const el = event.target as HTMLElement;

@@ -159,6 +159,10 @@ import { SoundUnits } from './sound-units';
         [class.on]="practice.recording()"
         [disabled]="practice.checking() || (recorder.owner() != null && !practice.recording())"
         (click)="practice.toggleRecord()"
+        (pointerenter)="recorder.warm()"
+        (pointerleave)="recorder.cool()"
+        (focus)="recorder.warm()"
+        (blur)="recorder.cool()"
         [title]="practice.recording() ? 'Stop and score the word' : 'Record the word on its own: it does not change the sentence’s score'"
       >
         @if (practice.recording()) {

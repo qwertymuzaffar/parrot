@@ -128,7 +128,6 @@ export class Session {
     this.playback.stop();
     await this.dropTake();
     if (build !== this.builds) return;
-    this.recorder.warm();
     writeSetting('text', id);
     this.engine.updateText(id, { opened: true }).catch(() => {});
     // the text shows (and the practice screen, from Home) once its parts and scores are in

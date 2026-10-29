@@ -45,7 +45,7 @@ describe('the word card when the dictionary cannot be read', () => {
           },
         },
         { provide: Playback, useValue: {} },
-        { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0) } },
+        { provide: Recorder, useValue: { owner: signal(null), elapsed: signal(0), warm() {}, cool() {} } },
         {
           provide: WordPractice,
           useValue: {

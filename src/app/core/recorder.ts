@@ -45,8 +45,11 @@ export interface TakeHooks {
 
 /** how long a take goes on after Stop is clicked */
 const AFTER_STOP_MS = 250;
-/** how long the microphone stays open with nothing recorded and no one about, before it is let go */
+/** how long the microphone stays open after a take with nothing recorded, before it is let go */
 const IDLE_MS = 120_000;
+/** how long the microphone opened for a take about to start stays open once the pointer or focus has left the record
+ * button with no take begun */
+const NEARBY_MS = 5_000;
 
 /** a talk is sent on in blocks this long */
 const SINK_MS = 2000;
@@ -105,7 +108,8 @@ export class Recorder {
   private stream: MediaStream | null = null;
   private opening: Promise<void> | null = null;
   private settling: Settling | null = null;
-  private lastWarm = 0;
+  /** whether the microphone was last opened by a take, rather than only for one about to start */
+  private taken = false;
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -247,18 +251,24 @@ export class Recorder {
     }
   }
 
-  /** Open the microphone ahead of a take, so it has settled by the time one starts: on opening a text, and whenever
-   * the user does something while practising. Only once the microphone has been allowed, so the permission prompt
-   * comes with the first take, not with opening a text. */
+  /** Open the microphone ahead of a take, so it has settled by the time one starts: while the pointer or focus is on
+   * a record button, and only then, so the system's microphone light means a take is about to start, under way or
+   * just done. Only once the microphone has been allowed, so the permission prompt comes with the first take. */
   warm() {
     if (this.capturing) return;
-    const now = performance.now();
-    if (this.ctx && now - this.lastWarm < 10_000) return;
     if (readSetting<'granted' | ''>('mic', '') !== 'granted') return;
-    this.lastWarm = now;
+    // let go after a while all the same: the pointer may never leave (the window put away with it there)
     clearTimeout(this.idle);
     this.idle = window.setTimeout(() => this.close(), IDLE_MS);
     this.open().catch(() => {});
+  }
+
+  /** The pointer or focus has left the record button: the microphone opened for it goes soon after, unless a take
+   * begins; the one kept open after a take stays its while, for the next take. */
+  cool() {
+    if (this.capturing || !(this.ctx || this.opening)) return;
+    clearTimeout(this.idle);
+    this.idle = window.setTimeout(() => this.close(), this.taken ? IDLE_MS : NEARBY_MS);
   }
 
   /** Let the microphone go (the system's microphone light turns off). */
@@ -269,6 +279,7 @@ export class Recorder {
     this.ctx?.close();
     this.ctx = this.node = this.analyser = this.stream = this.settling = null;
     this.preroll = [];
+    this.taken = false;
   }
 
   /** How long the take has gone without sound (ms): a talk stops itself after a long quiet. */
@@ -291,6 +302,7 @@ export class Recorder {
     if (this.capturing) return; // a second click while the microphone opens
     const take = ++this.take;
     clearTimeout(this.idle);
+    this.taken = true;
     this.capturing = true;
     this.owner.set(owner);
     // said from the click: opening the microphone can take a second or more, and the take looked idle meanwhile
