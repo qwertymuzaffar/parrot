@@ -14,10 +14,13 @@ use std::path::PathBuf;
 /// recording can't be read (gone, damaged, or the first engine's .mp3) can't be scored again: it stays where it was.
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
-    let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?);
+    let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
     let new = store::norm(new_text);
     if new.is_empty() {
         return Err("the text is empty".into());
+    }
+    if !store::has_words(&new) {
+        return Err("the text has no words".into());
     }
     if new == old {
         return store.text(id);
@@ -33,7 +36,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
 
     // the parts tried that are no longer parts of the text: their tries, and the part they became
     let mut changed: Vec<(PathBuf, Vec<Attempt>, String)> = vec![];
-    for entry in fs::read_dir(&dir).map_err(|error| error.to_string())?.flatten() {
+    for entry in fs::read_dir(&dir).map_err(crate::disk::said)?.flatten() {
         let path = entry.path();
         if !entry.file_name().to_string_lossy().starts_with("p-") || !path.is_dir() {
             continue;
@@ -84,7 +87,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     let filing = (|| {
         for (old_dir, old_attempt, part, mut attempt) in scored {
             let new_dir = dir.join(format!("p-{}", store::sha(part)));
-            fs::create_dir_all(&new_dir).map_err(|error| error.to_string())?;
+            fs::create_dir_all(&new_dir).map_err(crate::disk::said)?;
             let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
             attempt.id = Store::new_try(&new_dir, stamp)?;
             let file = new_dir.join(format!("{}.wav", attempt.id));
@@ -110,7 +113,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
 /// talk), else as a copy. `to` may be the empty file that claimed its name.
 fn link(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
     let _ = fs::remove_file(to);
-    fs::hard_link(from, to).or_else(|_| fs::copy(from, to).map(drop)).map_err(|error| error.to_string())
+    fs::hard_link(from, to).or_else(|_| fs::copy(from, to).map(drop)).map_err(crate::disk::said)
 }
 
 /// Remove `files`, then their folders left empty.
@@ -310,6 +313,16 @@ mod tests {
         assert_eq!(store.attempt(&id, "Hello there.", &store.attempts(&id, "Hello there.").unwrap()[0].id).unwrap().score, 0);
         assert_eq!(item.scores.len(), 2);
         assert!(store.part_dir(&id, "How are you?").is_err(), "no longer a part of the text");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_text_cannot_lose_all_its_words() {
+        let (store, id) = store_with("wordless", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
+        assert_eq!(edit_text(&listener, &store, &id, ". . .", |_, _| {}).map(|item| item.text), Err("the text has no words".into()));
+        assert_eq!(store.text(&id).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
         let _ = fs::remove_dir_all(&store.data);
     }
 

@@ -3,6 +3,7 @@ import { errorMessage, Library } from '../core/library';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
+import { wordCount } from '../core/split';
 import { WordPractice } from '../core/word-practice';
 import { Icon } from '../shared/icon';
 
@@ -52,7 +53,7 @@ export const STUCK_MS = 15_000;
             }
           } @else {
             <button class="btn ghost" (click)="close()">Cancel</button>
-            <button class="btn primary" [disabled]="!words().trim()" (click)="save()">Save</button>
+            <button class="btn primary" [disabled]="!wordCount(words())" (click)="save()">Save</button>
           }
         </div>
       </div>
@@ -126,6 +127,7 @@ export class EditWords {
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
 
   protected readonly words = signal('');
+  protected readonly wordCount = wordCount;
   protected readonly busy = signal(false);
   protected readonly done = signal(0);
   protected readonly total = signal(0);

@@ -14,18 +14,20 @@ describe('the word card when the dictionary cannot be read', () => {
   /** the engine refuses to mark a name: the list stays as it was, and says why */
   let refused: boolean;
   let nameError: ReturnType<typeof signal<string | null>>;
+  let selected: ReturnType<typeof signal<number>>;
 
   beforeEach(() => {
     names = new Set();
     recording = signal(false);
     refused = false;
     nameError = signal(null);
+    selected = signal(1);
     const named = signal(0);
     TestBed.configureTestingModule({
       providers: [
         {
           provide: Session,
-          useValue: { selected: signal(1), words: signal(['Hello', 'there.']), result: signal(null), recording: signal(false) },
+          useValue: { selected, words: signal(['Hello', 'there.', '!!!']), result: signal(null), recording: signal(false) },
         },
         // the dictionary file is missing or damaged
         { provide: Engine, useValue: { soundsLike: () => Promise.reject(new EngineError('pron: the dictionary is damaged')) } },
@@ -85,5 +87,17 @@ describe('the word card when the dictionary cannot be read', () => {
     await fixture.whenStable();
     expect(card.querySelector('.name + .error')!.textContent).toContain('the speech engine is not running');
     expect([box.checked, card.querySelector('.name span')!.textContent]).toEqual([false, 'A name: never counted as misheard, in any text']);
+  });
+
+  it('heads a word of punctuation alone as it is written, and says it is not in the dictionary', async () => {
+    selected.set(2);
+    const fixture = TestBed.createComponent(WordCard);
+    const card: HTMLElement = fixture.nativeElement;
+    await fixture.whenStable();
+    expect([
+      card.querySelector('h2')!.textContent,
+      card.getAttribute('aria-label'),
+      card.querySelector('.sounds .none')?.textContent,
+    ]).toEqual(['!!!', '!!!', 'Not in the dictionary. Use Hear it.']);
   });
 });

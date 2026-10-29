@@ -57,6 +57,7 @@ describe('DemoEngine', () => {
     await engine.deleteText(added.id);
     expect((await engine.texts()).map((text) => text.id)).not.toContain(added.id);
     await expect(engine.addText(' ', '', 'whole')).rejects.toThrow(new EngineError('the text is empty'));
+    await expect(engine.addText('. . . !!!', '', 'whole')).rejects.toThrow(new EngineError('the text has no words'));
   });
 
   it('scores a take without hearing it, and plays it back from where it was recorded', async () => {
