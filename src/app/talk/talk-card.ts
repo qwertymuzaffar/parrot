@@ -1,6 +1,18 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  Injector,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { Recorder } from '../core/recorder';
 import { LONGEST_TALK, StopReason, Talking } from '../core/talking';
+import { focusIn, refocus } from '../shared/focus';
 import { Icon } from '../shared/icon';
 import { PROMPT_SETS } from './prompts';
 
@@ -70,13 +82,13 @@ export function length(seconds: number) {
             </p>
             <div class="go">
               <span class="hint">Stop when you're done. Esc also stops.</span>
-              <button class="btn primary stop" (click)="talking.stop()"><app-icon name="stop" [size]="14" /> Stop</button>
+              <button class="btn primary stop" (click)="talking.stop()" #lead><app-icon name="stop" [size]="14" /> Stop</button>
             </div>
           } @else {
             <!-- the microphone opening and settling: a word said now would be lost, so the card says to wait -->
             <p class="hint" role="status">Getting the microphone ready. Start talking when it says Listening.</p>
             <div class="go">
-              <button class="btn ghost" (click)="talking.stop()">Cancel</button>
+              <button class="btn ghost" (click)="talking.stop()" #lead>Cancel</button>
               <button class="btn primary" disabled aria-busy="true"><span class="spinner light"></span> Preparing…</button>
             </div>
           }
@@ -101,7 +113,7 @@ export function length(seconds: number) {
           </div>
           <div class="go">
             <span class="hint">{{ note() }}</span>
-            <button class="btn" (click)="talking.cancel()">Cancel</button>
+            <button class="btn" (click)="talking.cancel()" #lead>Cancel</button>
           </div>
         }
         @case ('stopped') {
@@ -109,11 +121,11 @@ export function length(seconds: number) {
           <div class="go">
             @if (confirming()) {
               <span class="hint">Discard this talk and its recording?</span>
-              <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
+              <button class="btn ghost small" (click)="confirming.set(false)" #keepIt>Keep it</button>
               <button class="btn danger small" (click)="discard()">Discard</button>
             } @else {
-              <button class="btn ghost" (click)="confirming.set(true)">Discard</button>
-              <button class="btn primary" (click)="talking.writeDown()">Write it down</button>
+              <button class="btn ghost" (click)="confirming.set(true)" #discardButton>Discard</button>
+              <button class="btn primary" (click)="talking.writeDown()" #lead>Write it down</button>
             }
           </div>
         }
@@ -126,14 +138,14 @@ export function length(seconds: number) {
             <div class="go">
               @if (confirming()) {
                 <span class="hint">Discard this talk and its recording?</span>
-                <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
+                <button class="btn ghost small" (click)="confirming.set(false)" #keepIt>Keep it</button>
                 <button class="btn danger small" (click)="discard()">Discard</button>
               } @else {
-                <button class="btn ghost" (click)="confirming.set(true)">Discard</button>
+                <button class="btn ghost" (click)="confirming.set(true)" #discardButton>Discard</button>
                 @if (left.heard) {
-                  <button class="btn primary" (click)="talking.checkUnfinished()">Check it</button>
+                  <button class="btn primary" (click)="talking.checkUnfinished()" #lead>Check it</button>
                 } @else {
-                  <button class="btn primary" (click)="talking.writeDown()">Write it down</button>
+                  <button class="btn primary" (click)="talking.writeDown()" #lead>Write it down</button>
                 }
               }
             </div>
@@ -181,7 +193,7 @@ export function length(seconds: number) {
             }
             <div class="go">
               <span class="hint">Up to {{ LONGEST_TALK / 60 }} minutes</span>
-              <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()">
+              <button class="btn primary" [disabled]="recorder.owner() != null" (click)="talking.start()" #lead>
                 <app-icon name="mic" [size]="16" /> Start talking
               </button>
             </div>
@@ -330,6 +342,31 @@ export class TalkCard {
   protected readonly length = length;
   /** asking before a talk kept on the card (left, or stopped) is discarded */
   protected readonly confirming = signal(false);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private injector = inject(Injector);
+  /** what to press next in each state: Stop while talking, Cancel while it is written down, Write it down when stopped */
+  private lead = viewChild<ElementRef<HTMLElement>>('lead');
+  private keepIt = viewChild<ElementRef<HTMLElement>>('keepIt');
+  private discardButton = viewChild<ElementRef<HTMLElement>>('discardButton');
+
+  constructor() {
+    // each state draws the card anew, and the button pressed goes with it: focus goes on to what is pressed next (asked
+    // whether to discard, to Keep it; kept, back to Discard), not to the page. Not when Home is drawn: nothing was pressed
+    let drawn = false;
+    let asked = false;
+    effect(() => {
+      // recording: the microphone getting ready (Cancel), then listening (Stop)
+      if (this.talking.state() === 'recording') this.talking.recording();
+      const confirming = this.confirming();
+      const kept = asked && !confirming;
+      asked = confirming;
+      if (!drawn) return void (drawn = true);
+      untracked(() => {
+        if (!focusIn(this.host.nativeElement)) return;
+        refocus(() => (confirming ? this.keepIt() : kept ? this.discardButton() : this.lead())?.nativeElement, this.injector);
+      });
+    });
+  }
 
   protected discard() {
     this.confirming.set(false);

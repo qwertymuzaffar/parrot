@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, resource, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, resource, signal, viewChild } from '@angular/core';
 import { Engine } from '../core/engine';
 import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
 import { Sound } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
 import { UpdateCheck, Updates } from '../core/updates';
+import { focusIn, refocus } from '../shared/focus';
 import { Icon } from '../shared/icon';
 
 const MB = 1_000_000;
@@ -91,19 +92,19 @@ const MB = 1_000_000;
         </section>
 
         <section>
-          <span class="eyebrow">Names</span>
+          <span class="eyebrow" tabindex="-1" #namesHeading>Names</span>
           <p class="hint">
             Words never counted as misheard, in any text: speech recognition writes a name it doesn't know as some other word. Mark one from
             its word card.
           </p>
           @if (names.list().length) {
-            <ul class="names">
-              @for (name of names.list(); track name) {
+            <ul class="names" #namesList>
+              @for (name of names.list(); track name; let nameIndex = $index) {
                 <li>
                   {{ name }}
                   <button
                     class="btn ghost small icon"
-                    (click)="names.set(name, false)"
+                    (click)="removeName(name, nameIndex)"
                     [attr.aria-label]="'Remove ' + name + ' from the names'"
                   >
                     <app-icon name="close" [size]="13" />
@@ -281,6 +282,9 @@ export class Settings {
   protected names = inject(Names);
   private engine = inject(Engine);
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
+  private namesList = viewChild<ElementRef<HTMLElement>>('namesList');
+  private namesHeading = viewChild.required<ElementRef<HTMLElement>>('namesHeading');
+  private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
   private updates = inject(Updates);
   protected health = resource({ loader: () => this.engine.info() });
@@ -318,6 +322,18 @@ export class Settings {
     this.emptying.set(false);
     this.failure.set(null);
     this.dialog().nativeElement.showModal();
+  }
+
+  /** The chip goes with its name, and the × pressed with it: focus goes on to the next name's ×, else the one before,
+   * else (none left) the heading of the names, not back to the top of the dialog. */
+  protected async removeName(name: string, nameIndex: number) {
+    const hadFocus = focusIn(this.namesList()?.nativeElement);
+    await this.names.set(name, false);
+    if (!hadFocus) return;
+    refocus(() => {
+      const buttons = this.namesList()?.nativeElement.querySelectorAll('button') ?? [];
+      return buttons[nameIndex] ?? buttons[nameIndex - 1] ?? this.namesHeading().nativeElement;
+    }, this.injector);
   }
 
   protected async openFolder() {

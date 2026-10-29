@@ -96,7 +96,7 @@
   <!-- right: your texts -->
   <div class="right" #textsColumn>
     <div class="heading">
-      <h1>Your texts</h1>
+      <h1 tabindex="-1">Your texts</h1>
       @if (library.texts().length) {
         <span class="hint"
           >{{ library.texts().length }} {{ library.texts().length === 1 ? 'text' : 'texts' }} · {{ practisedParts() }} parts practised</span
