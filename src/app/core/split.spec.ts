@@ -1,4 +1,4 @@
-import { bare, forgetSplits, inEnglish, sentences, shortRanges, splitKnown, splitText, wordCount } from './split';
+import { bare, forgetSplits, inEnglish, sentences, shortRanges, splitKnown, splitText, wordCount, wordKey } from './split';
 
 describe('the splits kept', () => {
   it('keeps a split by its words and mode, and forgets the splits of words gone in every mode', async () => {
@@ -119,5 +119,13 @@ describe('inEnglish', () => {
     expect(
       ['I flew from Tokyo to Moscow and said Привет to everyone.', 'Hello, привет!', 'Café au lait, naïve', '1 2 3', '...'].map(inEnglish),
     ).toEqual([true, true, true, true, true]);
+  });
+});
+
+describe('wordKey', () => {
+  // the same cases as store.rs words_are_keyed_as_the_window_keys_them, so the window shows the tries the engine files
+  // for a word said alone
+  it('keys a word written two ways as one', () => {
+    expect(['caf\u00E9', 'Cafe\u0301,', '\u201CCAF\u00C9\u201D', 'CAFE\u0301'].map(wordKey)).toEqual(Array(4).fill('caf\u00E9'));
   });
 });

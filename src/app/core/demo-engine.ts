@@ -15,7 +15,7 @@ import {
   WordStatus,
 } from './models';
 import { nameKey } from './names';
-import { bare, inEnglish, partKey, sentences, wordCount } from './split';
+import { bare, inEnglish, partKey, sentences, wordCount, wordKey } from './split';
 
 /** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
 interface DemoText {
@@ -174,7 +174,7 @@ export class DemoEngine extends Engine {
   }
 
   private async store(text: string, title: string, mode: Mode, created = new Date()): Promise<DemoText> {
-    const body = norm(text);
+    const body = clean(text);
     if (!body) throw new EngineError('the text is empty');
     if (!wordCount(body)) throw new EngineError('the text has no words');
     if (!inEnglish(body)) throw new EngineError('Parrot checks English only');
@@ -262,8 +262,8 @@ export class DemoEngine extends Engine {
 
   async checkWord(textId: string, word: string, audio: Blob) {
     const text = await this.find(textId);
-    const said = bare(word.trim()).toLowerCase();
-    if (!said || !text.text.split(' ').some((each) => bare(each).toLowerCase() === said)) {
+    const said = wordKey(word);
+    if (!said || !text.text.split(' ').some((each) => wordKey(each) === said)) {
       throw new EngineError('that word is not in the text; reload');
     }
     // each try of a word alone comes out a little better: its first sound weak at first, then clear
@@ -283,11 +283,11 @@ export class DemoEngine extends Engine {
   }
 
   async wordAttempts(textId: string, word: string) {
-    return summaries((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()));
+    return summaries((await this.find(textId)).wordTries.get(wordKey(word)));
   }
 
   async wordAttempt(textId: string, word: string, id: string) {
-    return pick((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()), id);
+    return pick((await this.find(textId)).wordTries.get(wordKey(word)), id);
   }
 
   async deleteAttempt(textId: string, part: string, id: string) {
@@ -295,7 +295,7 @@ export class DemoEngine extends Engine {
   }
 
   async deleteWordAttempt(textId: string, word: string, id: string) {
-    remove((await this.find(textId)).wordTries.get(bare(word.trim()).toLowerCase()), id);
+    remove((await this.find(textId)).wordTries.get(wordKey(word)), id);
   }
 
   // a deleted text is gone at once here: nothing waits in a trash
@@ -428,7 +428,7 @@ export class DemoEngine extends Engine {
    * as the demo scores anything. */
   async editText(id: string, text: string, onProgress: (progress: TalkProgress) => void) {
     const kept = await this.find(id);
-    const body = norm(text);
+    const body = clean(text);
     if (!body) throw new EngineError('the text is empty');
     if (!wordCount(body)) throw new EngineError('the text has no words');
     if (!inEnglish(body)) throw new EngineError('Parrot checks English only');
@@ -478,6 +478,12 @@ function joined(blocks: Int16Array[], samples: number) {
 
 function norm(text: string) {
   return text.split(/\s+/).filter(Boolean).join(' ');
+}
+
+/** The words of a text as the store takes them in (store.rs `clean`): each letter written one way, without the
+ * characters never seen (a soft hyphen, zero-width spaces and joiners, a word joiner, a byte order mark). */
+function clean(text: string) {
+  return norm(text.normalize('NFC').replace(/[\u00AD\u200B\u200C\u200D\u2060\uFEFF]/g, ''));
 }
 
 function listOf(tries: Map<string, Attempt[]>, key: string) {

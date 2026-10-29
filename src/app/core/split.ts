@@ -146,3 +146,8 @@ export function inEnglish(text: string): boolean {
 /** A word without the punctuation around it, for the dictionary and the voice: at its ends only, as the engine trims it
  * ("2.5" and "Node.js" keep theirs). */
 export const bare = (word: string) => word.replace(/^[.,;:!?"“”()]+|[.,;:!?"“”()]+$/g, '');
+
+/** How a word said alone is kept, as the engine keeps it (store.rs `word_key`): without the punctuation around it, lower
+ * case, and each letter written one way (NFC), so "The", "the," and a "café" whose é was typed as e and a mark are each
+ * one word with one set of tries. */
+export const wordKey = (word: string) => bare(word.trim()).normalize('NFC').toLowerCase();

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
     let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
-    let new = store::norm(new_text);
+    let new = store::clean(new_text);
     if new.is_empty() {
         return Err("the text is empty".into());
     }
@@ -343,6 +343,17 @@ mod tests {
             edit_text(&listener, &store, &id, "Hello there. How are you, Привет?", |_, _| {}).unwrap().text,
             "Hello there. How are you, Привет?"
         );
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn the_words_are_written_one_way_when_edited() {
+        let (store, id) = store_with("one-form", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "a cafe here", fail: false, texts: RefCell::new(vec![]) };
+        // pasted from a file that writes é as e and a mark, with a soft hyphen in a word
+        let item = edit_text(&listener, &store, &id, "Hello there. A cafe\u{301} he\u{AD}re.", |_, _| {}).unwrap();
+        assert_eq!(item.text, "Hello there. A caf\u{E9} here.");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the part that didn't change keeps its tries");
         let _ = fs::remove_dir_all(&store.data);
     }
 

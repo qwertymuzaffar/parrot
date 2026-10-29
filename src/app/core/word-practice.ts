@@ -5,7 +5,7 @@ import { Attempt, AttemptSummary } from './models';
 import { Playback } from './playback';
 import { MIC_LOST, micError, Recorder } from './recorder';
 import { Session } from './session';
-import { bare } from './split';
+import { bare, wordKey } from './split';
 
 /** The word practised: the text it is in, the word as written there ("there,"), and the folder its tries share. */
 interface PractisedWord {
@@ -31,7 +31,7 @@ export class WordPractice {
       const text = this.session.text();
       const wordIndex = this.session.selected();
       const word = wordIndex == null ? '' : (this.session.words()[wordIndex] ?? '');
-      return text && bare(word) ? { textId: text.id, word, key: `${text.id} ${bare(word).toLowerCase()}` } : null;
+      return text && bare(word) ? { textId: text.id, word, key: `${text.id} ${wordKey(word)}` } : null;
     },
     { equal: (first, second) => first?.key === second?.key },
   );
