@@ -1,6 +1,8 @@
 @let text = session.text();
 @let part = session.part();
 @let progress = session.progress();
+<!-- every part in reading order, a repeated one each time it comes: progress counts the distinct ones -->
+@let steps = session.parts().length;
 @let take = result();
 
 <app-sidebar (settings)="settings.emit()" />
@@ -9,9 +11,7 @@
 <main #centre>
   <header>
     <div class="title">
-      <span class="meta"
-        >{{ text?.words }} words · {{ progress.total }} {{ unit().toLowerCase() }}{{ progress.total === 1 ? '' : 's' }}</span
-      >
+      <span class="meta">{{ text?.words }} words · {{ steps }} {{ unit().toLowerCase() }}{{ steps === 1 ? '' : 's' }}</span>
       <div class="named">
         <h1 tabindex="-1" [title]="text?.title">{{ text?.title }}</h1>
         <button
@@ -47,8 +47,8 @@
             [class.current]="current"
             [class]="current ? band(stepScore?.last) || 'none' : ''"
             [attr.aria-current]="current ? 'step' : null"
-            [attr.title]="current ? null : step.text"
-            [attr.aria-label]="stepLabel(step.label, stepScore?.last)"
+            [attr.title]="current ? sameAs(stepIndex) : sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
+            [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
             (click)="session.select(stepIndex)"
           >
             @if (current) {

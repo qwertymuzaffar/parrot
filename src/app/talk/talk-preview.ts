@@ -16,7 +16,7 @@ import { Names } from '../core/names';
 import { Playback } from '../core/playback';
 import { asTitle } from './prompts';
 import { leastSure, SoundUnit, soundUnits } from '../core/sounds';
-import { bare } from '../core/split';
+import { bare, wordCount } from '../core/split';
 import { Talking } from '../core/talking';
 import { soundTip } from '../core/tips';
 import { ScoreRing } from '../practice/score-ring';
@@ -159,7 +159,7 @@ import { stopNote } from './talk-card';
                 <button class="btn danger small" (click)="discard()">Discard</button>
               } @else {
                 <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="askDiscard()" #discardButton>Discard</button>
-                <button class="btn primary" [disabled]="!said().trim() || talking.state() === 'keeping'" (click)="keep()" #save>
+                <button class="btn primary" [disabled]="!wordCount(said()) || talking.state() === 'keeping'" (click)="keep()" #save>
                   @if (talking.state() === 'keeping') {
                     <span class="spinner"></span> Saving…
                   } @else {
@@ -355,6 +355,7 @@ export class TalkPreview {
   protected playback = inject(Playback);
   protected names = inject(Names);
   protected readonly Math = Math;
+  protected readonly wordCount = wordCount;
 
   /** the word looked at */
   protected readonly selected = signal<number | null>(null);

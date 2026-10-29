@@ -7,6 +7,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
 
 static DICT: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
     let mut raw = String::new();
@@ -125,6 +126,12 @@ pub struct SoundsLike {
 }
 
 pub fn sounds_like(word: &str) -> Option<SoundsLike> {
+    // a digit ("1st", "12th"), or a letter that is not a to z under its marks ("ß", "ж"): with it dropped or spelled
+    // out the word would be another one ("st" is street, "ss" is S S), so no tip rather than a wrong one
+    let other = |character: char| !character.is_ascii() && !character.nfd().next().is_some_and(|base| base.is_ascii_alphabetic());
+    if word.chars().any(|character| character.is_numeric() || (character.is_alphabetic() && other(character))) {
+        return None;
+    }
     let lower = crate::text::fold(&word.to_lowercase()).replace('\u{2019}', "'");
     let mut spell = vec![];
     let mut ipas = vec![];
@@ -199,6 +206,27 @@ mod tests {
     #[test]
     fn an_accented_word_sounds_like_its_plain_spelling() {
         assert_eq!(sounds_like("Café").unwrap().ipa, sounds_like("cafe").unwrap().ipa);
+    }
+
+    #[test]
+    fn a_word_with_a_digit_has_no_respelling() {
+        // without its digits "1st" would be "st", the dictionary's street
+        for word in ["1st", "12th", "2nd", "3D", "mp3", "x²"] {
+            assert!(sounds_like(word).is_none(), "{word}");
+        }
+        assert_eq!(spelled("first"), "FURST");
+    }
+
+    #[test]
+    fn a_letter_that_is_not_a_to_z_under_its_marks_has_no_respelling() {
+        // "ß" would be read as "ss", the letters S S; "кот" and "aж" as nothing, or "a"
+        for word in ["ß", "Straße", "þ", "кот", "aж", "ø"] {
+            assert!(sounds_like(word).is_none(), "{word}");
+        }
+        // a letter with marks is still the letter under them, and punctuation is still not part of the word
+        assert!(sounds_like("naïve").is_some());
+        assert_eq!(spelled("answer,"), "AN·sr");
+        assert_eq!(spelled("“answer”"), "AN·sr");
     }
 
     #[test]

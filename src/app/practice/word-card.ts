@@ -19,10 +19,10 @@ import { SoundUnits } from './sound-units';
   selector: 'app-word-card',
   imports: [Icon, SoundUnits],
   // focus moves here when a word is opened (see Practice.wordClick), so a screen reader reads the card next
-  host: { role: 'region', tabindex: '-1', '[attr.aria-label]': 'word()' },
+  host: { role: 'region', tabindex: '-1', '[attr.aria-label]': 'shown()' },
   template: `
     <div class="head">
-      <h2>{{ word() }}</h2>
+      <h2>{{ shown() }}</h2>
       @switch (mine()?.status) {
         @case ('good') {
           <span class="pill good">clear</span>
@@ -53,7 +53,7 @@ import { SoundUnits } from './sound-units';
           }
         </span>
         <span class="ipa">{{ soundsLike()?.ipa }}</span>
-      } @else if (soundsLike()) {
+      } @else if (soundsLike() || !word()) {
         <span class="none">Not in the dictionary. Use Hear it.</span>
       } @else if (sounds.error()) {
         <span class="none">Couldn't look it up. Use Hear it.</span>
@@ -381,6 +381,8 @@ export class WordCard {
     return wordIndex == null ? '' : (this.session.words()[wordIndex] ?? '');
   });
   protected readonly word = computed(() => bare(this.raw()));
+  /** the word as the card heads it: punctuation alone ("!!!") is shown as it is written, not as nothing */
+  protected readonly shown = computed(() => this.word() || this.raw());
   protected readonly mine = computed(() => {
     const wordIndex = this.index();
     return wordIndex == null || this.session.recording() ? null : (this.session.result()?.words[wordIndex] ?? null);

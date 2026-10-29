@@ -142,7 +142,8 @@ describe('keyboard focus on the practice screen', () => {
   it('leaves focus on the page as the part changes from the keyboard, so Space still means Listen', async () => {
     const fixture = await render();
     (document.activeElement as HTMLElement | null)?.blur();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    // a key, and then the part changes as the arrow's shortcut changes it
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
     session.select(1);
     await fixture.whenStable();
     expect(document.activeElement).toBe(document.body);

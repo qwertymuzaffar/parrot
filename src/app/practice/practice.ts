@@ -13,7 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { Mode } from '../core/models';
-import { Playback } from '../core/playback';
+import { Playback, RATES } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
@@ -66,7 +66,7 @@ export class Practice {
     { id: 'sentences', label: 'Sentences' },
     { id: 'short', label: 'Short parts' },
   ];
-  protected readonly rates = [0.6, 0.75, 1];
+  protected readonly rates = RATES;
 
   /** a take of the part is being recorded (a word said alone is recorded in its card) */
   protected readonly recording = this.session.recording;
@@ -181,9 +181,27 @@ export class Practice {
     return said;
   }
 
-  /** what a screen reader says for a step: the part and its last score ("Part 3, 64%"), which the bar shows in colour */
-  protected stepLabel(label: string, score: number | undefined) {
-    return `${this.unit()} ${label}, ${score != null ? `${score}%` : 'not practised'}`;
+  /** for each step, the label of the first step with the same words when it repeats one ("Thank you." said twice), else
+   * null: the copies share their tries and score, and count as one part practised */
+  protected readonly repeats = computed(() => {
+    const first = new Map<string, string>();
+    return this.session.parts().map((part) => {
+      const label = first.get(part.key);
+      if (label == null) first.set(part.key, part.label);
+      return label ?? null;
+    });
+  });
+
+  /** "Same as sentence 1", for a step that repeats another */
+  protected sameAs(stepIndex: number) {
+    const label = this.repeats()[stepIndex];
+    return label != null ? `Same as ${this.unit().toLowerCase()} ${label}` : null;
+  }
+
+  /** what a screen reader says for a step: the part and its last score ("Part 3, 64%"), which the bar shows in colour,
+   * and the step it repeats, if it does ("Sentence 3, same as sentence 1, 64%") */
+  protected stepLabel(label: string, score: number | undefined, same: string | null = null) {
+    return `${this.unit()} ${label}, ${same ? same.toLowerCase() + ', ' : ''}${score != null ? `${score}%` : 'not practised'}`;
   }
 
   protected wordClick(wordIndex: number, event: MouseEvent) {

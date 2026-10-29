@@ -6,7 +6,7 @@ import { Attempt, AttemptSummary, Mode, Part, PartScore, TextItem } from './mode
 import { Playback } from './playback';
 import { MIC_LOST, micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
-import { bare, splitText } from './split';
+import { bare, distinctKeys, splitText } from './split';
 
 /** a part's tries as they go on screen with it: its newest in full, and what went wrong loading them */
 interface Tries {
@@ -88,12 +88,13 @@ export class Session {
 
   readonly part = computed(() => this.parts()[this.index()] ?? null);
   readonly words = computed(() => this.part()?.text.split(' ') ?? []);
+  /** how much of the text is practised, counted over its distinct parts (see distinctKeys) */
   readonly progress = computed(() => {
-    const parts = this.parts();
+    const keys = distinctKeys(this.parts());
     const scores = this.scores();
-    const done = parts.filter((part) => scores[part.key]);
-    const avg = done.length ? Math.round(done.reduce((sum, part) => sum + scores[part.key].last, 0) / done.length) : null;
-    return { total: parts.length, done: done.length, avg };
+    const done = keys.filter((key) => scores[key]);
+    const avg = done.length ? Math.round(done.reduce((sum, key) => sum + scores[key].last, 0) / done.length) : null;
+    return { total: keys.length, done: done.length, avg };
   });
 
   /** the score of the try before the one shown */
@@ -209,7 +210,8 @@ export class Session {
     }
     if (build !== this.builds) return;
     let partIndex = w0 != null ? parts.findLastIndex((part) => part.w0 <= w0) : Number(savedIndex ?? 0);
-    if (!(partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
+    // a saved place that isn't one of the parts (damaged storage: 1.5, -1, abc) is the first part
+    if (!(Number.isInteger(partIndex) && partIndex >= 0 && partIndex < parts.length)) partIndex = 0;
     // the part's newest try comes with it (see goTo)
     const part = parts[partIndex];
     const tries = part && scores[part.key] ? await this.whileLoading(this.triesOf(text, part, () => build === this.builds)) : UNPRACTISED;

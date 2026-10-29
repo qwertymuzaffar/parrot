@@ -7,6 +7,14 @@ import { Sound } from './sound';
 import { bare } from './split';
 import { forVoice, wordForVoice } from './voice-text';
 
+/** The speeds the reference can be read at. */
+export const RATES = [0.6, 0.75, 1];
+
+function savedRate() {
+  const saved = Number(readSetting('rate', '1'));
+  return RATES.includes(saved) ? saved : 1;
+}
+
 /** Listening: the reference reading and my takes, whole or word by word, with the word being spoken lit up. */
 @Injectable({ providedIn: 'root' })
 export class Playback {
@@ -22,7 +30,9 @@ export class Playback {
   /** the word being spoken: in the reference line and in your own */
   readonly nowRef = signal<number | null>(null);
   readonly nowMine = signal<number | null>(null);
-  readonly rate = signal(Number(readSetting('rate', '1')));
+  /** the speed chosen, one of the speeds offered: anything else saved (damaged storage) is the normal speed, or the
+   * voice would be handed a speed it can't read at */
+  readonly rate = signal(savedRate());
 
   /** every play chain (mine, then the reference) checks this, so Stop really stops it */
   private run = 0;

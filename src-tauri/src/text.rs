@@ -514,10 +514,17 @@ pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>
             }
         }
     }
-    // words that own no token of their own share the verdict of the word before ("fifty-nine" of "nineteen fifty-nine")
+    // words that own no token of their own share the verdict of the word before ("fifty-nine" of "nineteen fifty-nine");
+    // but a word of letters none of which can be matched ("привет", "東京") can't be found in what was heard, whatever
+    // was said: it is not heard, rather than good for free
     let owned: HashSet<usize> = owner.iter().copied().collect();
-    for word_index in 1..sw.len() {
-        if !owned.contains(&word_index) {
+    for (word_index, word) in sw.iter().enumerate() {
+        if owned.contains(&word_index) {
+            continue;
+        }
+        if raw_words(word).is_empty() && word.chars().any(char::is_alphabetic) {
+            wrong[word_index] = Some(String::new());
+        } else if word_index > 0 {
             wrong[word_index] = wrong[word_index - 1].clone();
         }
     }
@@ -590,18 +597,30 @@ fn by_sound(score: Option<f64>, reference_score: Option<f64>) -> WordStatus {
 /// How a word is kept in the names list: lower case, without the punctuation around it or a possessive 's.
 /// The sentences of a text, as ranges of its words, cut as the interface cuts them (split.ts): after a word ending in
 /// . ! or ? (and any closing quotes) when the next starts with a capital, a digit or an opening quote before one, so
-/// "Node.js" and "e.g. the" stay whole.
+/// "Node.js" and "e.g. the" stay whole; but not after an abbreviation such as "Mr." or "p." before its name or number.
 pub fn sentences(text: &str) -> Vec<std::ops::Range<usize>> {
+    // the lists of split.ts: a title before a name ("Mr. Smith", "St. Louis", "e.g. Python"), and a page, volume or
+    // number before its digits ("p. 12", "vol. 3", "No. 5"; the word "no." can end a sentence, so only "No." is one).
+    // "etc." and "Jr." often end a sentence, so they are not here.
+    const TITLES: [&str; 10] = ["mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "mt.", "vs.", "e.g.", "i.e."];
+    const NUMBERED: [&str; 5] = ["p.", "pp.", "vol.", "fig.", "ch."];
     let words: Vec<&str> = text.split_whitespace().collect();
     let ends = |word: &str| word.trim_end_matches(['"', '”', '’', ')']).ends_with(['.', '!', '?']);
     let starts = |word: &str| {
         let word = word.strip_prefix(['"', '“', '(']).unwrap_or(word);
         word.starts_with(|character: char| character.is_ascii_uppercase() || character.is_ascii_digit())
     };
+    // whether the sentence goes on after `word` (one that could end it) into `next`
+    let abbreviated = |word: &str, next: &str| {
+        let written = word.trim_start_matches(['"', '“', '(']);
+        let lower = written.to_lowercase();
+        let digit_follows = next.strip_prefix(['"', '“', '(']).unwrap_or(next).starts_with(|character: char| character.is_ascii_digit());
+        TITLES.contains(&lower.as_str()) || ((NUMBERED.contains(&lower.as_str()) || written == "No.") && digit_follows)
+    };
     let mut out = vec![];
     let mut start = 0;
     for index in 0..words.len() {
-        if index + 1 == words.len() || (ends(words[index]) && starts(words[index + 1])) {
+        if index + 1 == words.len() || (ends(words[index]) && starts(words[index + 1]) && !abbreviated(words[index], words[index + 1])) {
             out.push(start..index + 1);
             start = index + 1;
         }
@@ -775,6 +794,23 @@ mod tests {
         assert_eq!(
             cut("He said “Go.” “Now?” I asked. 3 days later, (Then) more"),
             ["He said “Go.”", "“Now?”", "I asked.", "3 days later, (Then) more"]
+        );
+        assert_eq!(
+            cut("Mr. Smith arrived at 10 a.m. and left at 2.5 p.m. Dr. Who stayed. The U.S. team won 3.5 to 2. See p. 12 of vol. 3 for details."),
+            [
+                "Mr. Smith arrived at 10 a.m. and left at 2.5 p.m.",
+                "Dr. Who stayed.",
+                "The U.S. team won 3.5 to 2.",
+                "See p. 12 of vol. 3 for details."
+            ]
+        );
+        assert_eq!(
+            cut("Ask Mrs. Lee and (Prof. Kim) about No. 5, e.g. Fig. 2 in ch. 3 and pp. 10 to 12. Then go."),
+            ["Ask Mrs. Lee and (Prof. Kim) about No. 5, e.g. Fig. 2 in ch. 3 and pp. 10 to 12.", "Then go."]
+        );
+        assert_eq!(
+            cut("We had tea, cake, etc. Then we left. He said no. 5 days later he came. Turn the p. The end."),
+            ["We had tea, cake, etc.", "Then we left.", "He said no.", "5 days later he came.", "Turn the p.", "The end."]
         );
         assert_eq!(cut("no ending at all"), ["no ending at all"]);
         assert!(sentences("  ").is_empty());
@@ -958,6 +994,23 @@ mod tests {
         let results = judge(text, "the beautiful sinks", &mine, Some(&reference));
         assert_eq!(results.iter().map(|word| word.status).collect::<Vec<_>>(), vec![WordStatus::Good, WordStatus::Unclear, WordStatus::Wrong]);
         assert_eq!(results[2].heard.as_deref(), Some("sinks"));
+    }
+
+    #[test]
+    fn a_word_of_letters_that_cannot_be_matched_is_not_good_for_free() {
+        let statuses = |text: &str, heard: &str| judge(text, heard, &[], None).into_iter().map(|word| (word.w, word.status)).collect::<Vec<_>>();
+        assert_eq!(statuses("привет мир", "hello world"), [("привет".into(), WordStatus::Wrong), ("мир".into(), WordStatus::Wrong)]);
+        assert_eq!(statuses("I love 東京", "i love tokyo")[2], ("東京".into(), WordStatus::Wrong));
+        // punctuation alone, and the second half of a number, still go with the word before
+        assert_eq!(
+            statuses("Well — nineteen fifty-nine", "well nineteen fifty nine"),
+            [
+                ("Well".into(), WordStatus::Good),
+                ("—".into(), WordStatus::Good),
+                ("nineteen".into(), WordStatus::Good),
+                ("fifty-nine".into(), WordStatus::Good)
+            ]
+        );
     }
 
     #[test]
