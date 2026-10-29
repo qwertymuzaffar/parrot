@@ -482,13 +482,15 @@ header {
   box-shadow: 0 10px 26px color-mix(in srgb, var(--rec) 35%, transparent);
   transition: transform 0.12s;
 
-  &:hover:not(:disabled) {
+  &:hover:not(:disabled, .checking) {
     transform: scale(1.04);
   }
-  &:active:not(:disabled) {
+  &:active:not(:disabled, .checking) {
     transform: scale(0.97);
   }
-  &:disabled {
+  // a take being checked: it looks as it would disabled, but keeps the focus it had for the take (a press does nothing)
+  &:disabled,
+  &.checking {
     opacity: 0.5;
     cursor: default;
   }

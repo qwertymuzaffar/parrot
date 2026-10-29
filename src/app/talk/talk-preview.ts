@@ -1,4 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  Injector,
+  linkedSignal,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { Attempt } from '../core/models';
 import { Names } from '../core/names';
 import { Playback } from '../core/playback';
@@ -9,6 +21,7 @@ import { Talking } from '../core/talking';
 import { soundTip } from '../core/tips';
 import { ScoreRing } from '../practice/score-ring';
 import { SoundUnits } from '../practice/sound-units';
+import { focusIn, refocus } from '../shared/focus';
 import { Icon } from '../shared/icon';
 import { stopNote } from './talk-card';
 
@@ -22,7 +35,7 @@ import { stopNote } from './talk-card';
         <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="leave()">
           <app-icon name="back" [size]="16" /> Home
         </button>
-        <h1>Check what you said</h1>
+        <h1 tabindex="-1">Check what you said</h1>
       </header>
 
       <div class="body">
@@ -142,11 +155,11 @@ import { stopNote } from './talk-card';
             <div class="go">
               @if (confirming()) {
                 <span class="ask">Discard this talk and its recording?</span>
-                <button class="btn ghost small" (click)="confirming.set(false)">Keep it</button>
+                <button class="btn ghost small" (click)="confirming.set(false)" #keepIt>Keep it</button>
                 <button class="btn danger small" (click)="discard()">Discard</button>
               } @else {
-                <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="askDiscard()">Discard</button>
-                <button class="btn primary" [disabled]="!wordCount(said()) || talking.state() === 'keeping'" (click)="keep()">
+                <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="askDiscard()" #discardButton>Discard</button>
+                <button class="btn primary" [disabled]="!wordCount(said()) || talking.state() === 'keeping'" (click)="keep()" #save>
                   @if (talking.state() === 'keeping') {
                     <span class="spinner"></span> Saving…
                   } @else {
@@ -359,7 +372,31 @@ export class TalkPreview {
     },
   });
   protected readonly confirming = signal(false);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private injector = inject(Injector);
+  private keepIt = viewChild<ElementRef<HTMLElement>>('keepIt');
+  private discardButton = viewChild<ElementRef<HTMLElement>>('discardButton');
+  private save = viewChild<ElementRef<HTMLElement>>('save');
   protected readonly note = computed(() => stopNote(this.talking.stopReason()));
+
+  constructor() {
+    // the buttons under the words are drawn anew as they change, and the one pressed goes with them: asked whether to
+    // discard, focus goes to Keep it; kept, back to Discard; a save that failed, back to Save (disabled while it saved)
+    let drawn = false;
+    let asked = false;
+    effect(() => {
+      const state = this.talking.state();
+      const confirming = this.confirming();
+      const kept = asked && !confirming;
+      asked = confirming;
+      if (!drawn) return void (drawn = true);
+      untracked(() => {
+        if (!focusIn(this.host.nativeElement)) return;
+        const target = confirming ? this.keepIt : kept ? this.discardButton : state === 'preview' ? this.save : null;
+        if (target) refocus(() => target()?.nativeElement, this.injector);
+      });
+    });
+  }
 
   /** the talk as a try, so it plays back and is cut into words as a try is */
   protected readonly attempt = computed((): Attempt | null => {

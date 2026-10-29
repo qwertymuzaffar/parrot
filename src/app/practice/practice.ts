@@ -19,6 +19,7 @@ import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
 import { Names } from '../core/names';
 import { Icon } from '../shared/icon';
+import { refocus } from '../shared/focus';
 import { band } from '../shared/score';
 import { fitTo } from './fit';
 import { ScoreRing } from './score-ring';
@@ -49,6 +50,7 @@ export class Practice {
   private words = inject(WordPractice);
   protected names = inject(Names);
   private injector = inject(Injector);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private destroyRef = inject(DestroyRef);
   readonly settings = output<void>();
   protected band = band;
@@ -122,6 +124,19 @@ export class Practice {
       queueMicrotask(() =>
         this.stepper()?.nativeElement.children[partIndex]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }),
       );
+    });
+    // another part, with focus in what went with the part left (its word card, a word of it): focus goes to the new
+    // part's step, not to the page. Only from inside the screen: with focus on the page the keys are the screen's
+    // shortcuts, and on a step Space would press it rather than Listen
+    let opened = true;
+    effect(() => {
+      const partIndex = this.session.index();
+      if (opened) return void (opened = false);
+      untracked(() => {
+        const active = document.activeElement;
+        if (active && active !== document.body && this.host.nativeElement.contains(active))
+          refocus(() => this.stepper()?.nativeElement.children[partIndex]?.querySelector('button'), this.injector);
+      });
     });
     // a card closed from the keyboard (Escape, Close) took focus with it: hand it back to the word, if still on its part
     effect(() => {

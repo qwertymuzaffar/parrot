@@ -13,7 +13,7 @@
     <div class="title">
       <span class="meta">{{ text?.words }} words · {{ steps }} {{ unit().toLowerCase() }}{{ steps === 1 ? '' : 's' }}</span>
       <div class="named">
-        <h1 [title]="text?.title">{{ text?.title }}</h1>
+        <h1 tabindex="-1" [title]="text?.title">{{ text?.title }}</h1>
         <button
           class="btn ghost small icon"
           aria-label="Edit the words"
@@ -40,30 +40,26 @@
     <ol #stepper>
       @for (step of session.parts(); track step.key + $index; let stepIndex = $index) {
         @let stepScore = session.scores()[step.key];
+        @let current = stepIndex === session.index();
         <li>
-          @if (stepIndex === session.index()) {
-            <button
-              class="current"
-              [class]="band(stepScore?.last) || 'none'"
-              aria-current="step"
-              [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
-              [attr.title]="sameAs(stepIndex)"
-              (click)="session.select(stepIndex)"
-            >
+          <!-- one button a step, whichever is current: the one pressed stays, and keeps the focus -->
+          <button
+            [class.current]="current"
+            [class]="current ? band(stepScore?.last) || 'none' : ''"
+            [attr.aria-current]="current ? 'step' : null"
+            [attr.title]="current ? sameAs(stepIndex) : sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
+            [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
+            (click)="session.select(stepIndex)"
+          >
+            @if (current) {
               <span class="n">{{ step.label }}</span>
               <!-- prettier-ignore -->
               <span>{{ unit() }} {{ step.label }}@if (stepScore) { · <b class="pct">{{ stepScore.last }}%</b>}</span>
-            </button>
-          } @else {
-            <button
-              (click)="session.select(stepIndex)"
-              [title]="sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
-              [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
-            >
+            } @else {
               <span>{{ step.label }}</span>
               <span class="bar" [class]="band(stepScore?.last) || 'none'"></span>
-            </button>
-          }
+            }
+          </button>
         </li>
       }
     </ol>
@@ -169,8 +165,9 @@
       class="record"
       [class.on]="recording()"
       [class.loading]="session.loading()"
-      [attr.aria-busy]="session.loading() || null"
-      [disabled]="session.checking() || !part || recorder.owner() === 'word'"
+      [class.checking]="session.checking()"
+      [attr.aria-busy]="session.loading() || session.checking() || null"
+      [disabled]="!part || recorder.owner() === 'word'"
       (click)="session.toggleRecord()"
       [attr.aria-label]="recording() ? 'Stop recording (R)' : 'Record (R)'"
       [title]="recording() ? 'Stop (R)' : 'Record (R)'"
