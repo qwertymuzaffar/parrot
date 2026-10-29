@@ -299,9 +299,15 @@ fn score_word(listener: &impl Listen, audio: &[f32], secs: f64, word: &str, name
     Ok(scored)
 }
 
+/// What the window says when a command's work panics (or is cancelled): the panic's own words are only for the log.
+const UNEXPECTED: &str = "Parrot hit a problem it didn't expect; try again, or restart Parrot";
+
 /// Run blocking engine work off the main thread.
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| {
+        log::error!("a command stopped short: {error}");
+        UNEXPECTED.to_string()
+    })?
 }
 
 #[tauri::command]
@@ -1112,5 +1118,14 @@ mod tests {
         let busy = Mutex::new(Some(2));
         let _held = busy.lock().unwrap();
         assert!(lock_unless_busy(&busy).is_none());
+    }
+
+    #[test]
+    fn a_command_that_panics_is_said_plainly() {
+        let said = tauri::async_runtime::block_on(blocking(|| -> Result<(), String> { panic!("index out of bounds") }));
+        assert_eq!(said, Err(UNEXPECTED.to_string()));
+        // work that finishes, or fails in its own words, is untouched
+        assert_eq!(tauri::async_runtime::block_on(blocking(|| Ok(2))), Ok(2));
+        assert_eq!(tauri::async_runtime::block_on(blocking(|| Err::<(), _>("the text was deleted".to_string()))), Err("the text was deleted".into()));
     }
 }
