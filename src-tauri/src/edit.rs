@@ -19,6 +19,9 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     if new.is_empty() {
         return Err("the text is empty".into());
     }
+    if !store::has_words(&new) {
+        return Err("the text has no words".into());
+    }
     if new == old {
         return store.text(id);
     }
@@ -310,6 +313,16 @@ mod tests {
         assert_eq!(store.attempt(&id, "Hello there.", &store.attempts(&id, "Hello there.").unwrap()[0].id).unwrap().score, 0);
         assert_eq!(item.scores.len(), 2);
         assert!(store.part_dir(&id, "How are you?").is_err(), "no longer a part of the text");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_text_cannot_lose_all_its_words() {
+        let (store, id) = store_with("wordless", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
+        assert_eq!(edit_text(&listener, &store, &id, ". . .", |_, _| {}).map(|item| item.text), Err("the text has no words".into()));
+        assert_eq!(store.text(&id).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
         let _ = fs::remove_dir_all(&store.data);
     }
 

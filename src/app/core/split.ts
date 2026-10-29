@@ -98,6 +98,12 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
   return parts;
 }
 
+/** A word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none). */
+const isWord = (word: string) => /[\p{L}\p{N}]/u.test(word);
+
+/** How many words to say `text` has: a text with none is not taken, by the window or the engine. */
+export const wordCount = (text: string) => text.split(/\s+/).filter(isWord).length;
+
 /** A word without the punctuation around it, for the dictionary and the voice: at its ends only, as the engine trims it
  * ("2.5" and "Node.js" keep theirs). */
 export const bare = (word: string) => word.replace(/^[.,;:!?"“”()]+|[.,;:!?"“”()]+$/g, '');

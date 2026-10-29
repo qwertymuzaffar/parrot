@@ -1,4 +1,4 @@
-import { bare, forgetSplits, sentences, shortRanges, splitKnown, splitText } from './split';
+import { bare, forgetSplits, sentences, shortRanges, splitKnown, splitText, wordCount } from './split';
 
 describe('the splits kept', () => {
   it('keeps a split by its words and mode, and forgets the splits of words gone in every mode', async () => {
@@ -71,5 +71,11 @@ describe('bare', () => {
       'e.g',
       "don't",
     ]);
+  });
+});
+
+describe('wordCount', () => {
+  it('counts the words with a letter or a digit in them, in any alphabet', () => {
+    expect(['Hello there.', '... !!! ??? --- ***', '\u200B', 'привет — мир, 東京 2.5'].map(wordCount)).toEqual([2, 0, 0, 4]);
   });
 });
