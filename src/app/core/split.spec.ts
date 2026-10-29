@@ -24,6 +24,35 @@ describe('sentences', () => {
       'Then Java.',
     ]);
   });
+
+  // the same cases as text.rs sentences_are_cut_as_the_interface_cuts_them, so the window and the engine agree
+  it('keeps a title with its name and a page or volume with its number', () => {
+    expect(
+      sentences(
+        'Mr. Smith arrived at 10 a.m. and left at 2.5 p.m. Dr. Who stayed. The U.S. team won 3.5 to 2. See p. 12 of vol. 3 for details.',
+      ),
+    ).toEqual([
+      'Mr. Smith arrived at 10 a.m. and left at 2.5 p.m.',
+      'Dr. Who stayed.',
+      'The U.S. team won 3.5 to 2.',
+      'See p. 12 of vol. 3 for details.',
+    ]);
+    expect(sentences('Ask Mrs. Lee and (Prof. Kim) about No. 5, e.g. Fig. 2 in ch. 3 and pp. 10 to 12. Then go.')).toEqual([
+      'Ask Mrs. Lee and (Prof. Kim) about No. 5, e.g. Fig. 2 in ch. 3 and pp. 10 to 12.',
+      'Then go.',
+    ]);
+  });
+
+  it('still ends a sentence at "etc.", at the word "no." and at a page with no number after it', () => {
+    expect(sentences('We had tea, cake, etc. Then we left. He said no. 5 days later he came. Turn the p. The end.')).toEqual([
+      'We had tea, cake, etc.',
+      'Then we left.',
+      'He said no.',
+      '5 days later he came.',
+      'Turn the p.',
+      'The end.',
+    ]);
+  });
 });
 
 describe('shortRanges', () => {

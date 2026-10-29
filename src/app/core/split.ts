@@ -1,14 +1,37 @@
 import { Mode, Part } from './models';
 
+/** Abbreviations a sentence does not end at (the engine's text.rs has the same lists): a title before a name ("Mr.
+ * Smith", "St. Louis", "e.g. Python"), and a page, volume or number before its digits ("p. 12", "vol. 3", "No. 5"; the
+ * word "no." can end a sentence, so only "No." is one). "etc." and "Jr." often end a sentence, so they are not here. */
+const TITLES = new Set(['mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'st.', 'mt.', 'vs.', 'e.g.', 'i.e.']);
+const NUMBERED = new Set(['p.', 'pp.', 'vol.', 'fig.', 'ch.']);
+
+/** Whether the sentence goes on after `word` (one that could end it) into the words `next`. */
+function abbreviated(word: string, next: string): boolean {
+  const written = word.replace(/^["“(]+/, '');
+  const lower = written.toLowerCase();
+  return TITLES.has(lower) || ((NUMBERED.has(lower) || written === 'No.') && /^["“(]?[0-9]/.test(next));
+}
+
 /**
  * Sentences: a sentence ends at . ! or ? followed by a space and a capital, a digit or a quote,
- * so "Node.js" and "e.g. the" stay whole.
+ * so "Node.js" and "e.g. the" stay whole, but not at an abbreviation such as "Mr." or "p." before its name or number.
  */
 export function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?]["”’)]*)\s+(?=["“(]?[A-Z0-9])/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+  // the text cut wherever a sentence could end, with the spaces of each cut kept at the odd indexes
+  const pieces = text.split(/((?<=[.!?]["”’)]*)\s+(?=["“(]?[A-Z0-9]))/);
+  const out: string[] = [];
+  let sentence = pieces[0];
+  for (let index = 1; index < pieces.length; index += 2) {
+    const next = pieces[index + 1];
+    if (abbreviated(/\S*$/.exec(sentence)![0], next)) sentence += pieces[index] + next;
+    else {
+      out.push(sentence);
+      sentence = next;
+    }
+  }
+  out.push(sentence);
+  return out.map((each) => each.trim()).filter(Boolean);
 }
 
 const CONJUNCTION = /^(and|but|or|which|where|when|while|because|so|then|that|who)$/i;

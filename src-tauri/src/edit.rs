@@ -14,7 +14,7 @@ use std::path::PathBuf;
 /// recording can't be read (gone, damaged, or the first engine's .mp3) can't be scored again: it stays where it was.
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
-    let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?);
+    let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
     let new = store::norm(new_text);
     if new.is_empty() {
         return Err("the text is empty".into());
@@ -36,7 +36,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
 
     // the parts tried that are no longer parts of the text: their tries, and the part they became
     let mut changed: Vec<(PathBuf, Vec<Attempt>, String)> = vec![];
-    for entry in fs::read_dir(&dir).map_err(|error| error.to_string())?.flatten() {
+    for entry in fs::read_dir(&dir).map_err(crate::disk::said)?.flatten() {
         let path = entry.path();
         if !entry.file_name().to_string_lossy().starts_with("p-") || !path.is_dir() {
             continue;
@@ -87,7 +87,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     let filing = (|| {
         for (old_dir, old_attempt, part, mut attempt) in scored {
             let new_dir = dir.join(format!("p-{}", store::sha(part)));
-            fs::create_dir_all(&new_dir).map_err(|error| error.to_string())?;
+            fs::create_dir_all(&new_dir).map_err(crate::disk::said)?;
             let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
             attempt.id = Store::new_try(&new_dir, stamp)?;
             let file = new_dir.join(format!("{}.wav", attempt.id));
@@ -113,7 +113,7 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
 /// talk), else as a copy. `to` may be the empty file that claimed its name.
 fn link(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
     let _ = fs::remove_file(to);
-    fs::hard_link(from, to).or_else(|_| fs::copy(from, to).map(drop)).map_err(|error| error.to_string())
+    fs::hard_link(from, to).or_else(|_| fs::copy(from, to).map(drop)).map_err(crate::disk::said)
 }
 
 /// Remove `files`, then their folders left empty.

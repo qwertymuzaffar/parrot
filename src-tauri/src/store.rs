@@ -193,7 +193,7 @@ pub(crate) fn write_whole(path: &Path, contents: &[u8]) -> Result<(), String> {
     });
     written.and_then(|()| fs::rename(&temporary, path)).map_err(|error| {
         let _ = fs::remove_file(&temporary);
-        error.to_string()
+        crate::disk::said(error)
     })
 }
 
@@ -247,7 +247,7 @@ impl Store {
     /// The folder of one part of a text, checked to really be in the text.
     pub fn part_dir(&self, id: &str, part: &str) -> Result<PathBuf, String> {
         let dir = self.text_dir(id)?;
-        let full = fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?;
+        let full = fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?;
         if part.trim().is_empty() || !norm(&full).contains(&norm(part)) {
             return Err("that part is not in the text; reload".into());
         }
@@ -270,7 +270,7 @@ impl Store {
     /// in the text ("The", "the,") shares it.
     pub fn word_dir(&self, id: &str, word: &str) -> Result<PathBuf, String> {
         let dir = self.text_dir(id)?;
-        let full = fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?;
+        let full = fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?;
         let word = bare(word.trim()).to_lowercase();
         if word.is_empty() || !full.split_whitespace().any(|each| bare(each).to_lowercase() == word) {
             return Err("that word is not in the text; reload".into());
@@ -321,12 +321,12 @@ impl Store {
         let dir = self.text_dir(id)?;
         // only the parts of the text as it is now, whichever way it is practised: tries left under words it no longer
         // has (as an edit before 0.5 could leave them) are not shown, so they don't count
-        let full = norm(&fs::read_to_string(dir.join("text.txt")).map_err(|error| error.to_string())?);
+        let full = norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
         let words: Vec<&str> = full.split_whitespace().collect();
         let parts: std::collections::HashSet<String> =
             crate::text::MODES.iter().flat_map(|mode| crate::text::parts(&words, mode)).map(|part| words[part].join(" ")).collect();
         let mut out = BTreeMap::new();
-        for entry in fs::read_dir(&dir).map_err(|error| error.to_string())?.flatten() {
+        for entry in fs::read_dir(&dir).map_err(crate::disk::said)?.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if !name.starts_with("p-") || !entry.path().is_dir() {
                 continue;
@@ -413,7 +413,7 @@ impl Store {
             return Ok(self.text_info(&dir));
         }
         let dir = self.new_dir(&body);
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        fs::create_dir_all(&dir).map_err(crate::disk::said)?;
         write_whole(&dir.join("text.txt"), body.as_bytes())?;
         let created = if dir.join("meta.json").exists() { None } else { Some(json!(now())) };
         let mut change = vec![("title", title), ("created", created)];
@@ -462,8 +462,12 @@ impl Store {
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let dir = self.text_dir(id)?;
         let trash = self.trash();
-        fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
-        fs::rename(&dir, trash.join(format!("{id}-{}", Local::now().format("%Y%m%d-%H%M%S")))).map_err(|error| error.to_string())
+        fs::create_dir_all(&trash).map_err(crate::disk::said)?;
+        let stamp = Local::now().format("%Y%m%d-%H%M%S");
+        // deleted, added again and deleted within one second: <id>-2-<time>, the time still last for expire_trash
+        let name = |count: u32| if count == 1 { format!("{id}-{stamp}") } else { format!("{id}-{count}-{stamp}") };
+        let place = (1..).map(|count| trash.join(name(count))).find(|place| !place.exists()).expect("a free name");
+        fs::rename(&dir, place).map_err(crate::disk::said)
     }
 
     fn trash(&self) -> PathBuf {
@@ -558,11 +562,15 @@ impl Store {
             return Err(format!("not found: {attempt}"));
         }
         // the result first: without it the try is gone from every list, even if its recording stayed behind
-        fs::remove_file(&result).map_err(|error| error.to_string())?;
-        match fs::remove_file(dir.join(format!("{attempt}.wav"))) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
-            _ => Ok(()),
+        fs::remove_file(&result).map_err(crate::disk::said)?;
+        // the try is gone from the lists already, as the person asked: a recording that stays behind takes some room,
+        // but no try comes back, and none is claimed over it (new_try skips a name taken)
+        if let Err(error) = fs::remove_file(dir.join(format!("{attempt}.wav")))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("the recording of try {attempt} stayed behind in {}: {error}", dir.display());
         }
+        Ok(())
     }
 
     fn read_attempt(dir: &Path, attempt: &str) -> Result<Attempt, String> {
@@ -582,7 +590,7 @@ impl Store {
             match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{id}.wav"))) {
                 Ok(_) => return Ok(id),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error.to_string()),
+                Err(error) => return Err(crate::disk::said(error)),
             }
         }
         unreachable!("the counter runs out before the folder does")
@@ -964,6 +972,57 @@ mod tests {
         store.delete_attempt(&id, "How are you?", "20261001-120000").unwrap();
         assert!(store.scores(&id).unwrap().is_empty());
         assert_eq!(store.list()[0].practised, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_try_whose_recording_wont_go_is_deleted_all_the_same() {
+        let dir = std::env::temp_dir().join(format!("parrot-delete-try-stuck-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let id = store.add("Hello there. How are you?", None, None).unwrap().id;
+        let part = store.part_dir(&id, "How are you?").unwrap();
+        save_try(&store, &part, "20261001-120000", "How are you?", 90);
+        // its recording is a folder with something in it: it can't be removed as a file
+        fs::remove_file(part.join("20261001-120000.wav")).unwrap();
+        fs::create_dir_all(part.join("20261001-120000.wav/inside")).unwrap();
+        assert_eq!(store.delete_attempt(&id, "How are you?", "20261001-120000"), Ok(()));
+        assert!(store.attempts(&id, "How are you?").unwrap().is_empty() && store.scores(&id).unwrap().is_empty());
+        // and a new try takes another name than the one left behind
+        assert_eq!(Store::new_try(&part, "20261001-120000").unwrap(), "20261001-120000-2");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_text_deleted_twice_in_one_second_goes_both_times() {
+        let dir = std::env::temp_dir().join(format!("parrot-delete-twice-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        // deleted, added again and deleted: the second is in the trash beside the first, not left in the library
+        for _ in 0..3 {
+            let id = store.add("Hello there.", None, None).unwrap().id;
+            store.delete(&id).unwrap();
+            assert!(store.list().is_empty());
+        }
+        assert!(fs::read_dir(store.trash()).unwrap().count() == 3);
+        store.expire_trash(Local::now().naive_local() + chrono::Duration::days(TRASH_DAYS + 1));
+        assert_eq!(store.trash_size(), 0, "each read for the time it was deleted");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_parrot_cant_write_to_is_said_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("parrot-read-only-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("texts")).unwrap();
+        fs::set_permissions(dir.join("texts"), fs::Permissions::from_mode(0o555)).unwrap();
+        let store = Store { data: dir.clone() };
+        let error = store.add("Hello there.", None, None).unwrap_err();
+        fs::set_permissions(dir.join("texts"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(error.starts_with("Parrot can't write to its data folder"), "{error}");
+        assert!(!error.contains("os error"), "{error}");
         let _ = fs::remove_dir_all(dir);
     }
 

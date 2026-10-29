@@ -229,10 +229,10 @@ impl Talks {
             return Err(format!("a talk can't be recorded at {rate} Hz"));
         }
         self.discard()?;
-        fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
+        fs::create_dir_all(&self.dir).map_err(crate::disk::said)?;
         let path = self.dir.join(format!("{}.wav", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let spec = hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-        let writer = hound::WavWriter::create(&path, spec).map_err(|error| error.to_string())?;
+        let writer = hound::WavWriter::create(&path, spec).map_err(crate::disk::wav_said)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         *self.current() = Some(Talk {
             path,
@@ -264,10 +264,10 @@ impl Talks {
             return Err(format!("a talk can be at most {} minutes", LONGEST / 60.0));
         }
         for sample in samples {
-            writer.write_sample(i16::from_le_bytes(*sample)).map_err(|error| error.to_string())?;
+            writer.write_sample(i16::from_le_bytes(*sample)).map_err(crate::disk::wav_said)?;
         }
         // the header brought up to date: a crash loses no more than this block
-        writer.flush().map_err(|error| error.to_string())?;
+        writer.flush().map_err(crate::disk::wav_said)?;
         talk.samples += count;
         // not once a stretch couldn't be heard: nothing more is, and the rest of a long talk would sit in memory
         if !talk.live.broken {
@@ -357,7 +357,7 @@ impl Talks {
             // a writing-down waiting for a stretch to be heard wakes to find the talk gone, rather than waiting on
             self.heard.notify_all();
             fs::remove_file(&talk.path)
-                .or_else(|error| if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error.to_string()) })?;
+                .or_else(|error| if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(crate::disk::said(error)) })?;
         }
         Ok(())
     }
@@ -375,7 +375,7 @@ impl Talks {
         let talk = current.as_mut().filter(|talk| Some(talk.generation) == generation);
         let talk = talk.ok_or(if generation.is_some() { DISCARDED } else { GONE })?;
         if let Some(writer) = talk.writer.take() {
-            writer.finalize().map_err(|error| error.to_string())?;
+            writer.finalize().map_err(crate::disk::wav_said)?;
         }
         // written down already, as when Stop comes twice: it can't have changed since (its recording has stopped),
         // and hearing it all again would hold up every other talk command meanwhile
@@ -525,7 +525,7 @@ impl Talk {
     fn save(&self) -> Result<(), String> {
         let known = Known { cleaned: self.cleaned, written: self.written.clone(), heard: self.heard.clone(), keeping: self.keeping.clone() };
         let json = serde_json::to_vec(&known).map_err(|error| error.to_string())?;
-        fs::write(self.path.with_extension("json"), json).map_err(|error| error.to_string())
+        fs::write(self.path.with_extension("json"), json).map_err(crate::disk::said)
     }
 
     /// Finish the keep a quit cut short, if the talk was being kept (`data` is the data folder). Once the take's
@@ -581,7 +581,7 @@ impl Talks {
         // the text with these words: a new one, spoken, or the one that has them (pasted, or talked before), as it is
         let text = store.add_spoken(&said, title)?;
         let dir = store.part_dir(&text.id, &said)?;
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        fs::create_dir_all(&dir).map_err(crate::disk::said)?;
         let now = chrono::Local::now();
         let id = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
         let file = dir.join(format!("{id}.wav"));
@@ -618,7 +618,7 @@ impl Talks {
                 }
             }
             // the recording moves in last: until the take is whole, the talk is where it was
-            fs::rename(&talk.path, &file).map_err(|error| error.to_string())
+            fs::rename(&talk.path, &file).map_err(crate::disk::said)
         })();
         if let Err(error) = filing {
             for path in &filed {
@@ -725,7 +725,7 @@ fn cut_take(
         .map(|word| WordResult { t: word.t.map(|[start, end]| [round3((start - from).max(0.0)), round3((end - from).min(duration))]), ..word })
         .collect();
     let dir = store.part_dir(id, sentence)?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(crate::disk::said)?;
     let take = Store::new_try(&dir, &now.format("%Y%m%d-%H%M%S").to_string())?;
     let file = dir.join(format!("{take}.wav"));
     filed.extend([file.clone(), dir.join(format!("{take}.json"))]);

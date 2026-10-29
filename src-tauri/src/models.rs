@@ -3,7 +3,7 @@
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use reqwest::header::{CONTENT_RANGE, RANGE};
+use reqwest::header::{CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
@@ -105,7 +105,7 @@ struct Progress<'a> {
 /// Download every missing model, reporting "model-progress" events as it goes. A partial file is kept as
 /// <file>.part and continued on the next try; the file is renamed into place only once its SHA-256 matches.
 pub async fn download_missing(app: &AppHandle, dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|error| on_disk(error, dir))?;
     let client =
         reqwest::Client::builder().user_agent("Parrot").connect_timeout(STALL).read_timeout(STALL).build().map_err(|error| error.to_string())?;
     for model in ALL {
@@ -114,17 +114,18 @@ pub async fn download_missing(app: &AppHandle, dir: &Path) -> Result<(), String>
         }
         let part = dir.join(format!("{}.part", model.file));
         download(app, &client, model, &part).await?;
-        std::fs::rename(&part, path(dir, model)).map_err(|error| error.to_string())?;
+        std::fs::rename(&part, path(dir, model)).map_err(|error| on_disk(error, dir))?;
     }
     Ok(())
 }
 
 /// Bring <file>.part to the full, verified model, asking only for the bytes it does not have yet.
 async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part: &Path) -> Result<(), String> {
+    let folder = part.parent().unwrap_or(part);
     let mut have = std::fs::metadata(part).map(|md| md.len()).unwrap_or(0);
     if have > model.bytes {
         // longer than the model: not the start of it
-        std::fs::remove_file(part).map_err(|error| error.to_string())?;
+        std::fs::remove_file(part).map_err(|error| on_disk(error, folder))?;
         have = 0;
     }
     let mut hasher = Sha256::new();
@@ -143,18 +144,24 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
             }
             return Err(format!("could not download {}: {status}; try again", model.file));
         };
+        let content_type = res.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+        if let Some(error) = wrong_body(model, start, res.content_length(), content_type) {
+            // not the model (or not the rest of it): nothing of it is kept, so the next try starts clean
+            let _ = std::fs::remove_file(part);
+            return Err(error);
+        }
         let mut out = if start == 0 {
-            File::create(part).map_err(|error| error.to_string())?
+            File::create(part).map_err(|error| on_disk(error, folder))?
         } else {
             hash_file(&mut hasher, part)?;
-            OpenOptions::new().append(true).open(part).map_err(|error| error.to_string())?
+            OpenOptions::new().append(true).open(part).map_err(|error| on_disk(error, folder))?
         };
         let mut received = start;
         let mut last = received;
         let mut stream = res.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|error| format!("the download of {} stopped: {error}; try again", model.file))?;
-            out.write_all(&chunk).map_err(|error| error.to_string())?;
+            out.write_all(&chunk).map_err(|error| on_disk(error, folder))?;
             hasher.update(&chunk);
             received += chunk.len() as u64;
             if received > model.bytes {
@@ -167,7 +174,7 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
                 let _ = app.emit("model-progress", Progress { model: model.key, received, total: model.bytes });
             }
         }
-        out.flush().map_err(|error| error.to_string())?;
+        out.flush().map_err(|error| on_disk(error, folder))?;
         drop(out);
         if received != model.bytes {
             return Err(format!("{} arrived incomplete ({received} of {} bytes); try again", model.file, model.bytes));
@@ -198,14 +205,42 @@ fn body_starts_at(have: u64, status: StatusCode, content_range: Option<&str>) ->
     }
 }
 
+/// Why a body starting at byte `start` of `model`, of `content_length` bytes and of `content_type`, is not the model
+/// (or its rest), if it isn't: a Wi-Fi sign-in page or a proxy answers 200 with a web page of its own, which would
+/// otherwise be kept as the start of the model and spoil the next try too.
+fn wrong_body(model: &Model, start: u64, content_length: Option<u64>, content_type: Option<&str>) -> Option<String> {
+    let page = content_type.is_some_and(|value| value.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("text/html"));
+    if page {
+        return Some(format!(
+            "could not download {}: the network sent a web page instead (a Wi-Fi sign-in page or a proxy, perhaps); sign in if it asks, then try again",
+            model.file
+        ));
+    }
+    let rest = model.bytes - start;
+    match content_length {
+        Some(length) if length != rest => Some(format!(
+            "could not download {}: the server offered {length} bytes, not the {rest} expected (a Wi-Fi sign-in page or a proxy, perhaps); try again",
+            model.file
+        )),
+        _ => None,
+    }
+}
+
 fn hash_file(hasher: &mut Sha256, file: &Path) -> Result<(), String> {
-    let mut reader = File::open(file).map_err(|error| error.to_string())?;
-    std::io::copy(&mut reader, hasher).map_err(|error| error.to_string())?;
+    let folder = file.parent().unwrap_or(file);
+    let mut reader = File::open(file).map_err(|error| on_disk(error, folder))?;
+    std::io::copy(&mut reader, hasher).map_err(|error| on_disk(error, folder))?;
     Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A disk error met in the models' `folder`, as the window says it: a model is 300 to 500 MB, so a full disk is most
+/// often met here.
+fn on_disk(error: std::io::Error, folder: &Path) -> String {
+    crate::disk::said_about(&error, Some(folder))
 }
 
 #[cfg(test)]
@@ -224,6 +259,30 @@ mod tests {
         assert_eq!(body_starts_at(0, StatusCode::PARTIAL_CONTENT, Some("bytes 0-99/100")), None);
         assert_eq!(body_starts_at(1000, StatusCode::RANGE_NOT_SATISFIABLE, Some("bytes */1000")), None);
         assert_eq!(body_starts_at(0, StatusCode::NOT_FOUND, None), None);
+    }
+
+    #[test]
+    fn a_body_that_is_not_the_model_is_turned_away() {
+        let whole = Some(WHISPER.bytes);
+        assert_eq!(wrong_body(&WHISPER, 0, whole, Some("application/octet-stream")), None);
+        assert_eq!(wrong_body(&WHISPER, 0, whole, None), None);
+        // no length said (sent in chunks): the size is checked as it arrives
+        assert_eq!(wrong_body(&WHISPER, 0, None, Some("binary/octet-stream")), None);
+        // the rest of a .part
+        assert_eq!(wrong_body(&WHISPER, 1000, Some(WHISPER.bytes - 1000), None), None);
+        // a sign-in page answering 200
+        let error = wrong_body(&WHISPER, 0, Some(12345), Some("text/html; charset=utf-8")).unwrap();
+        assert!(error.contains("web page") && error.contains("sign-in") && error.ends_with("try again"), "{error}");
+        assert!(wrong_body(&WHISPER, 0, whole, Some("TEXT/HTML")).is_some(), "a page, whatever its length says");
+        assert!(wrong_body(&WHISPER, 1000, Some(WHISPER.bytes - 1000), Some("text/html")).is_some());
+        // a length that isn't the model's, or the rest of it
+        let error = wrong_body(&WHISPER, 0, Some(12345), None).unwrap();
+        assert_eq!(
+            error,
+            "could not download ggml-small.en.bin: the server offered 12345 bytes, not the 487614201 expected (a Wi-Fi sign-in page or a proxy, perhaps); try again"
+        );
+        assert!(wrong_body(&WHISPER, 1000, whole, None).is_some(), "the whole file sent as the rest");
+        assert!(wrong_body(&WHISPER, 0, Some(WHISPER.bytes + 1), None).is_some());
     }
 
     #[test]
