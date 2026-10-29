@@ -743,6 +743,17 @@ describe('the practice state', () => {
       expect(app.progress()).toEqual({ total: 3, done: 2, avg: 86 });
     });
 
+    it('counts a sentence said more than once as one part, practised by a take of any copy', async () => {
+      engine.library = [engine.item({ text: 'I like tea. I like tea. I like tea. I like coffee.' })];
+      await app.loadTexts();
+      engine.tries['I like tea.'] = [attempt('t1', 'I like tea.', 83)];
+      await app.open(ID);
+      expect([app.parts().length, app.progress()]).toEqual([4, { total: 2, done: 1, avg: 83 }]);
+      // each copy is a step of its own, in reading order, with the try they share
+      await app.select(2);
+      expect([app.index(), app.result()?.id]).toEqual([2, 't1']);
+    });
+
     it("doesn't show a part's try on the part moved to while it loaded", async () => {
       engine.tries['How are you?'] = [attempt('t1', 'How are you?', 80, ['wrong', 'good', 'good'])];
       await app.open(ID, 0);
