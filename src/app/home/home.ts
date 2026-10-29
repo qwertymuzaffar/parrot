@@ -25,6 +25,10 @@ import { ringDash } from '../shared/ring';
 import { band } from '../shared/score';
 import { matchesSearch } from '../shared/search';
 
+/** A card's date further back than yesterday ("12 Oct" in the user's language), made once: toLocaleDateString makes a
+ * formatter on every call, about 30 ms for each check of a Home of 1,000 cards (every key typed, every return). */
+const SHORT_DATE = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+
 interface Card {
   t: TextItem;
   parts: Part[];
@@ -232,7 +236,7 @@ export class Home {
     const days = Math.floor((Date.now() - date.getTime()) / 86400000);
     if (new Date().toDateString() === date.toDateString()) return 'today';
     if (days < 2) return 'yesterday';
-    return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    return SHORT_DATE.format(date);
   }
 
   protected modeName(mode: Mode) {
