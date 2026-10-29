@@ -588,7 +588,7 @@ impl Talks {
         let duration = pcm.seconds();
         let samples = audio::resample(&pcm, 16000);
         drop(pcm);
-        let said = store::norm(said);
+        let said = store::clean(said);
         // a text of one sentence is not cut
         let sentences = Some(text::sentences(&said)).filter(|sentences| sentences.len() > 1).unwrap_or_default();
         let stretches = written.len();
@@ -1183,6 +1183,24 @@ mod tests {
         let kept = talks.keep(&listener, &store, &heard.heard, None, |_, _| {}).unwrap();
         assert!(store.data.join(&kept.attempt.audio).exists());
         assert_eq!(wavs(&dir), 0);
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_byte_order_mark_pasted_into_a_talk_is_left_out() {
+        let (talks, dir) = talks("keep-mark");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-mark-data-{}", std::process::id())) };
+        let _ = fs::remove_dir_all(&store.data);
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let listener = Stretches { heard: "One two. Three four.", lengths: RefCell::new(vec![]) };
+        talks.write_down(&listener, |_, _| {}).unwrap();
+        // the words corrected by pasting from a file that had one in it
+        let kept = talks.keep(&listener, &store, "One two. \u{FEFF}Three four.", None, |_, _| {}).unwrap();
+        assert_eq!(kept.text.text, "One two. Three four.");
+        assert_eq!(store.attempts(&kept.text.id, "One two. Three four.").unwrap().len(), 1);
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(&store.data);
     }
