@@ -68,6 +68,13 @@ pub fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The words of a text as Parrot takes them in (added, edited, or a talk kept): normalised, and without the invisible
+/// byte order mark two pasted files or some web and Word copies leave in, which the window and the engine would cut
+/// differently. Only new words are cleaned: the parts of a text kept before keep their names.
+pub fn clean(text: &str) -> String {
+    norm(&text.replace('\u{FEFF}', ""))
+}
+
 /// Whether `text` has a word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none).
 pub fn has_words(text: &str) -> bool {
     text.chars().any(char::is_alphanumeric)
@@ -411,7 +418,7 @@ impl Store {
     /// practised chosen since; given `title` only if it has none of its own), else a new one with `title` and
     /// `details` (its mode, whether it began as a talk).
     fn add_with(&self, text: &str, title: Option<String>, details: &[(&str, Option<Value>)]) -> Result<TextItem, String> {
-        let body = norm(text);
+        let body = clean(text);
         if body.is_empty() {
             return Err("the text is empty".into());
         }
@@ -726,6 +733,40 @@ mod tests {
         assert_eq!(sha("Hello   there."), "95e3ac5665");
         assert_eq!(sha("I'm a front-end engineer with a bit over ten years"), "091ec5749e");
         assert_eq!(sha("I'm a front-end engineer").len(), 10);
+    }
+
+    // the same cases as split.spec.ts "cuts and names the parts as the engine does", so the window finds the tries the
+    // engine files: a byte order mark is part of a word, a next line (U+0085) is a space
+    #[test]
+    fn parts_are_named_as_the_window_names_them() {
+        let cases: [(&str, &str, &[&str]); 6] = [
+            ("Hello\u{FEFF}there. How are you?", "whole", &["9bdb8f3d9b"]),
+            ("Hello\u{FEFF}there. How are you?", "sentences", &["840842a6e4", "3031897e28"]),
+            ("\u{FEFF}Hello there. How are you?", "whole", &["7149316f67"]),
+            ("\u{FEFF}Hello there. How are you?", "sentences", &["a4e1204ae4", "3031897e28"]),
+            ("Hello\u{85}there. How are you?", "whole", &["29c51c722c"]),
+            ("Hello\u{85}there. How are you?", "sentences", &["95e3ac5665", "3031897e28"]),
+        ];
+        for (text, mode, keys) in cases {
+            let words: Vec<&str> = text.split_whitespace().collect();
+            let named: Vec<String> = crate::text::parts(&words, mode).into_iter().map(|part| sha(&words[part].join(" "))).collect();
+            assert_eq!(named, keys, "{text:?} {mode}");
+        }
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_left_out_of_the_words_taken_in() {
+        let dir = std::env::temp_dir().join(format!("parrot-store-bom-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        let plain = store.add("Hello there. How are you?", None, Some("sentences".into())).unwrap();
+        // two files pasted together, the second's mark between them: the same words, so the same text
+        let pasted = store.add("\u{FEFF}Hello there.\n\u{FEFF}How are you?", None, None).unwrap();
+        assert_eq!((pasted.id.as_str(), pasted.text.as_str()), (plain.id.as_str(), "Hello there. How are you?"));
+        // inside a word it is no space: the word stays one
+        assert_eq!(store.add("Hel\u{FEFF}lo there.", None, None).unwrap().text, "Hello there.");
+        assert_eq!(clean(" \u{FEFF} "), "");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

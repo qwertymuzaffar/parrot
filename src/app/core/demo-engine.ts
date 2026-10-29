@@ -15,7 +15,7 @@ import {
   WordStatus,
 } from './models';
 import { nameKey } from './names';
-import { bare, inEnglish, partKey, sentences, wordCount } from './split';
+import { bare, inEnglish, norm, partKey, sentences, wordCount } from './split';
 
 /** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
 interface DemoText {
@@ -474,10 +474,6 @@ function joined(blocks: Int16Array[], samples: number) {
     at += block.length;
   }
   return pcm;
-}
-
-function norm(text: string) {
-  return text.split(/\s+/).filter(Boolean).join(' ');
 }
 
 function listOf(tries: Map<string, Attempt[]>, key: string) {
