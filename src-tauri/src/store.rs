@@ -67,6 +67,11 @@ pub fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Whether `text` has a word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none).
+pub fn has_words(text: &str) -> bool {
+    text.chars().any(char::is_alphanumeric)
+}
+
 pub fn sha(text: &str) -> String {
     let digest = Sha1::digest(norm(text).as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()[..10].to_string()
@@ -396,6 +401,9 @@ impl Store {
         if body.is_empty() {
             return Err("the text is empty".into());
         }
+        if !has_words(&body) {
+            return Err("the text has no words".into());
+        }
         let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty()).map(Value::from);
         if let Some(dir) = self.with_words(&body) {
             let untitled = Self::meta(&dir).get("title").and_then(Value::as_str).is_none_or(str::is_empty);
@@ -712,6 +720,20 @@ mod tests {
         assert_eq!(store.update(&id, Some("Hi".into()), None, true).unwrap().title, "Hi");
         store.delete(&id).unwrap();
         assert!(store.list().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_text_with_no_words_is_not_added() {
+        let dir = std::env::temp_dir().join(format!("parrot-store-wordless-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        assert_eq!(store.add("   ", None, None).map(|item| item.id), Err("the text is empty".into()));
+        for wordless in [". . .", "... !!! ??? --- ***", "\u{200B}"] {
+            assert_eq!(store.add(wordless, None, None).map(|item| item.id), Err("the text has no words".into()), "{wordless:?}");
+        }
+        assert!(store.list().is_empty());
+        // a word of digits or of another alphabet is a word
+        assert!(store.add("1 2 3", None, None).is_ok() && store.add("привет мир", None, None).is_ok());
         let _ = fs::remove_dir_all(dir);
     }
 

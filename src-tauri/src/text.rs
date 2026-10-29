@@ -514,10 +514,17 @@ pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>
             }
         }
     }
-    // words that own no token of their own share the verdict of the word before ("fifty-nine" of "nineteen fifty-nine")
+    // words that own no token of their own share the verdict of the word before ("fifty-nine" of "nineteen fifty-nine");
+    // but a word of letters none of which can be matched ("привет", "東京") can't be found in what was heard, whatever
+    // was said: it is not heard, rather than good for free
     let owned: HashSet<usize> = owner.iter().copied().collect();
-    for word_index in 1..sw.len() {
-        if !owned.contains(&word_index) {
+    for (word_index, word) in sw.iter().enumerate() {
+        if owned.contains(&word_index) {
+            continue;
+        }
+        if raw_words(word).is_empty() && word.chars().any(char::is_alphabetic) {
+            wrong[word_index] = Some(String::new());
+        } else if word_index > 0 {
             wrong[word_index] = wrong[word_index - 1].clone();
         }
     }
@@ -987,6 +994,23 @@ mod tests {
         let results = judge(text, "the beautiful sinks", &mine, Some(&reference));
         assert_eq!(results.iter().map(|word| word.status).collect::<Vec<_>>(), vec![WordStatus::Good, WordStatus::Unclear, WordStatus::Wrong]);
         assert_eq!(results[2].heard.as_deref(), Some("sinks"));
+    }
+
+    #[test]
+    fn a_word_of_letters_that_cannot_be_matched_is_not_good_for_free() {
+        let statuses = |text: &str, heard: &str| judge(text, heard, &[], None).into_iter().map(|word| (word.w, word.status)).collect::<Vec<_>>();
+        assert_eq!(statuses("привет мир", "hello world"), [("привет".into(), WordStatus::Wrong), ("мир".into(), WordStatus::Wrong)]);
+        assert_eq!(statuses("I love 東京", "i love tokyo")[2], ("東京".into(), WordStatus::Wrong));
+        // punctuation alone, and the second half of a number, still go with the word before
+        assert_eq!(
+            statuses("Well — nineteen fifty-nine", "well nineteen fifty nine"),
+            [
+                ("Well".into(), WordStatus::Good),
+                ("—".into(), WordStatus::Good),
+                ("nineteen".into(), WordStatus::Good),
+                ("fifty-nine".into(), WordStatus::Good)
+            ]
+        );
     }
 
     #[test]

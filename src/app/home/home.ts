@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { Mode, Part, TextItem } from '../core/models';
 import { readSetting } from '../core/settings';
-import { sentences, shortRanges, splitKnown, splitText } from '../core/split';
+import { sentences, shortRanges, splitKnown, splitText, wordCount } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
@@ -63,7 +63,8 @@ export class Home {
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
   private textsColumn = viewChild.required<ElementRef<HTMLElement>>('textsColumn');
 
-  protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
+  /** the draft's words to say: punctuation alone is none, and a draft with none can't be added */
+  protected readonly words = computed(() => wordCount(this.draft()));
   /** how many parts each way of practising would give the draft */
   protected readonly counts = computed(() => {
     const text = this.draft().trim();
@@ -142,7 +143,7 @@ export class Home {
 
   protected async start() {
     const text = this.draft().trim();
-    if (!text || this.adding()) return;
+    if (!this.words() || this.adding()) return;
     this.adding.set(true);
     try {
       // the draft stays until the text is added: if the engine won't add it, it can be tried again
