@@ -175,6 +175,9 @@ pub struct Talks {
     heard: Condvar,
     cancel: AtomicBool,
     generation: AtomicU64,
+    /// the talk kept last, until another starts or it is discarded: the text it became, and its take. A keep sent
+    /// again (the window gave up waiting on the first, which went on) answers with what the first made
+    kept: Mutex<Option<(String, Attempt)>>,
 }
 
 impl Talks {
@@ -202,7 +205,14 @@ impl Talks {
                 let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
             }
         }
-        Talks { dir, current: Mutex::new(left), heard: Condvar::new(), cancel: AtomicBool::new(false), generation: AtomicU64::new(0) }
+        Talks {
+            dir,
+            current: Mutex::new(left),
+            heard: Condvar::new(),
+            cancel: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            kept: Mutex::new(None),
+        }
     }
 
     /// The talk left from the last time Parrot ran, if it is still here: not yet started again, kept or discarded.
@@ -221,6 +231,11 @@ impl Talks {
 
     fn current(&self) -> MutexGuard<'_, Option<Talk>> {
         self.current.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Taken only while `current` is held, so that the two are always taken in the same order.
+    fn kept(&self) -> MutexGuard<'_, Option<(String, Attempt)>> {
+        self.kept.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Start a talk recorded at `rate`, dropping one not kept.
@@ -351,6 +366,7 @@ impl Talks {
     pub fn discard(&self) -> Result<(), String> {
         self.cancel();
         let mut current = self.current();
+        *self.kept() = None;
         if let Some(talk) = current.take() {
             drop(talk.writer);
             let _ = fs::remove_file(talk.path.with_extension("json"));
@@ -550,22 +566,40 @@ impl Talk {
 impl Talks {
     /// Keep the talk written down: `said` (what was heard, as the user corrected it) becomes a text practised whole,
     /// titled `title`, and the recording its first take, judged against it as a reading is: a word the user corrected
-    /// is misheard, as what speech recognition wrote. The talk is over once kept.
-    pub fn keep(&self, listener: &impl Listen, store: &Store, said: &str, title: Option<String>) -> Result<Kept, String> {
+    /// is misheard, as what speech recognition wrote. The talk is over once kept; kept again (the window gave up
+    /// waiting), it gives what the first keep made. `progress` gets the steps done (a stretch scored, a sentence cut)
+    /// and how many there are, after each.
+    pub fn keep(
+        &self,
+        listener: &impl Listen,
+        store: &Store,
+        said: &str,
+        title: Option<String>,
+        progress: impl Fn(usize, usize),
+    ) -> Result<Kept, String> {
         let mut current = self.current();
-        let talk = current.as_mut().ok_or("there is no talk to keep")?;
+        let Some(talk) = current.as_mut() else {
+            // a keep sent again waited here for the first to finish
+            let (id, attempt) = self.kept().clone().ok_or("there is no talk to keep")?;
+            return Ok(Kept { text: store.text(&id)?, attempt });
+        };
         let written = talk.written.as_ref().ok_or("write the talk down first")?;
         let pcm = audio::read_wav_file(&talk.path)?;
         let duration = pcm.seconds();
         let samples = audio::resample(&pcm, 16000);
         drop(pcm);
         let said = store::norm(said);
+        // a text of one sentence is not cut
+        let sentences = Some(text::sentences(&said)).filter(|sentences| sentences.len() > 1).unwrap_or_default();
+        let stretches = written.len();
+        let steps = stretches + sentences.len();
         let names = store.names();
         // each stretch judged against the words the user meant in it, as it was written down: placing the whole talk
         // at once would take hundreds of MB
         let mut words: Vec<WordResult> = vec![];
-        for (part, meant) in written.iter().zip(share_out(written, &said)) {
+        for (index, (part, meant)) in written.iter().zip(share_out(written, &said)).enumerate() {
             if meant.is_empty() {
+                progress(index + 1, steps);
                 continue;
             }
             let reheard = Reheard { listener, written: part };
@@ -576,6 +610,7 @@ impl Talks {
             words.extend(
                 scored.words.into_iter().map(|word| WordResult { t: word.t.map(|[from, to]| [round3(from + offset), round3(to + offset)]), ..word }),
             );
+            progress(index + 1, steps);
         }
         drop(samples);
         // the text with these words: a new one, spoken, or the one that has them (pasted, or talked before), as it is
@@ -608,13 +643,13 @@ impl Talks {
             talk.save()?;
             store.save_attempt(&dir, &attempt)?;
             // each sentence's first try, cut from the talk: practised in sentences, the text has them already
-            let sentences = text::sentences(&attempt.text);
-            if sentences.len() > 1 {
+            if !sentences.is_empty() {
                 // read again, one recording in memory at a time
                 let pcm = audio::read_wav_file(&talk.path)?;
                 let said: Vec<&str> = attempt.text.split_whitespace().collect();
-                for (sentence, span) in sentences.iter().zip(cuts(&attempt.words, &sentences, duration)) {
+                for (index, (sentence, span)) in sentences.iter().zip(cuts(&attempt.words, &sentences, duration)).enumerate() {
                     cut_take(store, &text.id, &said[sentence.clone()].join(" "), &attempt, sentence.clone(), &pcm, span, &now, &mut filed)?;
+                    progress(stretches + index + 1, steps);
                 }
             }
             // the recording moves in last: until the take is whole, the talk is where it was
@@ -635,6 +670,7 @@ impl Talks {
         }
         let _ = fs::remove_file(talk.path.with_extension("json"));
         *current = None;
+        *self.kept() = Some((text.id.clone(), attempt.clone()));
         // read again: its scores now count the take
         Ok(Kept { text: store.text(&text.id)?, attempt })
     }
@@ -1057,14 +1093,17 @@ mod tests {
         talks.start(16000).unwrap();
         talks.feed(&speech(16000, 40.0)).unwrap();
         let listener = Stretches { heard: "Muzafar was here, and so were the things.", lengths: RefCell::new(vec![]) };
-        assert!(talks.keep(&listener, &store, "anything", None).unwrap_err().contains("write the talk down first"));
+        assert!(talks.keep(&listener, &store, "anything", None, |_, _| {}).unwrap_err().contains("write the talk down first"));
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
         let stretches = listener.lengths.borrow().len();
         assert_eq!(stretches, 2);
         store.set_name("Muzaffar", true).unwrap();
         // what was meant: the name spelt right, "things" was "thinks" in the second stretch, and a word added
         let meant = heard.heard.replacen("Muzafar", "Muzaffar", 1).replacen("things.", "thinks.", 2).replacen("thinks.", "things.", 1) + " Really.";
-        let kept = talks.keep(&listener, &store, &meant, Some("Who was here".into())).unwrap();
+        let steps = RefCell::new(vec![]);
+        let kept = talks.keep(&listener, &store, &meant, Some("Who was here".into()), |done, total| steps.borrow_mut().push((done, total))).unwrap();
+        // a step after each stretch scored and each sentence cut, so that the window waits as long as it goes on
+        assert_eq!(steps.into_inner(), [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]);
 
         let words = &kept.attempt.words;
         assert_eq!(words.len(), meant.split_whitespace().count(), "every word meant is judged");
@@ -1084,7 +1123,15 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert!(store.data.join(&kept.attempt.audio).exists(), "the recording moved in with the try");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "and out of talks/");
-        assert!(talks.keep(&listener, &store, &meant, None).is_err(), "a talk is kept once");
+        // kept again (the window gave up waiting on the first keep, which went on): what the first made, once
+        let again = talks.keep(&listener, &store, &meant, None, |_, _| {}).unwrap();
+        assert_eq!((again.text.id.as_str(), again.attempt.id.as_str()), (kept.text.id.as_str(), kept.attempt.id.as_str()));
+        assert_eq!((store.list().len(), store.attempts(&kept.text.id, &meant).unwrap().len()), (1, 1), "a talk is kept once");
+        // but not once another talk is under way, or the talk kept was discarded since
+        talks.start(16000).unwrap();
+        assert!(talks.keep(&listener, &store, &meant, None, |_, _| {}).unwrap_err().contains("write the talk down first"));
+        talks.discard().unwrap();
+        assert_eq!(talks.keep(&listener, &store, &meant, None, |_, _| {}).unwrap_err(), "there is no talk to keep");
 
         // each sentence has its first try, cut from the talk
         let sentences: Vec<String> =
@@ -1124,7 +1171,7 @@ mod tests {
         let text = store.add(&heard.heard, None, None).unwrap();
         let blocked = store.text_dir(&text.id).unwrap().join(format!("p-{}", store::sha("One two.")));
         fs::write(&blocked, b"").unwrap();
-        assert!(talks.keep(&listener, &store, &heard.heard, None).is_err());
+        assert!(talks.keep(&listener, &store, &heard.heard, None, |_, _| {}).is_err());
         // nothing of the take is filed, and the talk is where it was
         assert!(store.attempts(&text.id, &heard.heard).unwrap().is_empty());
         let wavs =
@@ -1133,7 +1180,7 @@ mod tests {
         assert_eq!(wavs(&dir), 1);
         // so it can be kept once the way is clear
         fs::remove_file(&blocked).unwrap();
-        let kept = talks.keep(&listener, &store, &heard.heard, None).unwrap();
+        let kept = talks.keep(&listener, &store, &heard.heard, None, |_, _| {}).unwrap();
         assert!(store.data.join(&kept.attempt.audio).exists());
         assert_eq!(wavs(&dir), 0);
         let _ = fs::remove_dir_all(dir);
@@ -1155,7 +1202,7 @@ mod tests {
         talks.feed(&speech(16000, 20.0)).unwrap();
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
         // the talk, heard as the words the text was added with, is a text of its own: the pasted one has other words
-        let kept = talks.keep(&listener, &store, &heard.heard, Some("My talk".into())).expect("the talk is kept");
+        let kept = talks.keep(&listener, &store, &heard.heard, Some("My talk".into()), |_, _| {}).expect("the talk is kept");
         assert_ne!(kept.text.id, pasted);
         assert_eq!((kept.text.text.as_str(), kept.text.title.as_str(), kept.text.mode.as_str(), kept.text.spoken), (said, "My talk", "whole", true));
         assert_eq!(store.attempts(&kept.text.id, said).unwrap().len(), 1);
@@ -1168,7 +1215,7 @@ mod tests {
         talks.start(16000).unwrap();
         talks.feed(&speech(16000, 20.0)).unwrap();
         let heard = talks.write_down(&listener, |_, _| {}).unwrap();
-        let again = talks.keep(&listener, &store, &heard.heard, Some("Another title".into())).unwrap();
+        let again = talks.keep(&listener, &store, &heard.heard, Some("Another title".into()), |_, _| {}).unwrap();
         assert_eq!((again.text.id.as_str(), again.text.title.as_str()), (kept.text.id.as_str(), "My talk"));
         assert_eq!(store.attempts(&kept.text.id, said).unwrap().len(), 2);
         // a talk whose words a pasted text has goes into that text, which is no talk for it and keeps its own title,
@@ -1178,7 +1225,7 @@ mod tests {
         talks.start(16000).unwrap();
         talks.feed(&speech(16000, 8.0)).unwrap();
         let heard = talks.write_down(&short, |_, _| {}).unwrap();
-        let into = talks.keep(&short, &store, &heard.heard, Some("Counting on".into())).unwrap();
+        let into = talks.keep(&short, &store, &heard.heard, Some("Counting on".into()), |_, _| {}).unwrap();
         assert_eq!(
             (into.text.id.as_str(), into.text.title.as_str(), into.text.mode.as_str(), into.text.spoken),
             (plain.as_str(), "Counting on", "short", false)
@@ -1296,7 +1343,7 @@ mod tests {
         assert!((left.duration - heard.duration).abs() < 0.01, "the cleaned recording's length");
         // kept as it is, without hearing it again
         let deaf = Stretches { heard: "nothing like it", lengths: RefCell::new(vec![]) };
-        let kept = talks.keep(&deaf, &store, &heard.heard, None).unwrap();
+        let kept = talks.keep(&deaf, &store, &heard.heard, None, |_, _| {}).unwrap();
         assert_eq!(kept.attempt.heard, heard.heard);
         assert!(deaf.lengths.borrow().is_empty());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "nothing of it left in talks/");
@@ -1368,7 +1415,7 @@ mod tests {
         };
         let talks = Talks::open(dir.clone());
         let (said, files) = talk(&talks);
-        let kept = talks.keep(&listener, &store, &said, Some("Counting".into())).unwrap();
+        let kept = talks.keep(&listener, &store, &said, Some("Counting".into()), |_, _| {}).unwrap();
         let id = kept.text.id.clone();
         let whole = data.join(&kept.attempt.audio);
         let tries = |store: &Store| {
@@ -1386,7 +1433,7 @@ mod tests {
         // file every try a second time, the first with no recording
         let talks = Talks::open(dir.clone());
         if let Some(left) = talks.left() {
-            talks.keep(&deaf(), &store, &left.heard.unwrap().heard, Some("Counting".into())).unwrap();
+            talks.keep(&deaf(), &store, &left.heard.unwrap().heard, Some("Counting".into()), |_, _| {}).unwrap();
         }
         assert_eq!(tries(&store), (1, 1, 1), "the take is filed once");
         assert!(talks.left().is_none() && fs::read_dir(&dir).unwrap().count() == 0, "the talk is over");
@@ -1396,7 +1443,7 @@ mod tests {
         // a quit before the take's result was filed: nothing of the take is kept, and the talk is here to keep again
         let (said, files) = talk(&talks);
         let before = walk(&data.join("texts"));
-        let kept = talks.keep(&listener, &store, &said, None).unwrap();
+        let kept = talks.keep(&listener, &store, &said, None, |_, _| {}).unwrap();
         quit(talks);
         for path in walk(&data.join("texts")).iter().filter(|path| !before.contains(path)) {
             fs::remove_file(path).unwrap();
@@ -1407,7 +1454,7 @@ mod tests {
         let talks = Talks::open(dir.clone());
         assert!(talks.left().is_some(), "offered again");
         assert!(!claimed.exists(), "the empty file that claimed the take's name is gone");
-        talks.keep(&deaf(), &store, &said, None).unwrap();
+        talks.keep(&deaf(), &store, &said, None, |_, _| {}).unwrap();
         assert_eq!(tries(&store), (2, 2, 2));
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
         let _ = fs::remove_dir_all(data);
