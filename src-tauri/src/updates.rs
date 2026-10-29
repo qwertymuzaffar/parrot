@@ -21,7 +21,10 @@ pub struct Release {
 }
 
 pub async fn latest() -> Result<Release, String> {
-    let client = reqwest::Client::builder().user_agent("Parrot").timeout(Duration::from_secs(15)).build().map_err(|error| error.to_string())?;
+    let client = reqwest::Client::builder().user_agent("Parrot").timeout(Duration::from_secs(15)).build().map_err(|error| {
+        log::warn!("could not start checking for updates: {error}");
+        "Couldn't start checking for updates. Try again.".to_string()
+    })?;
     let response = client
         .get(LATEST)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")

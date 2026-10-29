@@ -250,3 +250,78 @@ describe('Settings: opening again', () => {
     expect(lines()).toEqual([...shown.slice(0, -1), 'Empty trash · 5 MB']);
   });
 });
+
+describe('Settings: emptying the trash, on the keyboard', () => {
+  let emptied: () => Promise<number>;
+
+  async function settings() {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Updates, useValue: new FakeUpdates() },
+        {
+          provide: Engine,
+          useValue: {
+            info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }),
+            names: async () => [],
+            trashSize: async () => 2_000_000,
+            emptyTrash: () => emptied(),
+          },
+        },
+        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+      ],
+    });
+    const fixture = TestBed.createComponent(Settings);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    document.body.append(element);
+    // open: what is in a closed dialog takes no focus
+    element.querySelector('dialog')!.setAttribute('open', '');
+    const button = (text: string) => [...element.querySelectorAll('button')].find((each) => each.textContent!.trim() === text)!;
+    /** Enter on a focused button: a key, then the click it makes */
+    const enter = async (target: HTMLElement) => {
+      target.focus();
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      target.click();
+      await fixture.whenStable();
+    };
+    return { element, button, enter, update: () => fixture.whenStable() };
+  }
+  const focused = () => document.activeElement?.textContent!.replace(/\s+/g, ' ').trim();
+
+  beforeEach(() => (emptied = async () => 0));
+  afterEach(() => document.body.replaceChildren());
+
+  it('goes to Keep when asked whether to empty it, and back to Empty trash after it', async () => {
+    const { button, enter } = await settings();
+    await enter(button('Empty trash · 2 MB'));
+    expect(focused()).toBe('Keep');
+    await enter(button('Keep'));
+    expect(focused()).toBe('Empty trash · 2 MB');
+  });
+
+  it('goes to the line about the trash once it is emptied, its button not to be pressed', async () => {
+    const { button, enter } = await settings();
+    await enter(button('Empty trash · 2 MB'));
+    await enter(button('Empty'));
+    expect(button('The trash is empty').disabled).toBe(true);
+    expect(focused()).toBe('A deleted text stays in the trash for 30 days, then Parrot erases it for good.');
+  });
+
+  it('goes back to Empty trash when it could not be emptied, to try again', async () => {
+    emptied = () => Promise.reject(new EngineError('The speech engine is not running.'));
+    const { element, button, enter } = await settings();
+    await enter(button('Empty trash · 2 MB'));
+    await enter(button('Empty'));
+    expect(element.textContent).toContain('The speech engine is not running.');
+    expect(focused()).toBe('Empty trash · 2 MB');
+  });
+
+  it('is not put on the trash for a click, which left it on the page', async () => {
+    const { button, update } = await settings();
+    button('Empty trash · 2 MB').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    button('Empty trash · 2 MB').click();
+    await update();
+    expect(button('Keep')).toBeTruthy();
+    expect(document.activeElement).toBe(document.body);
+  });
+});

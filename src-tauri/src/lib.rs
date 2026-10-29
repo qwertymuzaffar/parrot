@@ -299,9 +299,15 @@ fn score_word(listener: &impl Listen, audio: &[f32], secs: f64, word: &str, name
     Ok(scored)
 }
 
+/// What the window says when a command's work panics (or is cancelled): the panic's own words are only for the log.
+const UNEXPECTED: &str = "Parrot hit a problem it didn't expect; try again, or restart Parrot";
+
 /// Run blocking engine work off the main thread.
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| {
+        log::error!("a command stopped short: {error}");
+        UNEXPECTED.to_string()
+    })?
 }
 
 #[tauri::command]
@@ -515,11 +521,20 @@ async fn talk_stop(app: AppHandle, engine: State<'_, Shared>, talks: State<'_, A
 }
 
 /// Keep the talk written down as a text: `text` is what was said, as the user corrected it, practised whole, and the
-/// recording is its first take.
+/// recording is its first take. Reports "keep-progress" events (stretches scored and sentences cut, of how many).
 #[tauri::command]
-async fn talk_keep(engine: State<'_, Shared>, talks: State<'_, Arc<talk::Talks>>, text: String, title: Option<String>) -> Result<talk::Kept, String> {
+async fn talk_keep(
+    app: AppHandle,
+    engine: State<'_, Shared>,
+    talks: State<'_, Arc<talk::Talks>>,
+    text: String,
+    title: Option<String>,
+) -> Result<talk::Kept, String> {
     let (engine, talks) = (engine.inner().clone(), talks.inner().clone());
-    blocking(move || talks.keep(&*engine, &engine.store, &text, title)).await
+    blocking(move || {
+        talks.keep(&*engine, &engine.store, &text, title, |done, total| drop(app.emit("keep-progress", json!({ "done": done, "total": total }))))
+    })
+    .await
 }
 
 /// Stop writing down the talk; its recording is kept, to write down again or discard.
@@ -927,7 +942,7 @@ mod tests {
         let mut meant: Vec<String> = heard.heard.split_whitespace().map(String::from).collect();
         meant[written] = "Parakeet".into();
         let started = std::time::Instant::now();
-        let kept = talks.keep(&engine, &engine.store, &meant.join(" "), None).unwrap();
+        let kept = talks.keep(&engine, &engine.store, &meant.join(" "), None, |_, _| {}).unwrap();
         eprintln!("kept in {:.1} s · score {}", started.elapsed().as_secs_f64(), kept.attempt.score);
         assert_eq!(kept.attempt.words.len(), meant.len());
         assert_eq!(kept.attempt.words[written].status, WordStatus::Wrong);
@@ -1112,5 +1127,14 @@ mod tests {
         let busy = Mutex::new(Some(2));
         let _held = busy.lock().unwrap();
         assert!(lock_unless_busy(&busy).is_none());
+    }
+
+    #[test]
+    fn a_command_that_panics_is_said_plainly() {
+        let said = tauri::async_runtime::block_on(blocking(|| -> Result<(), String> { panic!("index out of bounds") }));
+        assert_eq!(said, Err(UNEXPECTED.to_string()));
+        // work that finishes, or fails in its own words, is untouched
+        assert_eq!(tauri::async_runtime::block_on(blocking(|| Ok(2))), Ok(2));
+        assert_eq!(tauri::async_runtime::block_on(blocking(|| Err::<(), _>("the text was deleted".to_string()))), Err("the text was deleted".into()));
     }
 }

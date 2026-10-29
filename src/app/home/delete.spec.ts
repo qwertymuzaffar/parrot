@@ -100,4 +100,64 @@ describe('deleting a text on the home screen', () => {
     card()!.click();
     expect(opened).toEqual([text.id]);
   });
+
+  /** Focus as a keyboard user has it: keys pressed (Enter on a button), the card's button going with what it replaced. */
+  describe('keyboard focus', () => {
+    const enter = async (target: HTMLElement) => {
+      target.focus();
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      target.click();
+      await fixture.whenStable();
+    };
+    const focused = () => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent!.trim();
+    /** the card of a title, and its button labelled so */
+    const on = (title: string, label: string) =>
+      [
+        ...[...document.querySelectorAll('.card.text')]
+          .find((each) => each.querySelector('h3')?.textContent!.trim() === title)!
+          .querySelectorAll<HTMLButtonElement>('button'),
+      ].find((each) => each.getAttribute('aria-label') === label || each.textContent!.trim() === label)!;
+    const titled = (title: string, id: string): TextItem => ({ ...text, id, title, text: `${title}. Said out loud.`, opened: null });
+
+    it('goes to Keep when asked whether to delete, and back to Delete after it', async () => {
+      await enter(button('Delete')!);
+      expect(focused()).toBe('Keep');
+      await enter(button('Keep')!);
+      expect(focused()).toBe('Delete');
+      expect(document.activeElement).toBe(button('Delete'));
+    });
+
+    it('goes on to the next card after a delete, else the one before, else the heading of the texts', async () => {
+      texts.set([titled('First', 'a1'), titled('Second', 'b2'), titled('Third', 'c3')]);
+      await fixture.whenStable();
+      const remove = async (title: string) => {
+        await enter(on(title, 'Delete'));
+        await enter(on(title, 'Delete'));
+        // nothing to press on the card while the engine moves it to the trash
+        expect(document.activeElement).toBe(document.body);
+        deleted();
+        await fixture.whenStable();
+      };
+      await remove('Second');
+      expect(focused()).toBe('Third');
+      await remove('Third');
+      expect(focused()).toBe('First');
+      await remove('First');
+      expect(focused()).toBe('Your texts');
+    });
+
+    it('goes back to Delete if the engine keeps the text', async () => {
+      TestBed.inject(Library).remove = async () => undefined;
+      await enter(button('Delete')!);
+      await enter(button('Delete')!);
+      expect(document.activeElement).toBe(button('Delete'));
+    });
+
+    it('is not put on the card for a click, which left it on the page', async () => {
+      button('Delete')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      button('Delete')!.click();
+      await fixture.whenStable();
+      expect(document.activeElement).toBe(document.body);
+    });
+  });
 });
