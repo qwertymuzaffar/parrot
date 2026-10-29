@@ -3,7 +3,7 @@ import { errorMessage, Library } from '../core/library';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
-import { wordCount } from '../core/split';
+import { inEnglish, wordCount } from '../core/split';
 import { WordPractice } from '../core/word-practice';
 import { Icon } from '../shared/icon';
 
@@ -34,6 +34,9 @@ export const STUCK_MS = 15_000;
           [disabled]="busy()"
           (input)="words.set($any($event.target).value)"
         ></textarea>
+        @if (!inEnglish(words())) {
+          <p class="hint">Parrot checks English only</p>
+        }
         @if (failure(); as failure) {
           <p class="error" role="alert">{{ failure }}</p>
         }
@@ -53,7 +56,7 @@ export const STUCK_MS = 15_000;
             }
           } @else {
             <button class="btn ghost" (click)="close()">Cancel</button>
-            <button class="btn primary" [disabled]="!wordCount(words())" (click)="save()">Save</button>
+            <button class="btn primary" [disabled]="!wordCount(words()) || !inEnglish(words())" (click)="save()">Save</button>
           }
         </div>
       </div>
@@ -128,6 +131,7 @@ export class EditWords {
 
   protected readonly words = signal('');
   protected readonly wordCount = wordCount;
+  protected readonly inEnglish = inEnglish;
   protected readonly busy = signal(false);
   protected readonly done = signal(0);
   protected readonly total = signal(0);

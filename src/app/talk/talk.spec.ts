@@ -372,6 +372,23 @@ describe('Just talk', () => {
       expect(talking.keep).toHaveBeenCalledWith('I moved here tree years ago.', 'Moving');
     });
 
+    it('does not keep words typed in another alphabet, and says Parrot checks English only', async () => {
+      const preview = await render(TalkPreview);
+      const said = preview.element.querySelector<HTMLTextAreaElement>('textarea')!;
+      said.value = 'Я переехал сюда три года назад.';
+      said.dispatchEvent(new Event('input'));
+      await preview.update();
+      expect([preview.text(), preview.button(/Save and practise/).disabled]).toEqual([
+        expect.stringContaining('Parrot checks English only'),
+        true,
+      ]);
+      // a name in another alphabet among English words is fine
+      said.value = 'I moved to Москва three years ago.';
+      said.dispatchEvent(new Event('input'));
+      await preview.update();
+      expect([preview.text().includes('Parrot checks English only'), preview.button(/Save and practise/).disabled]).toEqual([false, false]);
+    });
+
     it('asks before discarding a talk, however short', async () => {
       talking.talk.set({ ...TALK, duration: 8 });
       const preview = await render(TalkPreview);

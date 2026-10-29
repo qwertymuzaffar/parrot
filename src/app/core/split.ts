@@ -131,6 +131,18 @@ const isWord = (word: string) => /[\p{L}\p{N}]/u.test(word);
 /** How many words to say `text` has: a text with none is not taken, by the window or the engine. */
 export const wordCount = (text: string) => text.split(/\s+/).filter(isWord).length;
 
+/** Whether a word reads in English: it has a letter a to z under its marks ("café", "naïve") or a digit, said as a
+ * number. "привет", "東京" and "ß" do not: Parrot hears English only, and matches a word by its a-to-z letters. */
+const readsInEnglish = (word: string) => /[a-z0-9]/i.test(word.normalize('NFD'));
+
+/** Whether Parrot can check `text`: no more than half its words to say are in another alphabet, as the engine counts
+ * them. A name or a few words in one are fine; a text in one would score 0% whatever is said, so it is not taken, by
+ * the window or the engine. A text with no words passes here: wordCount turns it away. */
+export function inEnglish(text: string): boolean {
+  const words = text.split(/\s+/).filter(isWord);
+  return words.filter((word) => !readsInEnglish(word)).length * 2 <= words.length;
+}
+
 /** A word without the punctuation around it, for the dictionary and the voice: at its ends only, as the engine trims it
  * ("2.5" and "Node.js" keep theirs). */
 export const bare = (word: string) => word.replace(/^[.,;:!?"“”()]+|[.,;:!?"“”()]+$/g, '');

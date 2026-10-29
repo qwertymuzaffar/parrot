@@ -1,4 +1,4 @@
-import { bare, forgetSplits, sentences, shortRanges, splitKnown, splitText, wordCount } from './split';
+import { bare, forgetSplits, inEnglish, sentences, shortRanges, splitKnown, splitText, wordCount } from './split';
 
 describe('the splits kept', () => {
   it('keeps a split by its words and mode, and forgets the splits of words gone in every mode', async () => {
@@ -106,5 +106,18 @@ describe('bare', () => {
 describe('wordCount', () => {
   it('counts the words with a letter or a digit in them, in any alphabet', () => {
     expect(['Hello there.', '... !!! ??? --- ***', '\u200B', 'привет — мир, 東京 2.5'].map(wordCount)).toEqual([2, 0, 0, 4]);
+  });
+});
+
+describe('inEnglish', () => {
+  // the engine's store.rs checks the same texts the same way
+  it('turns away a text most of whose words have no letter a to z under their marks', () => {
+    expect(['Привет, как дела?', '東京へ行きます', 'ß ß', 'Hello, привет мир!'].map(inEnglish)).toEqual([false, false, false, false]);
+  });
+
+  it('takes a few names or words in another alphabet, accents, and numbers', () => {
+    expect(
+      ['I flew from Tokyo to Moscow and said Привет to everyone.', 'Hello, привет!', 'Café au lait, naïve', '1 2 3', '...'].map(inEnglish),
+    ).toEqual([true, true, true, true, true]);
   });
 });

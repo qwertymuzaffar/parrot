@@ -58,6 +58,9 @@ describe('DemoEngine', () => {
     expect((await engine.texts()).map((text) => text.id)).not.toContain(added.id);
     await expect(engine.addText(' ', '', 'whole')).rejects.toThrow(new EngineError('the text is empty'));
     await expect(engine.addText('. . . !!!', '', 'whole')).rejects.toThrow(new EngineError('the text has no words'));
+    // Parrot hears English only: a text in another alphabet would score 0% whatever is said
+    await expect(engine.addText('Привет, как дела?', '', 'whole')).rejects.toThrow(new EngineError('Parrot checks English only'));
+    expect((await engine.addText('We said Привет in Tokyo.', '', 'whole')).words).toBe(5);
   });
 
   it('scores a take without hearing it, and plays it back from where it was recorded', async () => {
@@ -131,6 +134,8 @@ describe('DemoEngine', () => {
     expect((await engine.attempts(intro.id, first)).length).toBe(0);
     expect((await engine.attempts(intro.id, second)).length).toBe(1);
     await expect(engine.editText(intro.id, '  ', () => {})).rejects.toBeInstanceOf(EngineError);
+    await expect(engine.editText(intro.id, '東京へ行きます', () => {})).rejects.toThrow(new EngineError('Parrot checks English only'));
+    expect((await engine.texts()).find((text) => text.id === intro.id)?.text).toBe(changed);
   });
 
   it('refuses a talk over thirty minutes', async () => {

@@ -106,4 +106,14 @@ describe('a new text on the home screen', () => {
       expect([hint(), startButton().disabled, textarea().value]).toEqual(['Parrot reads it to you, then listens to you.', true, wordless]);
     }
   });
+
+  it('does not take a text in another alphabet, and says Parrot checks English only', async () => {
+    for (const foreign of ['Привет, как дела?', '東京へ行きます']) {
+      await start(foreign);
+      expect([hint(), startButton().disabled, textarea().value]).toEqual(['Parrot checks English only', true, foreign]);
+    }
+    // a name in another alphabet in an English text is fine
+    await start('We said Привет in Tokyo.');
+    expect([textarea().value, shownError()]).toEqual(['', null]);
+  });
 });
