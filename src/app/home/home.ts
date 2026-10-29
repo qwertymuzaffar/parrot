@@ -16,6 +16,7 @@ import { readSetting } from '../core/settings';
 import { distinctKeys, sentences, shortRanges, splitKnown, splitText, wordCount } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
+import { focusIn, refocus } from '../shared/focus';
 import { Icon } from '../shared/icon';
 import { HomeState } from './home-state';
 import { TalkCard } from '../talk/talk-card';
@@ -185,7 +186,25 @@ export class Home {
     if (title.trim() && title.trim() !== text.title) await this.library.rename(text.id, title.trim());
   }
 
+  /** The card of a text, as drawn: the cards are drawn in the order shown. */
+  private cardOf(id: string) {
+    const index = this.shown().findIndex((card) => card.t.id === id);
+    return this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.grid > .card.text')[index] ?? null;
+  }
+
+  /** Asking whether to delete a text (`id`), or keeping it after all (null): the button pressed goes with what it
+   * replaced, and focus goes on to Keep, or back to the card's Delete, not to the page. */
+  protected askDelete(id: string | null) {
+    const asked = id ?? this.confirming();
+    const hadFocus = focusIn(this.textsColumn().nativeElement);
+    this.confirming.set(id);
+    if (!hadFocus || !asked) return;
+    refocus(() => this.cardOf(asked)?.querySelector<HTMLElement>(id ? '.acts button' : '.acts [aria-label="Delete"]'), this.injector);
+  }
+
   protected async remove(text: TextItem) {
+    const hadFocus = focusIn(this.textsColumn().nativeElement);
+    const index = this.shown().findIndex((card) => card.t.id === text.id);
     this.confirming.set(null);
     this.deleting.update((ids) => new Set(ids).add(text.id));
     try {
@@ -194,6 +213,14 @@ export class Home {
       // gone, or kept if the engine wouldn't delete it (the error says why): its card opens again
       this.deleting.update((ids) => new Set([...ids].filter((id) => id !== text.id)));
     }
+    // the card goes, and focus with it: on to the next card, else the one before, else (none left) the heading of the
+    // texts. A text kept has its Delete back
+    if (!hadFocus) return;
+    refocus(() => {
+      const kept = this.cardOf(text.id)?.querySelector<HTMLElement>('.acts [aria-label="Delete"]');
+      const cards = this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.grid > .card.text .open');
+      return kept ?? cards[index] ?? cards[index - 1] ?? this.textsColumn().nativeElement.querySelector<HTMLElement>('h1');
+    }, this.injector);
   }
 
   protected when(iso: string | null) {

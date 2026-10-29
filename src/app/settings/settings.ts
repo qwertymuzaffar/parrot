@@ -132,17 +132,17 @@ const MB = 1_000_000;
             @if (trash.status() !== 'loading') {
               @let bytes = trashBytes();
               @if (bytes != null) {
-                <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+                <p class="hint" tabindex="-1" #trashLine>A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
               }
-              <div class="acts">
+              <div class="acts" #trashActs>
                 @if (emptying() && bytes) {
                   <span class="ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
-                  <button class="btn ghost small" (click)="emptying.set(false)">Keep</button>
+                  <button class="btn ghost small" (click)="askEmpty(false)" #keepTrash>Keep</button>
                   <button class="btn danger small" (click)="emptyTrash()">Empty</button>
                 } @else {
                   <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
                   @if (bytes != null) {
-                    <button class="btn small" [disabled]="!bytes" (click)="emptying.set(true)">
+                    <button class="btn small" [disabled]="!bytes" (click)="askEmpty(true)" #trashButton>
                       <app-icon name="trash" [size]="15" />
                       {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
                     </button>
@@ -284,6 +284,10 @@ export class Settings {
   private dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private namesList = viewChild<ElementRef<HTMLElement>>('namesList');
   private namesHeading = viewChild.required<ElementRef<HTMLElement>>('namesHeading');
+  private trashActs = viewChild<ElementRef<HTMLElement>>('trashActs');
+  private trashButton = viewChild<ElementRef<HTMLButtonElement>>('trashButton');
+  private trashLine = viewChild<ElementRef<HTMLElement>>('trashLine');
+  private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
   private updates = inject(Updates);
@@ -345,7 +349,16 @@ export class Settings {
     }
   }
 
+  /** Asking whether to empty the trash, or keeping it after all: the button pressed goes with what it replaced, and
+   * focus goes on to Keep, or back to Empty trash, not to the top of the dialog. */
+  protected askEmpty(asking: boolean) {
+    const hadFocus = focusIn(this.trashActs()?.nativeElement);
+    this.emptying.set(asking);
+    if (hadFocus) refocus(() => (asking ? this.keepTrash() : this.trashButton())?.nativeElement, this.injector);
+  }
+
   protected async emptyTrash() {
+    const hadFocus = focusIn(this.trashActs()?.nativeElement);
     this.emptying.set(false);
     try {
       this.trash.set(await this.engine.emptyTrash());
@@ -353,6 +366,13 @@ export class Settings {
     } catch (error) {
       this.failure.set(errorMessage(error));
     }
+    // emptied, its button can't be pressed (The trash is empty): focus goes to the line about the trash instead.
+    // Not emptied, Empty trash is there to try again
+    if (!hadFocus) return;
+    refocus(() => {
+      const button = this.trashButton()?.nativeElement;
+      return button && !button.disabled ? button : this.trashLine()?.nativeElement;
+    }, this.injector);
   }
 
   protected size(bytes: number) {
