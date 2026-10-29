@@ -5,7 +5,9 @@ import { errorMessage } from './library';
 /** How a word is kept in the names list, as the engine keeps it: lower case, without the punctuation around it or a
  * possessive 's. */
 export function nameKey(word: string) {
+  // each letter written one way first: an "é" written as e and a mark would lose the mark as punctuation at the end
   return word
+    .normalize('NFC')
     .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
     .toLowerCase()
     .replace(/['’]s$/, '');

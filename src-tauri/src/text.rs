@@ -698,6 +698,8 @@ pub fn parts(words: &[&str], mode: &str) -> Vec<std::ops::Range<usize>> {
 }
 
 pub fn name_key(word: &str) -> String {
+    // each letter written one way first: an "é" written as e and a mark would lose the mark as punctuation at the end
+    let word: String = word.nfc().collect();
     let word = word.trim_matches(|character: char| !character.is_alphanumeric()).to_lowercase();
     word.strip_suffix("'s").or_else(|| word.strip_suffix("’s")).unwrap_or(&word).to_string()
 }

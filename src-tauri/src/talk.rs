@@ -1188,6 +1188,29 @@ mod tests {
     }
 
     #[test]
+    fn a_talk_corrected_with_a_word_written_otherwise_is_kept_written_one_way() {
+        let (talks, dir) = talks("keep-one-form");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-one-form-data-{}", std::process::id())) };
+        let _ = fs::remove_dir_all(&store.data);
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        let typed = store.add("One caf\u{E9}. Three four.", None, None).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let listener = Stretches { heard: "One cafe. Three four.", lengths: RefCell::new(vec![]) };
+        talks.write_down(&listener, |_, _| {}).unwrap();
+        // the word corrected by pasting it from a file that writes é as e and a mark, with a byte order mark before it
+        let kept = talks.keep(&listener, &store, "One \u{FEFF}cafe\u{301}. Three four.", None, |_, _| {}).unwrap();
+        assert_eq!(
+            (kept.text.id.as_str(), kept.text.text.as_str()),
+            (typed.id.as_str(), "One caf\u{E9}. Three four."),
+            "the text that has the words"
+        );
+        assert_eq!(store.attempts(&typed.id, "One caf\u{E9}. Three four.").unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
     fn a_byte_order_mark_pasted_into_a_talk_is_left_out() {
         let (talks, dir) = talks("keep-mark");
         let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-mark-data-{}", std::process::id())) };

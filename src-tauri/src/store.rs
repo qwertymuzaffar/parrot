@@ -68,11 +68,23 @@ pub fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The words of a text as Parrot takes them in (added, edited, or a talk kept): normalised, and without the invisible
-/// byte order mark two pasted files or some web and Word copies leave in, which the window and the engine would cut
-/// differently. Only new words are cleaned: the parts of a text kept before keep their names.
+/// The characters a word can have that are never seen: a soft hyphen, zero-width spaces and joiners, a word joiner and
+/// a byte order mark. Pasted in from a web page or a document, they would make "co\u{AD}operate" another word than
+/// "cooperate".
+const INVISIBLE: [char; 6] = ['\u{AD}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}'];
+
+/// The words of a text as Parrot takes them in (added, edited, or a talk kept): normalised, each letter written one
+/// way (NFC: "café" is the same word whether its é was typed as one character or as e and a mark), and without the
+/// characters that are never seen. Only new words are cleaned: the parts of a text kept before keep their names.
 pub fn clean(text: &str) -> String {
-    norm(&text.replace('\u{FEFF}', ""))
+    norm(&text.nfc().filter(|character| !INVISIBLE.contains(character)).collect::<String>())
+}
+
+/// How a word said alone is kept: without the punctuation around it, lower case, and each letter written one way, so
+/// "The", "the," and a "the" written otherwise are one word with one set of tries. The window keys it the same way
+/// (split.ts `wordKey`).
+pub fn word_key(word: &str) -> String {
+    bare(word.trim()).nfc().collect::<String>().to_lowercase()
 }
 
 /// Whether `text` has a word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none).
@@ -242,7 +254,8 @@ impl Store {
     /// The folder of the text whose words are `body` (normalised), if any text has them: the one named after them,
     /// else, as words fixed since a text was added leave it under the old words' name, whichever has them now.
     fn with_words(&self, body: &str) -> Option<PathBuf> {
-        let has = |dir: &Path| fs::read_to_string(dir.join("text.txt")).is_ok_and(|words| norm(&words) == body);
+        // a text kept before its words were cleaned as they are taken in has them still, written as they were pasted
+        let has = |dir: &Path| fs::read_to_string(dir.join("text.txt")).is_ok_and(|words| clean(&words) == body);
         let named = self.texts().join(sha(body));
         if has(&named) {
             return Some(named);
@@ -292,8 +305,8 @@ impl Store {
     pub fn word_dir(&self, id: &str, word: &str) -> Result<PathBuf, String> {
         let dir = self.text_dir(id)?;
         let full = fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?;
-        let word = bare(word.trim()).to_lowercase();
-        if word.is_empty() || !full.split_whitespace().any(|each| bare(each).to_lowercase() == word) {
+        let word = word_key(word);
+        if word.is_empty() || !full.split_whitespace().any(|each| word_key(each) == word) {
             return Err("that word is not in the text; reload".into());
         }
         Ok(dir.join(format!("w-{}", sha(&word))))
@@ -770,6 +783,41 @@ mod tests {
     }
 
     #[test]
+    fn a_word_written_two_ways_is_one_word() {
+        let dir = std::env::temp_dir().join(format!("parrot-store-one-form-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = Store { data: dir.clone() };
+        // é typed as one character, then as e and a mark: the same words, so the same text
+        let typed = store.add("A caf\u{E9} here.", None, None).unwrap();
+        let pasted = store.add("A cafe\u{301} here.", None, None).unwrap();
+        assert_eq!((pasted.id.as_str(), pasted.text.as_str()), (typed.id.as_str(), "A caf\u{E9} here."));
+        // and the characters never seen are left out: a soft hyphen, zero-width spaces and joiners, a byte order mark
+        let plain = store.add("We cooperate. Zero width. Joiner.", None, None).unwrap();
+        let marked = store.add("\u{FEFF}We co\u{AD}operate. Zero\u{200B} width. Jo\u{200C}in\u{200D}er\u{2060}.", None, None).unwrap();
+        assert_eq!((marked.id.as_str(), marked.text.as_str()), (plain.id.as_str(), "We cooperate. Zero width. Joiner."));
+        assert_eq!(store.list().len(), 2);
+        // a text kept before, with the word both ways: one word said alone, with one set of tries
+        write_whole(&store.text_dir(&typed.id).unwrap().join("text.txt"), "A caf\u{E9} here, a Cafe\u{301}.".as_bytes()).unwrap();
+        let word = store.word_dir(&typed.id, "caf\u{E9}").unwrap();
+        assert_eq!(store.word_dir(&typed.id, "Cafe\u{301}.").unwrap(), word);
+        // the same text added again, written as it was pasted: that text, not a new one
+        assert_eq!(store.add("A cafe\u{301} here, a Caf\u{E9}.", None, None).unwrap().id, typed.id);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    // the same cases as split.spec.ts "keys a word written two ways as one", so the window shows the tries the engine
+    // files for a word said alone
+    #[test]
+    fn words_are_keyed_as_the_window_keys_them() {
+        for word in ["caf\u{E9}", "Cafe\u{301},", "\u{201C}CAF\u{C9}\u{201D}", "CAFE\u{301}"] {
+            assert_eq!(word_key(word), "caf\u{E9}", "{word:?}");
+        }
+        for name in ["Ren\u{E9}", "Rene\u{301}'s", "\u{201C}RENE\u{301}\u{201D}"] {
+            assert_eq!(crate::text::name_key(name), "ren\u{E9}", "{name:?}");
+        }
+    }
+
+    #[test]
     fn texts_round_trip() {
         let dir = std::env::temp_dir().join(format!("parrot-store-{}", std::process::id()));
         let store = Store { data: dir.clone() };
@@ -788,8 +836,11 @@ mod tests {
     fn a_text_with_no_words_is_not_added() {
         let dir = std::env::temp_dir().join(format!("parrot-store-wordless-{}", std::process::id()));
         let store = Store { data: dir.clone() };
-        assert_eq!(store.add("   ", None, None).map(|item| item.id), Err("the text is empty".into()));
-        for wordless in [". . .", "... !!! ??? --- ***", "\u{200B}"] {
+        // a zero-width space is never seen, so left out
+        for empty in ["   ", "\u{200B}"] {
+            assert_eq!(store.add(empty, None, None).map(|item| item.id), Err("the text is empty".into()), "{empty:?}");
+        }
+        for wordless in [". . .", "... !!! ??? --- ***"] {
             assert_eq!(store.add(wordless, None, None).map(|item| item.id), Err("the text has no words".into()), "{wordless:?}");
         }
         assert!(store.list().is_empty());

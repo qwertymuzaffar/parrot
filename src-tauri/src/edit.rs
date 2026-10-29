@@ -483,6 +483,17 @@ mod tests {
     }
 
     #[test]
+    fn the_words_are_written_one_way_when_edited() {
+        let (store, id) = store_with("one-form", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "a cafe here", fail: false, texts: RefCell::new(vec![]) };
+        // pasted from a file that writes é as e and a mark, with a soft hyphen in a word
+        let item = edit_text(&listener, &store, &id, "Hello there. A cafe\u{301} he\u{AD}re.", |_, _| {}).unwrap();
+        assert_eq!(item.text, "Hello there. A caf\u{E9} here.");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the part that didn't change keeps its tries");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
     fn a_byte_order_mark_pasted_into_the_words_is_left_out() {
         let (store, id) = store_with("mark", "Hello there. How are you?", &["Hello there."]);
         let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };

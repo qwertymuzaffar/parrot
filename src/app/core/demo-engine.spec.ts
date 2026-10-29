@@ -57,6 +57,9 @@ describe('DemoEngine', () => {
     await engine.deleteText(added.id);
     expect((await engine.texts()).map((text) => text.id)).not.toContain(added.id);
     await expect(engine.addText(' ', '', 'whole')).rejects.toThrow(new EngineError('the text is empty'));
+    // as the store takes words in: each letter written one way, and the characters never seen left out
+    const pasted = await engine.addText('\uFEFFA cafe\u0301 he\u00ADre.', '', 'whole');
+    expect([pasted.id, pasted.text]).toEqual(['c53f44f80a', 'A caf\u00E9 here.']);
     await expect(engine.addText('. . . !!!', '', 'whole')).rejects.toThrow(new EngineError('the text has no words'));
     // Parrot hears English only: a text in another alphabet would score 0% whatever is said
     await expect(engine.addText('Привет, как дела?', '', 'whole')).rejects.toThrow(new EngineError('Parrot checks English only'));

@@ -8,6 +8,8 @@ describe('names', () => {
     expect(nameKey('“Tashkent,”')).toBe('tashkent');
     expect(nameKey("O'Brien's")).toBe("o'brien");
     expect(nameKey('...')).toBe('');
+    // the same cases as store.rs words_are_keyed_as_the_window_keys_them: an é written as e and a mark keeps its mark
+    expect(['Ren\u00E9', "Rene\u0301's", '\u201CRENE\u0301\u201D'].map(nameKey)).toEqual(Array(3).fill('ren\u00E9'));
   });
 
   it('load from the engine, and marking one updates the list or says why it could not', async () => {
