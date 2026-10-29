@@ -4,6 +4,12 @@ use crate::text::WordTime;
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// What the window says when whisper.cpp fails on a take: its own words are only for the log.
+fn failed(error: whisper_rs::WhisperError) -> String {
+    log::error!("speech recognition failed: {error}");
+    "speech recognition failed; try again".into()
+}
+
 pub struct Recognizer {
     ctx: WhisperContext,
 }
@@ -16,7 +22,7 @@ impl Recognizer {
     }
 
     fn hear(&self, audio: &[f32]) -> Result<String, String> {
-        let mut state = self.ctx.create_state().map_err(|error| error.to_string())?;
+        let mut state = self.ctx.create_state().map_err(failed)?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some("en"));
         params.set_n_threads(std::thread::available_parallelism().map(|threads| threads.get().min(8)).unwrap_or(4) as i32);
@@ -31,7 +37,7 @@ impl Recognizer {
         if padded.len() < 16000 * 11 / 10 {
             padded.resize(16000 * 11 / 10, 0.0);
         }
-        state.full(params, &padded).map_err(|error| format!("speech recognition failed: {error}"))?;
+        state.full(params, &padded).map_err(failed)?;
         let text: Vec<String> = state
             .as_iter()
             .filter_map(|segment| segment.to_str_lossy().ok().map(|segment_text| segment_text.trim().to_string()))

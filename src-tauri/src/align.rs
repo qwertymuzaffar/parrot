@@ -73,6 +73,12 @@ fn windows(samples: usize) -> Vec<(std::ops::Range<usize>, usize, Option<usize>)
     out
 }
 
+/// What the window says when ONNX Runtime fails on a take: its own words are only for the log.
+fn failed(error: ort::Error) -> String {
+    log::error!("the aligner failed: {error}");
+    "the aligner failed; try again".into()
+}
+
 pub struct Aligner {
     session: Session,
 }
@@ -104,9 +110,9 @@ impl Aligner {
 
     /// One run of the model over normalised audio: each frame's log probabilities of the tokens.
     fn run(&mut self, norm: &[f32]) -> Result<Vec<[f32; TOKENS]>, String> {
-        let input = Tensor::from_array(([1usize, norm.len()], norm.to_vec())).map_err(|error| error.to_string())?;
-        let out = self.session.run(ort::inputs!["audio" => input]).map_err(|error| format!("aligner failed: {error}"))?;
-        let (shape, logits) = out["logits"].try_extract_tensor::<f32>().map_err(|error| error.to_string())?;
+        let input = Tensor::from_array(([1usize, norm.len()], norm.to_vec())).map_err(failed)?;
+        let out = self.session.run(ort::inputs!["audio" => input]).map_err(failed)?;
+        let (shape, logits) = out["logits"].try_extract_tensor::<f32>().map_err(failed)?;
         let frames = shape[1] as usize;
         Ok((0..frames)
             .map(|frame| {
