@@ -44,6 +44,9 @@ chrono = "0.4"
 regex = "1.13"
 # to fold a letter with marks to its plain one ("ễ" → "e") by Unicode decomposition
 unicode-normalization = "0.1"
+# to say why Parrot can't start (its data folder can't be made) in a dialog, before there is anything in its window;
+# everything it uses besides is in the app already (AppKit, the Windows API, GTK)
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 
 # whisper.cpp: on macOS on the graphics chip (Metal), elsewhere on the processor
 [target.'cfg(target_os = "macos")'.dependencies]
