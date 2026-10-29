@@ -3,7 +3,7 @@
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use reqwest::header::{CONTENT_RANGE, RANGE};
+use reqwest::header::{CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
@@ -144,6 +144,12 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
             }
             return Err(format!("could not download {}: {status}; try again", model.file));
         };
+        let content_type = res.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+        if let Some(error) = wrong_body(model, start, res.content_length(), content_type) {
+            // not the model (or not the rest of it): nothing of it is kept, so the next try starts clean
+            let _ = std::fs::remove_file(part);
+            return Err(error);
+        }
         let mut out = if start == 0 {
             File::create(part).map_err(|error| on_disk(error, folder))?
         } else {
@@ -199,6 +205,27 @@ fn body_starts_at(have: u64, status: StatusCode, content_range: Option<&str>) ->
     }
 }
 
+/// Why a body starting at byte `start` of `model`, of `content_length` bytes and of `content_type`, is not the model
+/// (or its rest), if it isn't: a Wi-Fi sign-in page or a proxy answers 200 with a web page of its own, which would
+/// otherwise be kept as the start of the model and spoil the next try too.
+fn wrong_body(model: &Model, start: u64, content_length: Option<u64>, content_type: Option<&str>) -> Option<String> {
+    let page = content_type.is_some_and(|value| value.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("text/html"));
+    if page {
+        return Some(format!(
+            "could not download {}: the network sent a web page instead (a Wi-Fi sign-in page or a proxy, perhaps); sign in if it asks, then try again",
+            model.file
+        ));
+    }
+    let rest = model.bytes - start;
+    match content_length {
+        Some(length) if length != rest => Some(format!(
+            "could not download {}: the server offered {length} bytes, not the {rest} expected (a Wi-Fi sign-in page or a proxy, perhaps); try again",
+            model.file
+        )),
+        _ => None,
+    }
+}
+
 fn hash_file(hasher: &mut Sha256, file: &Path) -> Result<(), String> {
     let folder = file.parent().unwrap_or(file);
     let mut reader = File::open(file).map_err(|error| on_disk(error, folder))?;
@@ -232,6 +259,30 @@ mod tests {
         assert_eq!(body_starts_at(0, StatusCode::PARTIAL_CONTENT, Some("bytes 0-99/100")), None);
         assert_eq!(body_starts_at(1000, StatusCode::RANGE_NOT_SATISFIABLE, Some("bytes */1000")), None);
         assert_eq!(body_starts_at(0, StatusCode::NOT_FOUND, None), None);
+    }
+
+    #[test]
+    fn a_body_that_is_not_the_model_is_turned_away() {
+        let whole = Some(WHISPER.bytes);
+        assert_eq!(wrong_body(&WHISPER, 0, whole, Some("application/octet-stream")), None);
+        assert_eq!(wrong_body(&WHISPER, 0, whole, None), None);
+        // no length said (sent in chunks): the size is checked as it arrives
+        assert_eq!(wrong_body(&WHISPER, 0, None, Some("binary/octet-stream")), None);
+        // the rest of a .part
+        assert_eq!(wrong_body(&WHISPER, 1000, Some(WHISPER.bytes - 1000), None), None);
+        // a sign-in page answering 200
+        let error = wrong_body(&WHISPER, 0, Some(12345), Some("text/html; charset=utf-8")).unwrap();
+        assert!(error.contains("web page") && error.contains("sign-in") && error.ends_with("try again"), "{error}");
+        assert!(wrong_body(&WHISPER, 0, whole, Some("TEXT/HTML")).is_some(), "a page, whatever its length says");
+        assert!(wrong_body(&WHISPER, 1000, Some(WHISPER.bytes - 1000), Some("text/html")).is_some());
+        // a length that isn't the model's, or the rest of it
+        let error = wrong_body(&WHISPER, 0, Some(12345), None).unwrap();
+        assert_eq!(
+            error,
+            "could not download ggml-small.en.bin: the server offered 12345 bytes, not the 487614201 expected (a Wi-Fi sign-in page or a proxy, perhaps); try again"
+        );
+        assert!(wrong_body(&WHISPER, 1000, whole, None).is_some(), "the whole file sent as the rest");
+        assert!(wrong_body(&WHISPER, 0, Some(WHISPER.bytes + 1), None).is_some());
     }
 
     #[test]

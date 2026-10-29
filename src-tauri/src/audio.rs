@@ -50,18 +50,31 @@ fn whole<R: Read>(reader: &hound::WavReader<R>, size: u64) -> Result<(), String>
     Ok(())
 }
 
+/// The rates a recording is read at: those a talk is recorded at. A header saying 0 Hz (or a million) is damaged,
+/// and would have the resampler divide by it.
+const RATES: std::ops::RangeInclusive<u32> = 8000..=192_000;
+
+fn rate<R: Read>(reader: &hound::WavReader<R>) -> Result<u32, String> {
+    let rate = reader.spec().sample_rate;
+    if !RATES.contains(&rate) {
+        return Err(format!("the recording is damaged: it says it was recorded at {rate} Hz"));
+    }
+    Ok(rate)
+}
+
 fn too_big(size: u64) -> Result<(), String> {
     if size > LARGEST_FILE as u64 { Err(format!("the recording is too long ({} MB)", size >> 20)) } else { Ok(()) }
 }
 
 /// The samples of a WAV recording of `size` bytes as mono floats.
 fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, String> {
+    rate(&reader)?;
     let spec = reader.spec();
     if spec.bits_per_sample > 32 {
         return Err(format!("not a WAV recording Parrot reads: {} bits a sample", spec.bits_per_sample));
     }
     // by its length, not its size: the same talk is twice the bytes from a microphone at 96 kHz
-    let secs = reader.duration() as f64 / spec.sample_rate.max(1) as f64;
+    let secs = reader.duration() as f64 / spec.sample_rate as f64;
     if secs > LONGEST_READ {
         return Err(format!("the recording is too long ({} minutes)", (secs / 60.0).round()));
     }
@@ -87,6 +100,7 @@ fn read<R: Read>(mut reader: hound::WavReader<R>, size: u64) -> Result<Pcm, Stri
 pub fn peaks_file(path: &Path, slices: usize) -> Result<Vec<f32>, String> {
     let (mut reader, size) = open_wav(path)?;
     whole(&reader, size)?;
+    rate(&reader)?;
     let spec = reader.spec();
     let ch = spec.channels.max(1) as usize;
     let frames = reader.duration() as usize;
@@ -112,7 +126,10 @@ pub fn peaks_file(path: &Path, slices: usize) -> Result<Vec<f32>, String> {
 /// The stretch of the WAV file at `path` from `from` to `to` (seconds), as 16-bit mono at the file's rate: a word
 /// cut from a long talk without reading the rest of it.
 pub fn clip_file(path: &Path, from: f64, to: f64) -> Result<(u32, Vec<i16>), String> {
-    let (mut reader, _) = open_wav(path)?;
+    let (mut reader, size) = open_wav(path)?;
+    // a header claiming more than the file holds would have a word play up to a minute of silence
+    whole(&reader, size)?;
+    rate(&reader)?;
     let spec = reader.spec();
     let ch = spec.channels.max(1) as usize;
     let frames = reader.duration();
@@ -460,6 +477,11 @@ mod tests {
 
     /// A 16-bit mono WAV header whose data chunk says it holds `claimed` bytes, followed by `body` bytes of silence.
     fn wav_claiming(claimed: u32, body: usize) -> Vec<u8> {
+        wav_at(16000, claimed, body)
+    }
+
+    /// `wav_claiming`, with a header saying it was recorded at `rate`.
+    fn wav_at(rate: u32, claimed: u32, body: usize) -> Vec<u8> {
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(36 + claimed).to_le_bytes());
@@ -467,8 +489,8 @@ mod tests {
         wav.extend_from_slice(&16u32.to_le_bytes());
         wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
         wav.extend_from_slice(&1u16.to_le_bytes()); // mono
-        wav.extend_from_slice(&16000u32.to_le_bytes());
-        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate.wrapping_mul(2)).to_le_bytes());
         wav.extend_from_slice(&2u16.to_le_bytes());
         wav.extend_from_slice(&16u16.to_le_bytes());
         wav.extend_from_slice(b"data");
@@ -500,6 +522,39 @@ mod tests {
         assert!(started.elapsed().as_secs_f64() < 0.1, "{:?}", started.elapsed());
         std::fs::write(&path, wav_claiming(2000, 2000)).unwrap();
         assert_eq!(peaks_file(&path, 92).unwrap().len(), 92);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_word_cut_from_a_header_claiming_more_than_the_file_holds_is_turned_away() {
+        let dir = std::env::temp_dir().join(format!("parrot-clip-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("damaged.wav");
+        // 40 MB claimed in 16 KB: once a minute of silence
+        std::fs::write(&path, wav_claiming(40_000_000, 16_000)).unwrap();
+        let error = clip_file(&path, 100.0, 200.0).unwrap_err();
+        assert!(error.contains("damaged"), "{error}");
+        std::fs::write(&path, wav_claiming(16_000, 16_000)).unwrap();
+        assert_eq!(clip_file(&path, 0.1, 0.2).unwrap(), (16000, vec![0; 1600]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_header_saying_a_rate_no_microphone_records_at_is_turned_away() {
+        let dir = std::env::temp_dir().join(format!("parrot-rate-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("damaged.wav");
+        for rate in [0, 7999, 192_001, 4_000_000] {
+            let wav = wav_at(rate, 2000, 2000);
+            assert_eq!(read_wav(&wav).err().unwrap(), format!("the recording is damaged: it says it was recorded at {rate} Hz"));
+            std::fs::write(&path, &wav).unwrap();
+            assert!(read_wav_file(&path).err().unwrap().contains("damaged"), "{rate}");
+            assert!(peaks_file(&path, 92).unwrap_err().contains("damaged"), "{rate}");
+            assert!(clip_file(&path, 0.0, 0.1).unwrap_err().contains("damaged"), "{rate}");
+        }
+        for rate in [8000, 192_000] {
+            assert_eq!(read_wav(&wav_at(rate, 2000, 2000)).unwrap().rate, rate);
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
