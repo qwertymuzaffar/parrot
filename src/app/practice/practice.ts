@@ -13,7 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { Mode } from '../core/models';
-import { Playback } from '../core/playback';
+import { Playback, RATES } from '../core/playback';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { WordPractice } from '../core/word-practice';
@@ -64,7 +64,7 @@ export class Practice {
     { id: 'sentences', label: 'Sentences' },
     { id: 'short', label: 'Short parts' },
   ];
-  protected readonly rates = [0.6, 0.75, 1];
+  protected readonly rates = RATES;
 
   /** a take of the part is being recorded (a word said alone is recorded in its card) */
   protected readonly recording = this.session.recording;
