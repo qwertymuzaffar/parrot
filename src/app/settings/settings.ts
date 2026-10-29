@@ -139,9 +139,10 @@ const MB = 1_000_000;
               }
               <div class="acts" #trashActs>
                 @if (emptying() && bytes) {
-                  <span class="ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
-                  <button class="btn ghost small" (click)="askEmpty(false)" #keepTrash>Keep</button>
-                  <button class="btn danger small" (click)="emptyTrash()">Empty</button>
+                  <span class="ask" id="trash-ask">Erase {{ size(bytes) }} of deleted texts for good?</span>
+                  <!-- described by the question, so a screen reader landing on either one reads it too -->
+                  <button class="btn ghost small" (click)="askEmpty(false)" aria-describedby="trash-ask" #keepTrash>Keep</button>
+                  <button class="btn danger small" (click)="emptyTrash()" aria-describedby="trash-ask">Empty</button>
                 } @else {
                   <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
                   @if (bytes != null) {
