@@ -635,6 +635,12 @@ pub fn short_parts(words: &[&str]) -> Vec<std::ops::Range<usize>> {
     const CONJUNCTIONS: [&str; 12] = ["and", "but", "or", "which", "where", "when", "while", "because", "so", "then", "that", "who"];
     let conjunction = |word: &str| CONJUNCTIONS.iter().any(|each| each.eq_ignore_ascii_case(word));
     let pause = |word: &str| word.ends_with([',', ';', ':', '—', '–', ')']) || word.trim_end_matches(['"', '”', '’', ')']).ends_with(['.', '!', '?']);
+    // how many words from each one on until one with a pause, counted once from the end: scanning ahead from every
+    // word took 0.4 s on a 20,000-word sentence with no punctuation (a pasted transcript), on every list of the texts
+    let mut unpaused = vec![0; words.len() + 1];
+    for index in (0..words.len()).rev() {
+        unpaused[index] = if pause(words[index]) { 0 } else { unpaused[index + 1] + 1 };
+    }
     let mut out = vec![];
     let mut start = 0;
     for index in 0..words.len() {
@@ -645,7 +651,7 @@ pub fn short_parts(words: &[&str]) -> Vec<std::ops::Range<usize>> {
             break;
         }
         // not before "and TypeScript," when a comma follows a word or two later: that cut comes a moment later
-        let to_pause = words[index + 1..].iter().take_while(|word| !pause(word)).count();
+        let to_pause = unpaused[index + 1];
         let cut = (pause(words[index]) && length >= 4 && left >= 3)
             || (length >= 10 && conjunction(words[index + 1]) && left >= 4 && to_pause > 2)
             || (length >= 16 && to_pause > 2)
@@ -833,6 +839,58 @@ mod tests {
         );
         assert_eq!(cut("Thank you for your time."), ["Thank you for your time."]);
         assert!(short_parts(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_long_sentence_with_no_punctuation_is_cut_in_moments() {
+        // pasted captions or dictation: one sentence of 20,000 words, which took 0.4 s (in a release build) on every
+        // list of the texts, as each word looked ahead to the end for a comma
+        let words = ["the", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog", "while", "people", "talk", "about", "it"];
+        let sentence: Vec<&str> = (0..20_000).map(|index| words[index % words.len()]).collect();
+        let started = std::time::Instant::now();
+        let cut = short_parts(&sentence);
+        assert!(started.elapsed().as_secs_f64() < 0.5, "{:?}", started.elapsed());
+        // cut at 16 words, or before "while" once a part has 10, as there is no comma for a later cut to wait for: the
+        // parts it was cut into before, one after another to the end
+        assert_eq!((cut.len(), cut[0].clone(), cut.last().unwrap().end), (1428, 0..16, 20_000));
+        assert!(cut.windows(2).all(|pair| pair[0].end == pair[1].start && pair[0].len() <= 16), "{cut:?}");
+    }
+
+    #[test]
+    fn a_short_part_waits_for_a_comma_up_to_three_words_away() {
+        let cut = |sentence: &str| {
+            let words: Vec<&str> = sentence.split(' ').collect();
+            short_parts(&words).into_iter().map(|range| words[range].join(" ")).collect::<Vec<_>>()
+        };
+        // at the 16th word the cut waits for a comma up to three words on; four words on, it doesn't
+        assert_eq!(
+            cut(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen, nineteen twenty twenty-one"
+            ),
+            [
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen,",
+                "nineteen twenty twenty-one"
+            ]
+        );
+        assert_eq!(
+            cut(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen, twenty twenty-one twenty-two"
+            ),
+            [
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen,",
+                "twenty twenty-one twenty-two"
+            ]
+        );
+        assert_eq!(
+            cut(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty, twenty-one twenty-two twenty-three"
+            ),
+            [
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen",
+                "seventeen eighteen nineteen twenty,",
+                "twenty-one twenty-two twenty-three"
+            ]
+        );
     }
 
     #[test]
