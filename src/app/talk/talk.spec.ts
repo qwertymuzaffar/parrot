@@ -237,6 +237,22 @@ describe('Just talk', () => {
       expect(talking.cancel).toHaveBeenCalled();
     });
 
+    it('cancels writing it down on Esc too, unless the Esc closes a dialog or leaves a field', async () => {
+      talking.state.set('writing');
+      await render(TalkCard);
+      const esc = (target: EventTarget) => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      const dialog = document.body.appendChild(document.createElement('dialog'));
+      dialog.setAttribute('open', '');
+      esc(dialog);
+      dialog.remove();
+      const field = document.body.appendChild(document.createElement('input'));
+      esc(field);
+      field.remove();
+      expect(talking.cancel).not.toHaveBeenCalled();
+      esc(document.body);
+      expect([talking.cancel.mock.calls.length, talking.stop.mock.calls.length]).toEqual([1, 0]);
+    });
+
     it('offers to write a stopped talk down again, or discard it', async () => {
       talking.state.set('stopped');
       talking.failure.set('speech recognition failed');

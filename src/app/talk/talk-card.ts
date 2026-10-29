@@ -373,11 +373,12 @@ export class TalkCard {
     void this.talking.discard();
   }
 
-  /** Esc stops a talk, unless it is closing a dialog (Settings) or leaving a field (a title being renamed), as on the
-   * practice screen */
+  /** Esc stops a talk, and cancels writing it down, as the card's button does then, unless it is closing a dialog
+   * (Settings) or leaving a field (a title being renamed), as on the practice screen */
   protected escape(event: Event) {
     const el = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || document.querySelector('dialog[open]')) return;
     if (this.talking.recording()) void this.talking.stop();
+    else if (this.talking.state() === 'writing') this.talking.cancel();
   }
 }
