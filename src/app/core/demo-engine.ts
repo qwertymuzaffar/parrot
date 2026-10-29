@@ -15,7 +15,7 @@ import {
   WordStatus,
 } from './models';
 import { nameKey } from './names';
-import { bare, inEnglish, partKey, sentences, wordCount, wordKey } from './split';
+import { bare, inEnglish, norm, partKey, sentences, wordCount, wordKey } from './split';
 
 /** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
 interface DemoText {
@@ -474,10 +474,6 @@ function joined(blocks: Int16Array[], samples: number) {
     at += block.length;
   }
   return pcm;
-}
-
-function norm(text: string) {
-  return text.split(/\s+/).filter(Boolean).join(' ');
 }
 
 /** The words of a text as the store takes them in (store.rs `clean`): each letter written one way, without the

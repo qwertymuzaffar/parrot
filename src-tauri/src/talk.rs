@@ -1211,6 +1211,24 @@ mod tests {
     }
 
     #[test]
+    fn a_byte_order_mark_pasted_into_a_talk_is_left_out() {
+        let (talks, dir) = talks("keep-mark");
+        let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-mark-data-{}", std::process::id())) };
+        let _ = fs::remove_dir_all(&store.data);
+        fs::create_dir_all(store.data.join("texts")).unwrap();
+        talks.start(16000).unwrap();
+        talks.feed(&speech(16000, 20.0)).unwrap();
+        let listener = Stretches { heard: "One two. Three four.", lengths: RefCell::new(vec![]) };
+        talks.write_down(&listener, |_, _| {}).unwrap();
+        // the words corrected by pasting from a file that had one in it
+        let kept = talks.keep(&listener, &store, "One two. \u{FEFF}Three four.", None, |_, _| {}).unwrap();
+        assert_eq!(kept.text.text, "One two. Three four.");
+        assert_eq!(store.attempts(&kept.text.id, "One two. Three four.").unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
     fn a_talk_said_as_the_words_a_text_was_added_with_is_kept_by_the_words_texts_have_now() {
         let (talks, dir) = talks("keep-twin");
         let store = Store { data: dir.parent().unwrap().join(format!("parrot-talks-keep-twin-data-{}", std::process::id())) };

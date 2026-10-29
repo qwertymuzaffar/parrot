@@ -20,8 +20,14 @@ pub fn environment() -> Result<&'static ort::environment::Environment, String> {
     if let Some(env) = ENVIRONMENT.get() {
         return Ok(env);
     }
-    let env = ort::init().with_name("parrot").build().map_err(|error| error.to_string())?;
+    let env = ort::init().with_name("parrot").build().map_err(unstarted)?;
     Ok(ENVIRONMENT.get_or_init(|| env))
+}
+
+/// What the window says when ONNX Runtime itself won't start: its own words are only for the log.
+fn unstarted(error: ort::Error) -> String {
+    log::error!("ONNX Runtime did not start: {error}");
+    "Parrot couldn't start its aligner; restart Parrot".into()
 }
 
 /// the model's tokens: blank (0), word separator "|" (4), then ' - a b c ... z from 5
@@ -257,6 +263,11 @@ mod tests {
         let places = |spelled: Vec<(usize, usize)>| spelled.into_iter().unzip::<usize, usize, Vec<_>, Vec<_>>();
         assert_eq!(places(spelling("Café,")), ((0..4).collect(), tokens("cafe")));
         assert_eq!(places(spelling("Straße")), (vec![0, 1, 2, 3, 4, 4, 5], tokens("strasse")));
+    }
+
+    #[test]
+    fn onnx_runtime_not_starting_is_said_plainly() {
+        assert_eq!(unstarted(ort::Error::new("dlopen(libonnxruntime.dylib) failed")), "Parrot couldn't start its aligner; restart Parrot");
     }
 
     fn build_dir() -> PathBuf {

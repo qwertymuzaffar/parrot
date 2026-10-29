@@ -1,5 +1,20 @@
 import { Mode, Part } from './models';
 
+/** The spaces between words, as the engine counts them (Rust's White_Space): JavaScript's \s also counts the invisible
+ * byte order mark (U+FEFF) and not the next line (U+0085), so the parts of a text with one in it would be named
+ * otherwise than the engine files their tries, and their scores never shown. */
+const SPACE = String.raw`\t-\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000`;
+const SPACES = new RegExp(`[${SPACE}]+`);
+const EDGES = new RegExp(`^[${SPACE}]+|[${SPACE}]+$`, 'g');
+const LAST_WORD = new RegExp(`[^${SPACE}]*$`);
+const SENTENCE_END = new RegExp(`((?<=[.!?]["”’)]*)[${SPACE}]+(?=["“(]?[A-Z0-9]))`);
+
+/** The words of `text`, as the engine splits it. */
+const wordsOf = (text: string) => text.split(SPACES).filter(Boolean);
+
+/** `text` with one space between its words and none around them, as the engine keeps it. */
+export const norm = (text: string) => wordsOf(text).join(' ');
+
 /** Abbreviations a sentence does not end at (the engine's text.rs has the same lists): a title before a name ("Mr.
  * Smith", "St. Louis", "e.g. Python"), and a page, volume or number before its digits ("p. 12", "vol. 3", "No. 5"; the
  * word "no." can end a sentence, so only "No." is one). "etc." and "Jr." often end a sentence, so they are not here. */
@@ -19,19 +34,19 @@ function abbreviated(word: string, next: string): boolean {
  */
 export function sentences(text: string): string[] {
   // the text cut wherever a sentence could end, with the spaces of each cut kept at the odd indexes
-  const pieces = text.split(/((?<=[.!?]["”’)]*)\s+(?=["“(]?[A-Z0-9]))/);
+  const pieces = text.split(SENTENCE_END);
   const out: string[] = [];
   let sentence = pieces[0];
   for (let index = 1; index < pieces.length; index += 2) {
     const next = pieces[index + 1];
-    if (abbreviated(/\S*$/.exec(sentence)![0], next)) sentence += pieces[index] + next;
+    if (abbreviated(LAST_WORD.exec(sentence)![0], next)) sentence += pieces[index] + next;
     else {
       out.push(sentence);
       sentence = next;
     }
   }
   out.push(sentence);
-  return out.map((each) => each.trim()).filter(Boolean);
+  return out.map((each) => each.replace(EDGES, '')).filter(Boolean);
 }
 
 const CONJUNCTION = /^(and|but|or|which|where|when|while|because|so|then|that|who)$/i;
@@ -74,7 +89,7 @@ export function shortRanges(words: string[]): [number, number][] {
 
 /** The engine's folder name for a part: p- and the first 10 hex digits of the SHA-1 of its words. */
 export async function partKey(text: string): Promise<string> {
-  const bytes = new TextEncoder().encode(text.split(/\s+/).join(' '));
+  const bytes = new TextEncoder().encode(norm(text));
   const hash = await crypto.subtle.digest('SHA-1', bytes);
   const hex = [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return 'p-' + hex.slice(0, 10);
@@ -106,9 +121,9 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
   if (known) return known;
   const out: Omit<Part, 'key'>[] = [];
   let w0 = 0;
-  const list = mode === 'whole' ? [text.split(/\s+/).join(' ')] : sentences(text);
+  const list = mode === 'whole' ? [norm(text)] : sentences(text);
   list.forEach((sentence, sentenceIndex) => {
-    const words = sentence.split(' ');
+    const words = wordsOf(sentence);
     const ranges = mode === 'short' ? shortRanges(words) : [[0, words.length] as [number, number]];
     ranges.forEach(([start, end], rangeIndex) => {
       out.push({
@@ -129,7 +144,7 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
 const isWord = (word: string) => /[\p{L}\p{N}]/u.test(word);
 
 /** How many words to say `text` has: a text with none is not taken, by the window or the engine. */
-export const wordCount = (text: string) => text.split(/\s+/).filter(isWord).length;
+export const wordCount = (text: string) => wordsOf(text).filter(isWord).length;
 
 /** Whether a word reads in English: it has a letter a to z under its marks ("café", "naïve") or a digit, said as a
  * number. "привет", "東京" and "ß" do not: Parrot hears English only, and matches a word by its a-to-z letters. */
@@ -139,7 +154,7 @@ const readsInEnglish = (word: string) => /[a-z0-9]/i.test(word.normalize('NFD'))
  * them. A name or a few words in one are fine; a text in one would score 0% whatever is said, so it is not taken, by
  * the window or the engine. A text with no words passes here: wordCount turns it away. */
 export function inEnglish(text: string): boolean {
-  const words = text.split(/\s+/).filter(isWord);
+  const words = wordsOf(text).filter(isWord);
   return words.filter((word) => !readsInEnglish(word)).length * 2 <= words.length;
 }
 
