@@ -344,6 +344,7 @@ class FakeRecorder {
   private sink: Sink | null = null;
   private lost: (() => void) | null = null;
   warm() {}
+  cool() {}
   async start(owner: TakeFor, { sink, lost }: TakeHooks = {}) {
     if (!this.micAllowed) throw new Error('Permission denied');
     this.owner.set(owner);

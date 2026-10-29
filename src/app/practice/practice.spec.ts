@@ -45,7 +45,7 @@ describe('the practice screen', () => {
         { provide: Session, useValue: session },
         { provide: Names, useValue: { has: (word: string) => word === 'Muzaffar' } },
         { provide: Playback, useValue: playback },
-        { provide: Recorder, useValue: { warm: vi.fn(), owner: signal(null) } },
+        { provide: Recorder, useValue: { warm: vi.fn(), cool: vi.fn(), owner: signal(null) } },
         { provide: WordPractice, useValue: { toggleRecord: vi.fn() } },
       ],
     });
@@ -189,7 +189,7 @@ describe('the practice screen when the centre changes size', () => {
         },
         { provide: Names, useValue: { has: () => false } },
         { provide: Playback, useValue: {} },
-        { provide: Recorder, useValue: { warm: vi.fn(), owner: signal(null) } },
+        { provide: Recorder, useValue: { warm: vi.fn(), cool: vi.fn(), owner: signal(null) } },
         { provide: WordPractice, useValue: { checking: signal(false) } },
       ],
     });

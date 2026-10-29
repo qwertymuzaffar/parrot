@@ -63,6 +63,72 @@ describe('Recorder', () => {
     expect(made).toEqual([{ sampleRate: 48000 }, { sampleRate: 48000 }, undefined]);
   });
 
+  describe('opening the microphone ahead of a take', () => {
+    beforeEach(() => localStorage.setItem('parrot.mic', 'granted'));
+    afterEach(() => localStorage.removeItem('parrot.mic'));
+
+    it('opens it only once the microphone has been allowed, so the permission prompt comes with a take', () => {
+      localStorage.removeItem('parrot.mic');
+      const mic = microphone();
+      mic.recorder.warm();
+      expect(mic.opens()).toBe(0);
+    });
+
+    it('keeps it open while on the record button, and lets it go soon after leaving with no take begun', async () => {
+      const mic = microphone();
+      mic.recorder.warm();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mic.opens()).toBe(1);
+      // still on the button a minute on: open
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mic.ctx.close).not.toHaveBeenCalled();
+      mic.recorder.cool();
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(mic.ctx.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(mic.ctx.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets it go after two minutes all the same when the pointer never leaves', async () => {
+      const mic = microphone();
+      mic.recorder.warm();
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(mic.ctx.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(mic.ctx.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps it open its two minutes after a take, for the next one, though the pointer leaves', async () => {
+      const mic = microphone();
+      mic.settled();
+      mic.recorder.warm();
+      const started = mic.start('part');
+      await vi.advanceTimersByTimeAsync(0);
+      mic.sound();
+      await started;
+      const stopping = mic.recorder.stop();
+      await vi.advanceTimersByTimeAsync(250);
+      await stopping;
+      mic.recorder.cool();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mic.ctx.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_100);
+      expect([mic.opens(), mic.ctx.close.mock.calls.length]).toEqual([1, 1]);
+    });
+
+    it('leaves a take under way alone', async () => {
+      const mic = microphone();
+      mic.settled();
+      const started = mic.start('part');
+      await vi.advanceTimersByTimeAsync(0);
+      mic.sound();
+      await started;
+      mic.recorder.cool();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect([mic.recorder.recording(), mic.ctx.close.mock.calls.length]).toEqual([true, 0]);
+    });
+  });
+
   it('says a take is getting ready from the click until it records, or until it gives up', async () => {
     const mic = microphone();
     const started = mic.start('part');
