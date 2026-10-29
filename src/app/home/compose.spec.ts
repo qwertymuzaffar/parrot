@@ -84,4 +84,26 @@ describe('a new text on the home screen', () => {
     await start('Hello there. How are you?');
     expect([textarea().value, shownError()]).toEqual(['', null]);
   });
+
+  const hint = () => document.querySelector('.compose .go .hint')!.textContent!.replace(/\s+/g, ' ').trim();
+  const startButton = () => document.querySelector<HTMLButtonElement>('.compose .go .btn')!;
+
+  it('counts only words with a letter or a digit, and one word as one', () => {
+    for (const [text, counted] of [
+      ['Hello', '1 word ·'],
+      ['... !!! Hello, 42 ??? --- ***', '2 words ·'],
+    ]) {
+      textarea().value = text;
+      textarea().dispatchEvent(new Event('input'));
+      TestBed.tick();
+      expect([hint().startsWith(counted), startButton().disabled]).toEqual([true, false]);
+    }
+  });
+
+  it('does not take a text with no words, as it does not take an empty one', async () => {
+    for (const wordless of ['\u200B', '... !!! ??? --- ***']) {
+      await start(wordless);
+      expect([hint(), startButton().disabled, textarea().value]).toEqual(['Parrot reads it to you, then listens to you.', true, wordless]);
+    }
+  });
 });

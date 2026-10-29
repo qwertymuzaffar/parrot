@@ -15,7 +15,7 @@ import {
   WordStatus,
 } from './models';
 import { nameKey } from './names';
-import { bare, partKey, sentences } from './split';
+import { bare, partKey, sentences, wordCount } from './split';
 
 /** What the demo engine keeps of a text: what the store keeps in its text.txt and meta.json. */
 interface DemoText {
@@ -176,6 +176,7 @@ export class DemoEngine extends Engine {
   private async store(text: string, title: string, mode: Mode, created = new Date()): Promise<DemoText> {
     const body = norm(text);
     if (!body) throw new EngineError('the text is empty');
+    if (!wordCount(body)) throw new EngineError('the text has no words');
     // the store's id: the first 10 hex digits of the SHA-1 of the words
     const id = (await partKey(body)).slice(2);
     let kept = this.library.find((each) => each.id === id);
@@ -428,6 +429,7 @@ export class DemoEngine extends Engine {
     const kept = await this.find(id);
     const body = norm(text);
     if (!body) throw new EngineError('the text is empty');
+    if (!wordCount(body)) throw new EngineError('the text has no words');
     const before = sentences(kept.text);
     const after = sentences(body);
     const moved = new Map<string, Attempt[]>();

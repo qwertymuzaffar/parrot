@@ -1,14 +1,37 @@
 import { Mode, Part } from './models';
 
+/** Abbreviations a sentence does not end at (the engine's text.rs has the same lists): a title before a name ("Mr.
+ * Smith", "St. Louis", "e.g. Python"), and a page, volume or number before its digits ("p. 12", "vol. 3", "No. 5"; the
+ * word "no." can end a sentence, so only "No." is one). "etc." and "Jr." often end a sentence, so they are not here. */
+const TITLES = new Set(['mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'st.', 'mt.', 'vs.', 'e.g.', 'i.e.']);
+const NUMBERED = new Set(['p.', 'pp.', 'vol.', 'fig.', 'ch.']);
+
+/** Whether the sentence goes on after `word` (one that could end it) into the words `next`. */
+function abbreviated(word: string, next: string): boolean {
+  const written = word.replace(/^["“(]+/, '');
+  const lower = written.toLowerCase();
+  return TITLES.has(lower) || ((NUMBERED.has(lower) || written === 'No.') && /^["“(]?[0-9]/.test(next));
+}
+
 /**
  * Sentences: a sentence ends at . ! or ? followed by a space and a capital, a digit or a quote,
- * so "Node.js" and "e.g. the" stay whole.
+ * so "Node.js" and "e.g. the" stay whole, but not at an abbreviation such as "Mr." or "p." before its name or number.
  */
 export function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?]["”’)]*)\s+(?=["“(]?[A-Z0-9])/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+  // the text cut wherever a sentence could end, with the spaces of each cut kept at the odd indexes
+  const pieces = text.split(/((?<=[.!?]["”’)]*)\s+(?=["“(]?[A-Z0-9]))/);
+  const out: string[] = [];
+  let sentence = pieces[0];
+  for (let index = 1; index < pieces.length; index += 2) {
+    const next = pieces[index + 1];
+    if (abbreviated(/\S*$/.exec(sentence)![0], next)) sentence += pieces[index] + next;
+    else {
+      out.push(sentence);
+      sentence = next;
+    }
+  }
+  out.push(sentence);
+  return out.map((each) => each.trim()).filter(Boolean);
 }
 
 const CONJUNCTION = /^(and|but|or|which|where|when|while|because|so|then|that|who)$/i;
@@ -57,6 +80,10 @@ export async function partKey(text: string): Promise<string> {
   return 'p-' + hex.slice(0, 10);
 }
 
+/** The keys of `parts`, each once, in reading order: a part said more than once ("Thank you.") is one part to practise,
+ * and a take of it is a take of every copy (the engine keeps the tries by key). */
+export const distinctKeys = (parts: Part[]) => [...new Set(parts.map((part) => part.key))];
+
 /** each text split, by mode and words: the same words always split the same way, so they are split (and hashed) once.
  * Kept for the texts the library has (see forgetSplits): the splits of words edited away or deleted would otherwise
  * stay for the session, hundreds of KB per edit of a long text. */
@@ -97,6 +124,12 @@ export async function splitText(text: string, mode: Mode): Promise<Part[]> {
   splits.set(mode + '\n' + text, parts);
   return parts;
 }
+
+/** A word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none). */
+const isWord = (word: string) => /[\p{L}\p{N}]/u.test(word);
+
+/** How many words to say `text` has: a text with none is not taken, by the window or the engine. */
+export const wordCount = (text: string) => text.split(/\s+/).filter(isWord).length;
 
 /** A word without the punctuation around it, for the dictionary and the voice: at its ends only, as the engine trims it
  * ("2.5" and "Node.js" keep theirs). */

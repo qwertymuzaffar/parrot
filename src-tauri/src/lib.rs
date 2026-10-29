@@ -5,6 +5,7 @@
 mod align;
 mod asr;
 mod audio;
+mod disk;
 mod edit;
 mod models;
 mod sounds;
@@ -128,7 +129,7 @@ impl Engine {
         // not create_dir_all: a text deleted while the take was scored must not come back as a folder of its tries
         match std::fs::create_dir(dir) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err("the text was deleted".into()),
-            Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => return Err(error.to_string()),
+            Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => return Err(disk::said(error)),
             _ => {}
         }
         let now = chrono::Local::now();
@@ -591,6 +592,19 @@ fn open_url(url: String) -> Result<(), String> {
     updates::open(&url)
 }
 
+/// Say why Parrot can't start in a dialog of its own (its window has nothing to show yet), then stop: without the
+/// data folder there is nothing it can do, and quitting silently would leave the person guessing.
+fn cannot_start(why: &str) -> ! {
+    log::error!("can't start: {why}");
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Parrot can't start")
+        .set_description(format!("{why}.\n\nParrot will close now."))
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+    std::process::exit(1)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -600,7 +614,10 @@ pub fn run() {
             }
             // macOS: ~/Library/Application Support/io.github.qwertymuzaffar.parrot (the first engine's folder too)
             let data = app.path().app_data_dir()?;
-            std::fs::create_dir_all(data.join("texts"))?;
+            disk::keep_in(&data);
+            if let Err(error) = std::fs::create_dir_all(data.join("texts")) {
+                cannot_start(&disk::said(error));
+            }
             // Windows: app_data_dir is the roaming profile, which domain machines copy to a server at every sign-in, so
             // the 800 MB of models go to the local one (%LOCALAPPDATA%) and the ones an older Parrot put there move over
             #[cfg(target_os = "windows")]

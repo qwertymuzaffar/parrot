@@ -4,7 +4,8 @@ import { Library } from '../core/library';
 import { TextItem } from '../core/models';
 import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
-import { splitText } from '../core/split';
+import { partKey, splitText } from '../core/split';
+import { band } from '../shared/score';
 import { Talking } from '../core/talking';
 import { Home } from './home';
 
@@ -109,5 +110,16 @@ describe('coming back to the home screen', () => {
       expect(home.querySelector('.resume .next')?.textContent).toContain('Hi, I am Sam.');
     }
     localStorage.removeItem(`parrot.part:${TEXTS[0].id}:sentences`);
+  });
+
+  it('counts a sentence said three times as one part, practised by one take', async () => {
+    const text = 'I like tea. I like tea. I like tea. I like coffee.';
+    const scores = { [await partKey('I like tea.')]: { last: 83, best: 83, tries: 1 } };
+    texts.set([{ ...TEXTS[0], id: '0123456789', title: 'Tea', text, words: 12, scores }]);
+    await fixture.whenStable();
+    const cells = [...home.querySelectorAll('.grid li.text .cells span')].map((cell) => cell.className);
+    const ring = home.querySelector('.resume .ring')!.textContent!.trim();
+    const next = home.querySelector('.resume .next')!.textContent!.trim();
+    expect([cells, ring, next]).toEqual([[band(83), 'none'], '1/2', 'Next: “I like coffee.”']);
   });
 });

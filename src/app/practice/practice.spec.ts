@@ -21,6 +21,7 @@ describe('the practice screen', () => {
     index: signal(0),
     selected: signal<number | null>(null),
     part: signal({ text: 'Hello there.' }),
+    parts: signal(['Thank you.', 'Yes.', 'Thank you.', 'No.', 'Yes.'].map((text, index) => ({ text, key: text, label: `${index + 1}` }))),
     toggleRecord: vi.fn(),
     next: vi.fn(),
     selectWord: vi.fn(),
@@ -32,7 +33,8 @@ describe('the practice screen', () => {
   let field: HTMLInputElement;
   let labels: {
     wordLabel(wordIndex: number, word: string): string;
-    stepLabel(label: string, score?: number): string;
+    stepLabel(label: string, score?: number, same?: string | null): string;
+    sameAs(stepIndex: number): string | null;
     pauseAfter(wordIndex: number): number | null;
   };
 
@@ -124,6 +126,17 @@ describe('the practice screen', () => {
     ]);
     expect(labels.stepLabel('3', 64)).toBe('Sentence 3, 64%');
     expect(labels.stepLabel('4')).toBe('Sentence 4, not practised');
+  });
+
+  it('says quietly which step a repeated part is the same as', () => {
+    expect([0, 1, 2, 3, 4].map((stepIndex) => labels.sameAs(stepIndex))).toEqual([
+      null,
+      null,
+      'Same as sentence 1',
+      null,
+      'Same as sentence 2',
+    ]);
+    expect(labels.stepLabel('3', 83, labels.sameAs(2))).toBe('Sentence 3, same as sentence 1, 83%');
   });
 
   it('says which words are names', () => {

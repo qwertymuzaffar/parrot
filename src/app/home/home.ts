@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { Mode, Part, TextItem } from '../core/models';
 import { readSetting } from '../core/settings';
-import { sentences, shortRanges, splitKnown, splitText } from '../core/split';
+import { distinctKeys, sentences, shortRanges, splitKnown, splitText, wordCount } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
@@ -63,7 +63,8 @@ export class Home {
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
   private textsColumn = viewChild.required<ElementRef<HTMLElement>>('textsColumn');
 
-  protected readonly words = computed(() => this.draft().trim().split(/\s+/).filter(Boolean).length);
+  /** the draft's words to say: punctuation alone is none, and a draft with none can't be added */
+  protected readonly words = computed(() => wordCount(this.draft()));
   /** how many parts each way of practising would give the draft */
   protected readonly counts = computed(() => {
     const text = this.draft().trim();
@@ -93,7 +94,8 @@ export class Home {
       try {
         const parts = splitKnown(text.text, text.mode);
         if (!parts) return [];
-        const cells = parts.map((part) => band(text.scores[part.key]?.last) || 'none');
+        // a cell per distinct part, as the practice screen counts them: the copies of a repeated sentence are one
+        const cells = distinctKeys(parts).map((key) => band(text.scores[key]?.last) || 'none');
         // the part it was left at, unless what was saved isn't one of its parts (damaged storage): the first
         const kept = Number(readSetting(`part:${text.id}:${text.mode}`, '0'));
         const saved = Number.isInteger(kept) && kept >= 0 && kept < parts.length ? kept : 0;
@@ -142,14 +144,15 @@ export class Home {
   }
 
   protected ring(card: Card) {
-    const total = card.parts.length || 1;
-    const done = card.parts.filter((part) => card.t.scores[part.key]).length;
+    const keys = distinctKeys(card.parts);
+    const total = keys.length || 1;
+    const done = keys.filter((key) => card.t.scores[key]).length;
     return { done, total, dash: ringDash(done, total) };
   }
 
   protected async start() {
     const text = this.draft().trim();
-    if (!text || this.adding()) return;
+    if (!this.words() || this.adding()) return;
     this.adding.set(true);
     try {
       // the draft stays until the text is added: if the engine won't add it, it can be tried again
