@@ -11,6 +11,9 @@ describe('the text the voice is given', () => {
   it('leaves the words said as words, capitals for weight, and longer or mixed ones', () => {
     expect(forVoice('NASA and NATO use JSON, NOT XML.').spoken).toBe('NASA and NATO use JSON, NOT X M L.');
     expect(forVoice('I use iOS and SaaS at UNICEF').spoken).toBe('I use iOS and SaaS at UNICEF');
+    // the voice says these as the words they are read as ("aria", "cores"), spelled it would say their letters
+    expect(forVoice('ARIA labels fix CORS on the DOM, not the GUI').spoken).toBe('ARIA labels fix CORS on the DOM, not the GUI');
+    expect(wordForVoice('ARIA')).toBe('ARIA');
   });
 
   it('leaves a number in Roman numerals for the voice to read as the number', () => {
