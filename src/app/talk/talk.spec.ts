@@ -423,4 +423,105 @@ describe('Just talk', () => {
       expect(preview.element.querySelector('[role=alert]')!.textContent).toContain('The speech engine is not running.');
     });
   });
+
+  /** Focus as a keyboard user has it: the screens attached to the page, and keys pressed (Enter on a button). */
+  describe('keyboard focus', () => {
+    async function attached<T>(component: Type<T>) {
+      const fixture = TestBed.createComponent(component);
+      document.body.append(fixture.nativeElement);
+      await fixture.whenStable();
+      const element: HTMLElement = fixture.nativeElement;
+      const button = (label: RegExp) => [...element.querySelectorAll('button')].find((each) => label.test(each.textContent!))!;
+      /** Enter on a focused button: a key, then the click it makes */
+      const enter = (target: HTMLElement) => {
+        target.focus();
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        target.click();
+      };
+      return { element, button, enter, update: () => fixture.whenStable() };
+    }
+    const focused = () => document.activeElement?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+
+    afterEach(() => document.body.replaceChildren());
+
+    it('goes on through the card as a talk is started, stopped and written down, never to the page', async () => {
+      const card = await attached(TalkCard);
+      // drawn: focus stays where it was
+      expect(document.activeElement).toBe(document.body);
+      card.enter(card.button(/Start talking/));
+      talking.state.set('recording');
+      await card.update();
+      expect(focused()).toBe('Cancel');
+      talking.recording.set(true);
+      await card.update();
+      expect(focused()).toBe('Stop');
+      card.enter(card.button(/Stop/));
+      talking.state.set('stopping');
+      await card.update();
+      talking.state.set('writing');
+      await card.update();
+      expect(focused()).toBe('Cancel');
+      card.enter(card.button(/Cancel/));
+      talking.state.set('stopped');
+      await card.update();
+      expect(focused()).toBe('Write it down');
+    });
+
+    it('goes to Keep it when asked whether to discard, and back to Discard after it', async () => {
+      talking.state.set('stopped');
+      const card = await attached(TalkCard);
+      card.enter(card.button(/^\s*Discard\s*$/));
+      await card.update();
+      expect(focused()).toBe('Keep it');
+      card.enter(card.button(/Keep it/));
+      await card.update();
+      expect(focused()).toBe('Discard');
+      // the same for a talk left from last time
+      talking.state.set('idle');
+      talking.unfinished.set({ started: '2026-10-21T10:00:00Z', duration: 75, heard: null });
+      await card.update();
+      card.enter(card.button(/^\s*Discard\s*$/));
+      await card.update();
+      expect(focused()).toBe('Keep it');
+    });
+
+    it('is not taken from somewhere else on Home as the talk changes', async () => {
+      const card = await attached(TalkCard);
+      const title = document.body.appendChild(document.createElement('input'));
+      title.focus();
+      talking.state.set('recording');
+      talking.recording.set(true);
+      await card.update();
+      expect(document.activeElement).toBe(title);
+    });
+
+    it('is not put on the card for a click, which left it on the page', async () => {
+      const card = await attached(TalkCard);
+      card.button(/Start talking/).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      card.button(/Start talking/).click();
+      talking.state.set('recording');
+      talking.recording.set(true);
+      await card.update();
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it('goes to Keep it on the check screen too, back to Discard, and back to Save when a save fails', async () => {
+      talking.talk.set(TALK);
+      talking.state.set('preview');
+      const preview = await attached(TalkPreview);
+      preview.enter(preview.button(/^\s*Discard\s*$/));
+      await preview.update();
+      expect(focused()).toBe('Keep it');
+      preview.enter(preview.button(/Keep it/));
+      await preview.update();
+      expect(focused()).toBe('Discard');
+      preview.enter(preview.button(/Save and practise/));
+      talking.state.set('keeping');
+      await preview.update();
+      talking.state.set('preview');
+      talking.failure.set('The speech engine is not running.');
+      await preview.update();
+      expect(focused()).toBe('Save and practise');
+    });
+  });
 });

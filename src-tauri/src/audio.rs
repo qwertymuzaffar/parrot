@@ -25,7 +25,7 @@ const LARGEST_FILE: usize = 1 << 30;
 /// Read a WAV file (any sample format, any channel count) as mono floats.
 pub fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
     too_big(bytes.len() as u64)?;
-    read(hound::WavReader::new(Cursor::new(bytes)).map_err(|error| format!("not a WAV recording: {error}"))?, bytes.len() as u64)
+    read(hound::WavReader::new(Cursor::new(bytes)).map_err(unreadable)?, bytes.len() as u64)
 }
 
 /// Read the WAV file at `path` as mono floats, a little at a time: a long talk is never in memory twice.
@@ -37,7 +37,20 @@ pub fn read_wav_file(path: &Path) -> Result<Pcm, String> {
 fn open_wav(path: &Path) -> Result<(hound::WavReader<BufReader<std::fs::File>>, u64), String> {
     let size = std::fs::metadata(path).map_err(crate::disk::said)?.len();
     too_big(size)?;
-    Ok((hound::WavReader::open(path).map_err(|error| format!("not a WAV recording: {error}"))?, size))
+    Ok((hound::WavReader::open(path).map_err(unreadable)?, size))
+}
+
+/// Why a recording won't open, as the window says it: the disk's error in plain words, and anything else (cut short,
+/// or not a WAV recording at all) as damaged, with hound's own words ("no RIFF tag found") only for the log.
+fn unreadable(error: hound::Error) -> String {
+    match error {
+        // the system's error is the disk's; a short read (hound's own "Failed to read enough bytes.") is the file's
+        hound::Error::IoError(error) if error.raw_os_error().is_some() => crate::disk::said(error),
+        other => {
+            log::warn!("a recording won't open: {other}");
+            "the recording is damaged: Parrot can't read it".into()
+        }
+    }
 }
 
 /// hound reads (and fails on) every sample the header claims: a header claiming millions more than the body holds
@@ -497,6 +510,14 @@ mod tests {
         wav.extend_from_slice(&claimed.to_le_bytes());
         wav.resize(wav.len() + body, 0);
         wav
+    }
+
+    #[test]
+    fn a_recording_that_wont_open_is_said_to_be_damaged() {
+        // not a WAV at all, and a WAV cut off inside its header: hound says "no RIFF tag found" and "Failed to read enough bytes."
+        for bytes in [b"hello there".to_vec(), wav_claiming(2000, 2000)[..30].to_vec()] {
+            assert_eq!(read_wav(&bytes).err().unwrap(), "the recording is damaged: Parrot can't read it");
+        }
     }
 
     #[test]

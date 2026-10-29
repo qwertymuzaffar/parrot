@@ -576,7 +576,10 @@ impl Store {
     fn read_attempt(dir: &Path, attempt: &str) -> Result<Attempt, String> {
         let name: String = attempt.chars().filter(|character| character.is_ascii_digit() || *character == '-').collect();
         let path = dir.join(format!("{name}.json"));
-        serde_json::from_str(&fs::read_to_string(&path).map_err(|_| format!("not found: {name}"))?).map_err(|error| error.to_string())
+        serde_json::from_str(&fs::read_to_string(&path).map_err(|_| format!("not found: {name}"))?).map_err(|error| {
+            log::warn!("could not read {}, which is damaged: {error}", path.display());
+            "this try's file is damaged".to_string()
+        })
     }
 
     /// Claim the id of a new try in `dir` by creating its empty <id>.wav: the time stamp, or the stamp with -2, -3...
@@ -815,6 +818,8 @@ mod tests {
         fs::write(part.join("20261023-101010.json"), b"{ half a try").unwrap();
         assert!(store.attempts(&id, "Hello there.").unwrap().is_empty());
         assert!(part.join("20261023-101010.json").exists());
+        // and opened, it is said to be damaged, not in serde's words ("key must be a string at line 1 column 3")
+        assert_eq!(store.attempt(&id, "Hello there.", "20261023-101010").unwrap_err(), "this try's file is damaged");
         // a meta.json that doesn't read is set aside, not written over, when the title changes
         fs::write(text.join("meta.json"), br#"{"title": "Greeting", "created": "2026-10-20T10:00:00""#).unwrap();
         assert_eq!(store.update(&id, Some("Hi".into()), None, false).unwrap().title, "Hi");

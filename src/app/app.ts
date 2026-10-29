@@ -1,4 +1,16 @@
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  Injector,
+  OnInit,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { Engine, EngineInfo, IN_APP } from './core/engine';
 import { Library } from './core/library';
 import { Session } from './core/session';
@@ -9,6 +21,10 @@ import { Settings } from './settings/settings';
 import { Talking } from './core/talking';
 import { TalkPreview } from './talk/talk-preview';
 import { Setup } from './setup/setup';
+import { focusIn, refocus } from './shared/focus';
+
+/** each screen, by the element that draws it: its main heading is where focus goes when it opens */
+const SCREENS = { setup: 'app-setup', preview: 'app-talk-preview', practice: 'app-practice', home: 'app-home' };
 
 /** How long the window waits for the engine's first answer before it says it is waiting (ms). */
 export const SLOW_START_MS = 4_000;
@@ -50,6 +66,32 @@ export class App implements OnInit {
   protected setup = signal<EngineInfo | null | undefined>(undefined);
   /** the engine is slow to answer at the start: the window says so rather than stay blank */
   protected slow = signal(false);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private injector = inject(Injector);
+  /** the screen shown, as the template picks it */
+  private readonly screen = computed(() => {
+    const setup = this.setup();
+    if (setup === undefined) return 'waiting';
+    if (setup) return 'setup';
+    return this.talking.checking() ? 'preview' : this.session.view();
+  });
+
+  constructor() {
+    // a new screen takes the old one's place, and the button pressed on it (a text opened, a new text, Home) goes with
+    // it: focus goes to the new screen's heading, so a screen reader says where the user is. Not for the first screen
+    // after the start, and not from the Settings dialog
+    let shown = 'waiting';
+    effect(() => {
+      const screen = this.screen();
+      const from = shown;
+      shown = screen;
+      if (screen === from || from === 'waiting' || screen === 'waiting') return;
+      untracked(() => {
+        if (document.activeElement?.closest('app-settings') || !focusIn(this.host.nativeElement)) return;
+        refocus(() => this.host.nativeElement.querySelector<HTMLElement>(`${SCREENS[screen]} h1[tabindex="-1"]`), this.injector);
+      });
+    });
+  }
 
   async ngOnInit() {
     // in the desktop app on macOS the title bar is hidden and the window buttons sit over the app

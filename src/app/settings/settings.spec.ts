@@ -98,6 +98,27 @@ describe('Settings: check for updates', () => {
     expect(listed()).toEqual(['muzaffar']);
   });
 
+  it('keeps focus in the names as one is removed: the next one, else the one before, else their heading', async () => {
+    names = ['alex', 'muzaffar', 'tashkent'];
+    const { element, click } = await settings();
+    document.body.append(element);
+    // open: what is in a closed dialog takes no focus
+    element.querySelector('dialog')!.setAttribute('open', '');
+    const remove = async (name: string) => {
+      const button = element.querySelector<HTMLElement>(`[aria-label="Remove ${name} from the names"]`)!;
+      button.focus();
+      await click(button);
+    };
+    const focused = () => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent;
+    await remove('muzaffar');
+    expect(focused()).toBe('Remove tashkent from the names');
+    await remove('tashkent');
+    expect(focused()).toBe('Remove alex from the names');
+    await remove('alex');
+    expect(focused()).toBe('Names');
+    element.remove();
+  });
+
   it('says why when GitHub cannot be asked, and can ask again', async () => {
     updates.answer = () => Promise.reject("Couldn't reach GitHub. Are you online?");
     const { button, status, click } = await settings();
