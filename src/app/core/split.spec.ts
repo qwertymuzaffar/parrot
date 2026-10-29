@@ -1,3 +1,4 @@
+import { Mode } from './models';
 import { bare, forgetSplits, inEnglish, sentences, shortRanges, splitKnown, splitText, wordCount } from './split';
 
 describe('the splits kept', () => {
@@ -119,5 +120,48 @@ describe('inEnglish', () => {
     expect(
       ['I flew from Tokyo to Moscow and said Привет to everyone.', 'Hello, привет!', 'Café au lait, naïve', '1 2 3', '...'].map(inEnglish),
     ).toEqual([true, true, true, true, true]);
+  });
+});
+
+describe('the parts of a text with spaces of other kinds', () => {
+  // the same cases as store.rs parts_are_named_as_the_window_names_them, so the window finds the tries the engine
+  // files: a byte order mark is part of a word, a next line (U+0085) is a space
+  const cases: [string, Mode, [string, string][]][] = [
+    ['Hello﻿there. How are you?', 'whole', [['p-9bdb8f3d9b', 'Hello﻿there. How are you?']]],
+    [
+      'Hello﻿there. How are you?',
+      'sentences',
+      [
+        ['p-840842a6e4', 'Hello﻿there.'],
+        ['p-3031897e28', 'How are you?'],
+      ],
+    ],
+    ['﻿Hello there. How are you?', 'whole', [['p-7149316f67', '﻿Hello there. How are you?']]],
+    [
+      '﻿Hello there. How are you?',
+      'sentences',
+      [
+        ['p-a4e1204ae4', '﻿Hello there.'],
+        ['p-3031897e28', 'How are you?'],
+      ],
+    ],
+    ['Hello\u0085there. How are you?', 'whole', [['p-29c51c722c', 'Hello there. How are you?']]],
+    [
+      'Hello\u0085there. How are you?',
+      'sentences',
+      [
+        ['p-95e3ac5665', 'Hello there.'],
+        ['p-3031897e28', 'How are you?'],
+      ],
+    ],
+  ];
+
+  for (const [text, mode, parts] of cases)
+    it(`cuts and names the parts of ${JSON.stringify(text)} ${mode} as the engine does`, async () => {
+      expect((await splitText(text, mode)).map((part) => [part.key, part.text])).toEqual(parts);
+    });
+
+  it('counts a word with a byte order mark in it as one, as the engine does', () => {
+    expect(['Hello﻿there.', '﻿Hello there.', 'Hello\u0085there.'].map(wordCount)).toEqual([1, 2, 2]);
   });
 });
