@@ -89,6 +89,22 @@ describe('Settings: check for updates', () => {
     expect(updates.opened).toEqual(['https://github.com/qwertymuzaffar/parrot/releases/tag/v0.10.0']);
   });
 
+  it('says why the release did not open in the browser, and where it is', async () => {
+    const url = 'https://github.com/qwertymuzaffar/parrot/releases/tag/v0.10.0';
+    updates.answer = async () => ({ version: '0.10.0', url });
+    updates.open = () => Promise.reject(`Parrot couldn't open your browser; the page is at ${url}`);
+    const { element, button, click } = await settings();
+    await click(button());
+    const alert = () => element.querySelector('[role=alert]')?.textContent!.trim();
+    expect(alert()).toBeUndefined();
+    await click(element.querySelector<HTMLAnchorElement>('[role=status] a')!);
+    expect(alert()).toBe(`Parrot couldn't open your browser; the page is at ${url}`);
+    // opened the next time, or checked again: the failure goes
+    updates.open = async () => {};
+    await click(element.querySelector<HTMLAnchorElement>('[role=status] a')!);
+    expect(alert()).toBeUndefined();
+  });
+
   it('lists the names, and removes one', async () => {
     names = ['muzaffar', 'tashkent'];
     const { element, click } = await settings();
@@ -131,7 +147,11 @@ describe('Settings: check for updates', () => {
 });
 
 describe('Settings when the engine fails', () => {
-  async function settings(engine: { info: () => Promise<unknown>; trashSize: () => Promise<number> }) {
+  async function settings(engine: {
+    info: () => Promise<unknown>;
+    trashSize: () => Promise<number>;
+    openDataFolder?: () => Promise<void>;
+  }) {
     TestBed.configureTestingModule({
       providers: [
         { provide: Updates, useValue: new FakeUpdates() },
@@ -180,6 +200,17 @@ describe('Settings when the engine fails', () => {
       'Open data folder',
       "Couldn't tell what is in the trash.",
     ]);
+  });
+
+  it('says out loud why the data folder did not open', async () => {
+    const said = "Parrot couldn't open the data folder; it is at the path shown above";
+    const { element, click } = await settings({
+      info,
+      trashSize: async () => 0,
+      openDataFolder: () => Promise.reject(new EngineError(said)),
+    });
+    await click('Open data folder');
+    expect(element.querySelector('[role=alert]')!.textContent!.trim()).toBe(said);
   });
 });
 
