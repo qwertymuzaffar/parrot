@@ -96,6 +96,21 @@ describe('editing the words of a text', () => {
     expect([dialog.open, textarea.value, textarea.disabled]).toEqual([true, 'Hello there.', false]);
   });
 
+  it('does not save words in another alphabet, and says Parrot checks English only', async () => {
+    const { fixture, element, textarea, button } = await editor();
+    const note = () => element.querySelector('p.hint:not(:first-of-type)')?.textContent?.trim() ?? null;
+    expect([note(), button(/Save/)!.disabled]).toEqual([null, false]);
+    textarea.value = 'Привет, как дела?';
+    textarea.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect([note(), button(/Save/)!.disabled]).toEqual(['Parrot checks English only', true]);
+    // a name in another alphabet in an English text is fine
+    textarea.value = 'Hello there, Привет. How are you?';
+    textarea.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect([note(), button(/Save/)!.disabled]).toEqual([null, false]);
+  });
+
   describe('when the engine goes quiet', () => {
     let finish: () => void;
     /** Let `ms` pass on the (fake) clock, then show what changed. whenStable never settles under fake timers. */

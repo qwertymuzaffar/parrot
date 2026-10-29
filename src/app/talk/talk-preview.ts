@@ -16,7 +16,7 @@ import { Names } from '../core/names';
 import { Playback } from '../core/playback';
 import { asTitle } from './prompts';
 import { leastSure, SoundUnit, soundUnits } from '../core/sounds';
-import { bare, wordCount } from '../core/split';
+import { bare, inEnglish, wordCount } from '../core/split';
 import { Talking } from '../core/talking';
 import { soundTip } from '../core/tips';
 import { ScoreRing } from '../practice/score-ring';
@@ -141,6 +141,9 @@ import { stopNote } from './talk-card';
               Change a word Parrot wrote to the one you meant: it then shows as misheard, with what was heard. That is the word to work on.
             </p>
             <textarea id="said" class="field" [value]="said()" (input)="said.set($any($event.target).value)"></textarea>
+            @if (!inEnglish(said())) {
+              <p class="hint">Parrot checks English only</p>
+            }
             <label class="eyebrow" for="talk-title-field">Title</label>
             <input
               id="talk-title-field"
@@ -159,7 +162,12 @@ import { stopNote } from './talk-card';
                 <button class="btn danger small" (click)="discard()">Discard</button>
               } @else {
                 <button class="btn ghost" [disabled]="talking.state() === 'keeping'" (click)="askDiscard()" #discardButton>Discard</button>
-                <button class="btn primary" [disabled]="!wordCount(said()) || talking.state() === 'keeping'" (click)="keep()" #save>
+                <button
+                  class="btn primary"
+                  [disabled]="!wordCount(said()) || !inEnglish(said()) || talking.state() === 'keeping'"
+                  (click)="keep()"
+                  #save
+                >
                   @if (talking.state() === 'keeping') {
                     <span class="spinner"></span> Saving…
                   } @else {
@@ -356,6 +364,7 @@ export class TalkPreview {
   protected names = inject(Names);
   protected readonly Math = Math;
   protected readonly wordCount = wordCount;
+  protected readonly inEnglish = inEnglish;
 
   /** the word looked at */
   protected readonly selected = signal<number | null>(null);

@@ -22,6 +22,9 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
     if !store::has_words(&new) {
         return Err("the text has no words".into());
     }
+    if !store::in_english(&new) {
+        return Err(store::NOT_ENGLISH.into());
+    }
     if new == old {
         return store.text(id);
     }
@@ -323,6 +326,23 @@ mod tests {
         assert_eq!(edit_text(&listener, &store, &id, ". . .", |_, _| {}).map(|item| item.text), Err("the text has no words".into()));
         assert_eq!(store.text(&id).unwrap().text, "Hello there. How are you?");
         assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_text_cannot_become_one_in_another_alphabet() {
+        let (store, id) = store_with("foreign", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
+        for foreign in ["Привет. Как дела?", "東京へ行きます"] {
+            assert_eq!(edit_text(&listener, &store, &id, foreign, |_, _| {}).map(|item| item.text), Err(store::NOT_ENGLISH.into()), "{foreign:?}");
+        }
+        assert_eq!(store.text(&id).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
+        // a name in another alphabet in an English text is fine
+        assert_eq!(
+            edit_text(&listener, &store, &id, "Hello there. How are you, Привет?", |_, _| {}).unwrap().text,
+            "Hello there. How are you, Привет?"
+        );
         let _ = fs::remove_dir_all(&store.data);
     }
 

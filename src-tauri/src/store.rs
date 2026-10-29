@@ -24,6 +24,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use unicode_normalization::UnicodeNormalization;
 
 /// Held while tries are filed: a take saved, or an edit moving tries to its parts' new words, so neither files a try
 /// under a part the other just took away.
@@ -70,6 +71,19 @@ pub fn norm(text: &str) -> String {
 /// Whether `text` has a word to say: one with a letter or a digit in it ("!!!", "---" and a zero-width space are none).
 pub fn has_words(text: &str) -> bool {
     text.chars().any(char::is_alphanumeric)
+}
+
+/// Why a text mostly in another alphabet is not taken: Parrot hears English only, and would score it 0% whatever is said.
+pub const NOT_ENGLISH: &str = "Parrot checks English only";
+
+/// Whether Parrot can check `text`: no more than half its words to say are in another alphabet, so a name or a few
+/// words in one are fine. A word reads in English when it has a letter a to z under its marks ("café", "naïve") or a
+/// digit, said as a number; "привет", "東京" and "ß" do not, and Parrot matches a word by its a-to-z letters. The window
+/// counts the same way (split.ts `inEnglish`). A text with no words passes here: `has_words` turns it away.
+pub fn in_english(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().filter(|word| has_words(word)).collect();
+    let foreign = words.iter().filter(|word| !word.nfd().any(|character| character.is_ascii_alphanumeric())).count();
+    foreign * 2 <= words.len()
 }
 
 pub fn sha(text: &str) -> String {
@@ -404,6 +418,9 @@ impl Store {
         if !has_words(&body) {
             return Err("the text has no words".into());
         }
+        if !in_english(&body) {
+            return Err(NOT_ENGLISH.into());
+        }
         let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty()).map(Value::from);
         if let Some(dir) = self.with_words(&body) {
             let untitled = Self::meta(&dir).get("title").and_then(Value::as_str).is_none_or(str::is_empty);
@@ -735,8 +752,27 @@ mod tests {
             assert_eq!(store.add(wordless, None, None).map(|item| item.id), Err("the text has no words".into()), "{wordless:?}");
         }
         assert!(store.list().is_empty());
-        // a word of digits or of another alphabet is a word
-        assert!(store.add("1 2 3", None, None).is_ok() && store.add("привет мир", None, None).is_ok());
+        // a word of digits is a word, said as a number
+        assert!(store.add("1 2 3", None, None).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_text_in_another_alphabet_is_not_added() {
+        let dir = std::env::temp_dir().join(format!("parrot-store-foreign-{}", std::process::id()));
+        let store = Store { data: dir.clone() };
+        // the window's split.spec.ts checks the same texts the same way
+        for foreign in ["Привет, как дела?", "東京へ行きます", "ß ß", "Hello, привет мир!"] {
+            assert!(!in_english(foreign), "{foreign:?}");
+            assert_eq!(store.add(foreign, None, None).map(|item| item.id), Err(NOT_ENGLISH.into()), "{foreign:?}");
+        }
+        assert!(store.list().is_empty());
+        // a few names or words in another alphabet, accents and numbers are fine
+        for english in ["I flew from Tokyo to Moscow and said Привет to everyone.", "Hello, привет!", "Café au lait, naïve", "1 2 3", "..."]
+        {
+            assert!(in_english(english), "{english:?}");
+        }
+        assert!(store.add("We said Привет in Tokyo.", None, None).is_ok() && store.add_spoken("Café au lait, naïve", None).is_ok());
         let _ = fs::remove_dir_all(dir);
     }
 

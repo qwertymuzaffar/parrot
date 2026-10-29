@@ -59,14 +59,16 @@
       }
       <div class="go">
         <span class="hint">
-          @if (words()) {
+          @if (!english()) {
+            Parrot checks English only
+          } @else if (words()) {
             {{ words() }} {{ words() === 1 ? 'word' : 'words' }} · about
             {{ words() < 150 ? Math.max(5, Math.round((words() / 150) * 60)) + ' s' : Math.round(words() / 150) + ' min' }} to read
           } @else {
             Parrot reads it to you, then listens to you.
           }
         </span>
-        <button class="btn primary" [disabled]="!words() || adding()" (click)="start()">Start practising</button>
+        <button class="btn primary" [disabled]="!words() || !english() || adding()" (click)="start()">Start practising</button>
       </div>
     </section>
 
