@@ -97,6 +97,21 @@ describe('coming back to the home screen', () => {
     expect(shown()).toEqual({ cards: ['Something new'], resume: null, empty: false });
   });
 
+  it('still lists every text, and Continue, when the part a text was left at is damaged', () => {
+    for (const saved of ['abc', '-1', '1.5', '9']) {
+      localStorage.setItem(`parrot.part:${TEXTS[0].id}:sentences`, saved);
+      texts.set(TEXTS.map((text) => ({ ...text })));
+      TestBed.tick();
+      expect([saved, shown()]).toEqual([
+        saved,
+        { cards: ['Introducing yourself', 'A weather report'], resume: 'Introducing yourself', empty: false },
+      ]);
+      // Continue goes to the first part
+      expect(home.querySelector('.resume .next')?.textContent).toContain('Hi, I am Sam.');
+    }
+    localStorage.removeItem(`parrot.part:${TEXTS[0].id}:sentences`);
+  });
+
   it('counts a sentence said three times as one part, practised by one take', async () => {
     const text = 'I like tea. I like tea. I like tea. I like coffee.';
     const scores = { [await partKey('I like tea.')]: { last: 83, best: 83, tries: 1 } };
