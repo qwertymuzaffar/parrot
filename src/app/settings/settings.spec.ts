@@ -307,6 +307,19 @@ describe('Settings: emptying the trash, on the keyboard', () => {
     expect(focused()).toBe('A deleted text stays in the trash for 30 days, then Parrot erases it for good.');
   });
 
+  it('asks its question of a screen reader on Keep and Empty too', async () => {
+    const { button, enter } = await settings();
+    await enter(button('Empty trash · 2 MB'));
+    /** what a screen reader adds to a button's name: the text of what it is described by */
+    const description = (target: HTMLElement) =>
+      (target.getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent!.trim())
+        .join(' ');
+    expect(description(button('Keep'))).toBe('Erase 2 MB of deleted texts for good?');
+    expect(description(button('Empty'))).toBe('Erase 2 MB of deleted texts for good?');
+  });
+
   it('goes back to Empty trash when it could not be emptied, to try again', async () => {
     emptied = () => Promise.reject(new EngineError('The speech engine is not running.'));
     const { element, button, enter } = await settings();
