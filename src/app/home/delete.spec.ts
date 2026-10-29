@@ -90,6 +90,20 @@ describe('deleting a text on the home screen', () => {
     expect([card(), document.querySelector('.resume')]).toEqual([null, null]);
   });
 
+  it('asks its question of a screen reader on Keep and Delete too', async () => {
+    button('Delete')!.click();
+    await fixture.whenStable();
+    /** what a screen reader adds to a button's name: the text of what it is described by */
+    const description = (target: HTMLElement) =>
+      (target.getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent!.trim())
+        .join(' ');
+    const asked = 'Move it and its recordings to the trash? Parrot erases them for good after 30 days.';
+    expect(description(button('Keep')!)).toBe(asked);
+    expect(description(button('Delete')!)).toBe(asked);
+  });
+
   it('opens again if the engine keeps it', async () => {
     TestBed.inject(Library).remove = async () => undefined;
     button('Delete')!.click();

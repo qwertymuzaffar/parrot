@@ -55,7 +55,8 @@ pub fn ready(dir: &Path, model: &Model) -> bool {
 }
 
 /// Rename a model file that would not load to <file>.bad, so it no longer counts as ready and Setup downloads it
-/// again; returns the message to show instead of `error`, the load's own (kept if the file could not be moved).
+/// again; returns the message to show instead of `error`, the load's own, which is only for the log. A file that could
+/// not be moved is left for the user to delete.
 pub fn set_aside(dir: &Path, model: &Model, error: String) -> String {
     let bad = dir.join(format!("{}.bad", model.file));
     let _ = std::fs::remove_file(&bad);
@@ -64,7 +65,10 @@ pub fn set_aside(dir: &Path, model: &Model, error: String) -> String {
             log::warn!("set {} aside: {error}", model.file);
             format!("{} is damaged; restart Parrot to download it again", model.file)
         }
-        Err(_) => error,
+        Err(moved) => {
+            log::warn!("{} would not load ({error}) and could not be set aside: {moved}", model.file);
+            format!("{} won't load; delete it from {}, then restart Parrot to download it again", model.file, dir.display())
+        }
     }
 }
 
@@ -381,5 +385,17 @@ mod tests {
         migrate(&old, &new).unwrap();
         assert!(!new.exists(), "no empty folder made for nothing");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_model_that_cannot_be_set_aside_is_said_plainly() {
+        let dir = std::env::temp_dir().join(format!("parrot-unmoved-{}", std::process::id()));
+        // a folder of things where <file>.bad would go: the model can't be moved there
+        fs::create_dir_all(dir.join(format!("{}.bad", ALIGNER.file)).join("kept")).unwrap();
+        fs::write(path(&dir, &ALIGNER), b"not the model").unwrap();
+        let said = set_aside(&dir, &ALIGNER, "could not load the aligner: Protobuf parsing failed".into());
+        assert_eq!(said, format!("{} won't load; delete it from {}, then restart Parrot to download it again", ALIGNER.file, dir.display()));
+        assert!(path(&dir, &ALIGNER).exists(), "left where it was, for the user to delete");
+        let _ = fs::remove_dir_all(dir);
     }
 }

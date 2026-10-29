@@ -176,7 +176,9 @@
           </div>
           <div class="meta">
             @if (confirming() === card.t.id) {
-              <span class="ask">Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span>
+              <span class="ask" [id]="'ask-' + card.t.id"
+                >Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span
+              >
             } @else if (deleting().has(card.t.id)) {
               <span role="status">Moving it to the trash…</span>
             } @else {
@@ -187,8 +189,9 @@
             }
             <span class="acts" [class.asking]="confirming() === card.t.id || renaming() === card.t.id" (click)="$event.stopPropagation()">
               @if (confirming() === card.t.id) {
-                <button class="btn ghost small" (click)="askDelete(null)">Keep</button>
-                <button class="btn danger small" (click)="remove(card.t)">Delete</button>
+                <!-- described by the question, so a screen reader landing on either one reads it too -->
+                <button class="btn ghost small" (click)="askDelete(null)" [attr.aria-describedby]="'ask-' + card.t.id">Keep</button>
+                <button class="btn danger small" (click)="remove(card.t)" [attr.aria-describedby]="'ask-' + card.t.id">Delete</button>
               } @else if (deleting().has(card.t.id)) {
                 <!-- nothing to do to a text on its way to the trash -->
               } @else if (renaming() === card.t.id) {
