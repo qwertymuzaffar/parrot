@@ -137,9 +137,8 @@ h3 {
   margin: 0;
 }
 
-// a heading or line focus is put on (a new screen's, a list's, the trash's once emptied): no ring for the pointer, the
-// usual one for the keyboard
-:is(h1, h2, h3, .eyebrow, p)[tabindex='-1'] {
+// a heading focus is put on (a new screen's, a list's): no ring for the pointer, the usual one for the keyboard
+:is(h1, h2, h3, .eyebrow)[tabindex='-1'] {
   outline: none;
   &:focus-visible {
     outline: 2px solid var(--accent);
@@ -167,10 +166,12 @@ h3 {
     background 0.12s,
     opacity 0.12s;
 
-  &:hover:not(:disabled) {
+  &:hover:not(:disabled, [aria-disabled='true']) {
     border-color: var(--muted);
   }
-  &:disabled {
+  // aria-disabled: dimmed and not to be pressed, but still focusable, for focus to stay on it
+  &:disabled,
+  &[aria-disabled='true'] {
     opacity: 0.45;
     cursor: default;
   }
@@ -178,7 +179,7 @@ h3 {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--accent-ink);
-    &:hover:not(:disabled) {
+    &:hover:not(:disabled, [aria-disabled='true']) {
       filter: brightness(1.06);
     }
   }
@@ -186,7 +187,7 @@ h3 {
     border-color: transparent;
     background: none;
     color: var(--ink-2);
-    &:hover:not(:disabled) {
+    &:hover:not(:disabled, [aria-disabled='true']) {
       background: var(--surface-2);
       color: var(--ink);
     }
