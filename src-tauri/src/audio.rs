@@ -35,7 +35,7 @@ pub fn read_wav_file(path: &Path) -> Result<Pcm, String> {
 }
 
 fn open_wav(path: &Path) -> Result<(hound::WavReader<BufReader<std::fs::File>>, u64), String> {
-    let size = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
+    let size = std::fs::metadata(path).map_err(crate::disk::said)?.len();
     too_big(size)?;
     Ok((hound::WavReader::open(path).map_err(|error| format!("not a WAV recording: {error}"))?, size))
 }
@@ -120,7 +120,7 @@ pub fn clip_file(path: &Path, from: f64, to: f64) -> Result<(u32, Vec<i16>), Str
     let end = ((to.max(from) * spec.sample_rate as f64).ceil() as u32).min(frames);
     // a word is a second or two; never more than a minute
     let count = (end - first).min(spec.sample_rate * 60) as usize;
-    reader.seek(first).map_err(|error| error.to_string())?;
+    reader.seek(first).map_err(crate::disk::said)?;
     let scale = match spec.sample_format {
         hound::SampleFormat::Float => 1.0,
         hound::SampleFormat::Int => (1i64 << (spec.bits_per_sample.clamp(1, 32) - 1)) as f32,
@@ -153,7 +153,7 @@ pub fn write_wav(path: &std::path::Path, pcm: &Pcm) -> Result<(), String> {
     })();
     written.map_err(|error| {
         let _ = std::fs::remove_file(&temporary);
-        error.to_string()
+        crate::disk::wav_said(error)
     })
 }
 

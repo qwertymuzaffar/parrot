@@ -105,7 +105,7 @@ struct Progress<'a> {
 /// Download every missing model, reporting "model-progress" events as it goes. A partial file is kept as
 /// <file>.part and continued on the next try; the file is renamed into place only once its SHA-256 matches.
 pub async fn download_missing(app: &AppHandle, dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|error| on_disk(error, dir))?;
     let client =
         reqwest::Client::builder().user_agent("Parrot").connect_timeout(STALL).read_timeout(STALL).build().map_err(|error| error.to_string())?;
     for model in ALL {
@@ -114,17 +114,18 @@ pub async fn download_missing(app: &AppHandle, dir: &Path) -> Result<(), String>
         }
         let part = dir.join(format!("{}.part", model.file));
         download(app, &client, model, &part).await?;
-        std::fs::rename(&part, path(dir, model)).map_err(|error| error.to_string())?;
+        std::fs::rename(&part, path(dir, model)).map_err(|error| on_disk(error, dir))?;
     }
     Ok(())
 }
 
 /// Bring <file>.part to the full, verified model, asking only for the bytes it does not have yet.
 async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part: &Path) -> Result<(), String> {
+    let folder = part.parent().unwrap_or(part);
     let mut have = std::fs::metadata(part).map(|md| md.len()).unwrap_or(0);
     if have > model.bytes {
         // longer than the model: not the start of it
-        std::fs::remove_file(part).map_err(|error| error.to_string())?;
+        std::fs::remove_file(part).map_err(|error| on_disk(error, folder))?;
         have = 0;
     }
     let mut hasher = Sha256::new();
@@ -144,17 +145,17 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
             return Err(format!("could not download {}: {status}; try again", model.file));
         };
         let mut out = if start == 0 {
-            File::create(part).map_err(|error| error.to_string())?
+            File::create(part).map_err(|error| on_disk(error, folder))?
         } else {
             hash_file(&mut hasher, part)?;
-            OpenOptions::new().append(true).open(part).map_err(|error| error.to_string())?
+            OpenOptions::new().append(true).open(part).map_err(|error| on_disk(error, folder))?
         };
         let mut received = start;
         let mut last = received;
         let mut stream = res.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|error| format!("the download of {} stopped: {error}; try again", model.file))?;
-            out.write_all(&chunk).map_err(|error| error.to_string())?;
+            out.write_all(&chunk).map_err(|error| on_disk(error, folder))?;
             hasher.update(&chunk);
             received += chunk.len() as u64;
             if received > model.bytes {
@@ -167,7 +168,7 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
                 let _ = app.emit("model-progress", Progress { model: model.key, received, total: model.bytes });
             }
         }
-        out.flush().map_err(|error| error.to_string())?;
+        out.flush().map_err(|error| on_disk(error, folder))?;
         drop(out);
         if received != model.bytes {
             return Err(format!("{} arrived incomplete ({received} of {} bytes); try again", model.file, model.bytes));
@@ -199,13 +200,20 @@ fn body_starts_at(have: u64, status: StatusCode, content_range: Option<&str>) ->
 }
 
 fn hash_file(hasher: &mut Sha256, file: &Path) -> Result<(), String> {
-    let mut reader = File::open(file).map_err(|error| error.to_string())?;
-    std::io::copy(&mut reader, hasher).map_err(|error| error.to_string())?;
+    let folder = file.parent().unwrap_or(file);
+    let mut reader = File::open(file).map_err(|error| on_disk(error, folder))?;
+    std::io::copy(&mut reader, hasher).map_err(|error| on_disk(error, folder))?;
     Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A disk error met in the models' `folder`, as the window says it: a model is 300 to 500 MB, so a full disk is most
+/// often met here.
+fn on_disk(error: std::io::Error, folder: &Path) -> String {
+    crate::disk::said_about(&error, Some(folder))
 }
 
 #[cfg(test)]
