@@ -330,12 +330,16 @@ describe('Settings: emptying the trash, on the keyboard', () => {
     expect(focused()).toBe('Empty trash · 2 MB');
   });
 
-  it('goes to the line about the trash once it is emptied, its button not to be pressed', async () => {
+  it('stays on the trash once it is emptied, which says so and asks nothing more', async () => {
     const { button, enter } = await settings();
     await enter(button('Empty trash · 2 MB'));
     await enter(button('Empty'));
-    expect(button('The trash is empty').disabled).toBe(true);
-    expect(focused()).toBe('A deleted text stays in the trash for 30 days, then Parrot erases it for good.');
+    expect(focused()).toBe('The trash is empty');
+    expect(button('The trash is empty').getAttribute('aria-disabled')).toBe('true');
+    // pressed again, it does nothing: there is nothing to erase
+    await enter(button('The trash is empty'));
+    expect(button('Keep')).toBeUndefined();
+    expect(focused()).toBe('The trash is empty');
   });
 
   it('goes back to Empty trash when it could not be emptied, to try again', async () => {

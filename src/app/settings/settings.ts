@@ -135,7 +135,7 @@ const MB = 1_000_000;
             @if (trash.status() !== 'loading') {
               @let bytes = trashBytes();
               @if (bytes != null) {
-                <p class="hint" tabindex="-1" #trashLine>A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
+                <p class="hint">A deleted text stays in the trash for 30 days, then Parrot erases it for good.</p>
               }
               <div class="acts" #trashActs>
                 @if (emptying() && bytes) {
@@ -145,7 +145,8 @@ const MB = 1_000_000;
                 } @else {
                   <button class="btn small" (click)="openFolder()"><app-icon name="folder" [size]="15" /> Open data folder</button>
                   @if (bytes != null) {
-                    <button class="btn small" [disabled]="!bytes" (click)="askEmpty(true)" #trashButton>
+                    <!-- aria-disabled rather than disabled once empty, so focus can stay on it as it says so -->
+                    <button class="btn small" [attr.aria-disabled]="!bytes || null" (click)="bytes && askEmpty(true)" #trashButton>
                       <app-icon name="trash" [size]="15" />
                       {{ bytes ? 'Empty trash · ' + size(bytes) : 'The trash is empty' }}
                     </button>
@@ -289,7 +290,6 @@ export class Settings {
   private namesHeading = viewChild.required<ElementRef<HTMLElement>>('namesHeading');
   private trashActs = viewChild<ElementRef<HTMLElement>>('trashActs');
   private trashButton = viewChild<ElementRef<HTMLButtonElement>>('trashButton');
-  private trashLine = viewChild<ElementRef<HTMLElement>>('trashLine');
   private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
@@ -379,13 +379,9 @@ export class Settings {
     } catch (error) {
       this.failure.set(errorMessage(error));
     }
-    // emptied, its button can't be pressed (The trash is empty): focus goes to the line about the trash instead.
-    // Not emptied, Empty trash is there to try again
-    if (!hadFocus) return;
-    refocus(() => {
-      const button = this.trashButton()?.nativeElement;
-      return button && !button.disabled ? button : this.trashLine()?.nativeElement;
-    }, this.injector);
+    // focus goes back to the trash's button: emptied, it says so (The trash is empty), and not emptied, it is there to
+    // try again
+    if (hadFocus) refocus(() => this.trashButton()?.nativeElement, this.injector);
   }
 
   protected size(bytes: number) {
