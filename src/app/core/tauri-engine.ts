@@ -10,7 +10,7 @@ import { Activity, Attempt, AttemptSummary, KeptTalk, LeftTalk, Mode, PartScore,
 export const LIMIT_MS = 30_000;
 /** a take's check: this, and three times the take's length on top (a long take takes long to write down and align) */
 export const CHECK_LIMIT_MS = 60_000;
-/** a command that reports progress (a download, a talk written down): this long between two reports */
+/** a command that reports progress (a download, a talk written down or kept): this long between two reports */
 export const PROGRESS_LIMIT_MS = 120_000;
 /** a text's words changed: its tries are scored again one by one, and a try can be a long take */
 export const EDIT_LIMIT_MS = 300_000;
@@ -187,8 +187,16 @@ export class TauriEngine extends Engine {
     return this.call<void>('talk_cancel');
   }
 
-  talkKeep(text: string, title: string) {
-    return this.call<KeptTalk>('talk_keep', { text, title: title.trim() || null });
+  /** A long talk takes a while to keep (each stretch scored again, each sentence cut): the window waits as long as
+   * the engine reports a step at a time. */
+  async talkKeep(text: string, title: string) {
+    const patience = new Patience(PROGRESS_LIMIT_MS);
+    const stop = await listen('keep-progress', () => patience.more());
+    try {
+      return await this.call<KeptTalk>('talk_keep', { text, title: title.trim() || null }, undefined, patience);
+    } finally {
+      stop();
+    }
   }
 
   talkDiscard() {

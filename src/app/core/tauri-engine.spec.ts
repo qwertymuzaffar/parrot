@@ -1,3 +1,4 @@
+import { emit } from '@tauri-apps/api/event';
 import { clearMocks, mockConvertFileSrc, mockIPC } from '@tauri-apps/api/mocks';
 import { EngineError } from './engine';
 import { CHECK_LIMIT_MS, EDIT_LIMIT_MS, LIMIT_MS, NO_ANSWER, Patience, PROGRESS_LIMIT_MS, TauriEngine, wavSeconds } from './tauri-engine';
@@ -187,17 +188,31 @@ describe('TauriEngine', () => {
       await expect(waited).rejects.toThrow(NO_ANSWER);
     });
 
-    it('a download, a talk written down and a text edited wait longer between reports than a plain command', async () => {
+    it('a download, a talk written down or kept and a text edited wait longer between reports than a plain command', async () => {
       const engine = new TauriEngine();
       const download = settled(engine.downloadModels(() => {}));
       const writing = settled(engine.talkStop(() => {}));
+      const keeping = settled(engine.talkKeep('Hello there.', ''));
       const editing = settled(engine.editText('95e3ac5665', 'Hello.', () => {}));
       await vi.advanceTimersByTimeAsync(PROGRESS_LIMIT_MS - 1);
-      expect([download(), writing(), editing()]).toEqual([false, false, false]);
+      expect([download(), writing(), keeping(), editing()]).toEqual([false, false, false, false]);
       await vi.advanceTimersByTimeAsync(1);
-      expect([download(), writing(), editing()]).toEqual([true, true, false]);
+      expect([download(), writing(), keeping(), editing()]).toEqual([true, true, true, false]);
       await vi.advanceTimersByTimeAsync(EDIT_LIMIT_MS - PROGRESS_LIMIT_MS);
       expect(editing()).toBe(true);
+    });
+
+    it('a long talk is waited for as long as the engine keeps it a step at a time', async () => {
+      mockIPC((cmd) => (cmd.startsWith('plugin:event') ? undefined : new Promise(() => {})), { shouldMockEvents: true });
+      const keeping = settled(new TauriEngine().talkKeep('Hello there.', ''));
+      // ten minutes of steps, each well within the wait
+      for (let step = 0; step < 10; step++) {
+        await vi.advanceTimersByTimeAsync(PROGRESS_LIMIT_MS / 2);
+        await emit('keep-progress', { done: step + 1, total: 20 });
+      }
+      expect(keeping()).toBe(false);
+      await vi.advanceTimersByTimeAsync(PROGRESS_LIMIT_MS);
+      expect(keeping()).toBe(true);
     });
 
     it("the talk's sound is waited for without a limit", async () => {
