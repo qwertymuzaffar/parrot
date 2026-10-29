@@ -15,7 +15,7 @@ use std::path::PathBuf;
 pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str, progress: impl Fn(usize, usize)) -> Result<TextItem, String> {
     let dir = store.text_dir(id)?;
     let old = store::norm(&fs::read_to_string(dir.join("text.txt")).map_err(crate::disk::said)?);
-    let new = store::norm(new_text);
+    let new = store::clean(new_text);
     if new.is_empty() {
         return Err("the text is empty".into());
     }
@@ -343,6 +343,16 @@ mod tests {
             edit_text(&listener, &store, &id, "Hello there. How are you, Привет?", |_, _| {}).unwrap().text,
             "Hello there. How are you, Привет?"
         );
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn a_byte_order_mark_pasted_into_the_words_is_left_out() {
+        let (store, id) = store_with("mark", "Hello there. How are you?", &["Hello there."]);
+        let listener = Listener { heard: "", fail: false, texts: RefCell::new(vec![]) };
+        // the words pasted over from a file that begins with one: the same words, so nothing changes
+        assert_eq!(edit_text(&listener, &store, &id, "\u{FEFF}Hello there. How are you?", |_, _| {}).unwrap().text, "Hello there. How are you?");
+        assert_eq!(store.attempts(&id, "Hello there.").unwrap().len(), 1, "the tries stay where they were");
         let _ = fs::remove_dir_all(&store.data);
     }
 
