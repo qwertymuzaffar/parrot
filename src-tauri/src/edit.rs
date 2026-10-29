@@ -6,6 +6,7 @@ use crate::store::{self, Attempt, Store, TextItem};
 use crate::text::{self, WordResult, WordStatus};
 use crate::{Listen, audio, score_take, talk};
 use similar::DiffOp;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -108,15 +109,28 @@ pub fn edit_text(listener: &impl Listen, store: &Store, id: &str, new_text: &str
 
     // all scored: each try is filed under its part's words now (its recording linked there), then the text changes,
     // and only then do the tries as they were go. A failure on the way takes back what was filed, leaving the text
-    // as it was; a crash leaves at worst a try twice, once where the text doesn't look.
+    // as it was; a crash leaves at worst a try twice, once where the text doesn't look, and the same edit made again
+    // files the try over that copy rather than beside it.
     let mut filed: Vec<PathBuf> = vec![];
     let mut moved: Vec<PathBuf> = vec![];
+    // the tries in each part's new folder before this edit filed any there
+    let mut there: HashMap<PathBuf, Vec<Attempt>> = HashMap::new();
     let filing = (|| {
         for (old_dir, old_attempt, part, mut attempt) in scored {
             let new_dir = dir.join(format!("p-{}", store::sha(&part)));
             fs::create_dir_all(&new_dir).map_err(crate::disk::said)?;
             let stamp = old_attempt.id.get(..15).unwrap_or(&old_attempt.id);
-            attempt.id = Store::new_try(&new_dir, stamp)?;
+            // the copy an edit cut short by a quit left of this try: the same try recorded at the same moment, as long
+            let earlier = there.entry(new_dir.clone()).or_insert_with(|| Store::read_attempts(&new_dir));
+            let copy = earlier.iter().position(|left| {
+                (left.id == stamp || left.id.starts_with(&format!("{stamp}-")))
+                    && left.when == old_attempt.when
+                    && left.duration == old_attempt.duration
+            });
+            attempt.id = match copy {
+                Some(index) => earlier.remove(index).id,
+                None => Store::new_try(&new_dir, stamp)?,
+            };
             let file = new_dir.join(format!("{}.wav", attempt.id));
             filed.extend([file.clone(), new_dir.join(format!("{}.json", attempt.id))]);
             let recording = store.recording(&old_attempt.audio)?;
@@ -372,6 +386,38 @@ mod tests {
         assert_eq!(store.attempt(&id, "Hello there.", &store.attempts(&id, "Hello there.").unwrap()[0].id).unwrap().score, 0);
         assert_eq!(item.scores.len(), 2);
         assert!(store.part_dir(&id, "How are you?").is_err(), "no longer a part of the text");
+        let _ = fs::remove_dir_all(&store.data);
+    }
+
+    #[test]
+    fn the_same_edit_made_again_after_a_quit_files_each_try_once() {
+        let (store, id) = store_with("again", "Hello there. How are you?", &["Hello there.", "How are you?"]);
+        let text = store.text_dir(&id).unwrap();
+        let old = text.join(format!("p-{}", store::sha("How are you?")));
+        let aside = store.data.join("aside");
+        fs::create_dir_all(&aside).unwrap();
+        for entry in fs::read_dir(&old).unwrap().flatten() {
+            fs::copy(entry.path(), aside.join(entry.file_name())).unwrap();
+        }
+        let listener = Listener { heard: "how old are you", fail: false, texts: RefCell::new(vec![]) };
+        edit_text(&listener, &store, &id, "Hello there. How old are you?", |_, _| {}).unwrap();
+        // Parrot quit after the try was filed under the new words, before the words were written: the text and its
+        // tries are as they were, with a copy of the try where the text doesn't look
+        store::write_whole(&text.join("text.txt"), b"Hello there. How are you?").unwrap();
+        fs::create_dir_all(&old).unwrap();
+        for entry in fs::read_dir(&aside).unwrap().flatten() {
+            fs::copy(entry.path(), old.join(entry.file_name())).unwrap();
+        }
+        let before = store.text(&id).unwrap();
+        assert_eq!(before.scores.values().map(|part| part.tries).collect::<Vec<_>>(), [1, 1]);
+
+        let item = edit_text(&listener, &store, &id, "Hello there. How old are you?", |_, _| {}).unwrap();
+        let tries = store.attempts(&id, "How old are you?").unwrap();
+        assert_eq!(tries.iter().map(|attempt| attempt.id.as_str()).collect::<Vec<_>>(), ["20261020-101010"], "the try once");
+        assert_eq!(item.scores.values().map(|part| part.tries).collect::<Vec<_>>(), [1, 1]);
+        let moved = store.attempt(&id, "How old are you?", "20261020-101010").unwrap();
+        assert!(store.data.join(&moved.audio).exists(), "its recording with it");
+        assert!(!old.exists());
         let _ = fs::remove_dir_all(&store.data);
     }
 
