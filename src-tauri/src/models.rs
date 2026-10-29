@@ -106,8 +106,12 @@ struct Progress<'a> {
 /// <file>.part and continued on the next try; the file is renamed into place only once its SHA-256 matches.
 pub async fn download_missing(app: &AppHandle, dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|error| on_disk(error, dir))?;
-    let client =
-        reqwest::Client::builder().user_agent("Parrot").connect_timeout(STALL).read_timeout(STALL).build().map_err(|error| error.to_string())?;
+    let client = reqwest::Client::builder()
+        .user_agent("Parrot")
+        .connect_timeout(STALL)
+        .read_timeout(STALL)
+        .build()
+        .map_err(|error| network_said(error, "Parrot couldn't start downloading; try again".into()))?;
     for model in ALL {
         if ready(dir, model) {
             continue;
@@ -134,7 +138,7 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
         if have > 0 {
             request = request.header(RANGE, format!("bytes={have}-"));
         }
-        let res = request.send().await.map_err(|error| format!("could not download {}: {error}", model.file))?;
+        let res = request.send().await.map_err(|error| network_said(error, out_of_reach(model)))?;
         let status = res.status();
         let content_range = res.headers().get(CONTENT_RANGE).and_then(|value| value.to_str().ok());
         let Some(start) = body_starts_at(have, status, content_range) else {
@@ -160,7 +164,7 @@ async fn download(app: &AppHandle, client: &reqwest::Client, model: &Model, part
         let mut last = received;
         let mut stream = res.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| format!("the download of {} stopped: {error}; try again", model.file))?;
+            let chunk = chunk.map_err(|error| network_said(error, stopped(model)))?;
             out.write_all(&chunk).map_err(|error| on_disk(error, folder))?;
             hasher.update(&chunk);
             received += chunk.len() as u64;
@@ -237,6 +241,23 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// What the window says when `model` can't be asked for: reqwest's own words ("error sending request for url (...)")
+/// are only for the log.
+fn out_of_reach(model: &Model) -> String {
+    format!("could not download {}: Parrot couldn't reach the server; check that you're online, then try again", model.file)
+}
+
+/// What the window says when the download of `model` breaks off partway: the connection dropped, or stalled.
+fn stopped(model: &Model) -> String {
+    format!("the download of {} stopped (the connection dropped or stalled); try again", model.file)
+}
+
+/// `said`, the plain words for a network `error`, with the error's own words logged.
+fn network_said(error: reqwest::Error, said: String) -> String {
+    log::warn!("{said}: {error}");
+    said
+}
+
 /// A disk error met in the models' `folder`, as the window says it: a model is 300 to 500 MB, so a full disk is most
 /// often met here.
 fn on_disk(error: std::io::Error, folder: &Path) -> String {
@@ -283,6 +304,14 @@ mod tests {
         );
         assert!(wrong_body(&WHISPER, 1000, whole, None).is_some(), "the whole file sent as the rest");
         assert!(wrong_body(&WHISPER, 0, Some(WHISPER.bytes + 1), None).is_some());
+    }
+
+    #[test]
+    fn a_server_that_cant_be_reached_is_said_plainly() {
+        // nothing listens on port 1: reqwest's own words are "error sending request for url (http://127.0.0.1:1/)"
+        let error = tauri::async_runtime::block_on(reqwest::Client::new().get("http://127.0.0.1:1/").send()).unwrap_err();
+        let said = network_said(error, out_of_reach(&WHISPER));
+        assert_eq!(said, "could not download ggml-small.en.bin: Parrot couldn't reach the server; check that you're online, then try again");
     }
 
     #[test]
