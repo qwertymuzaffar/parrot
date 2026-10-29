@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { Mode, Part, TextItem } from '../core/models';
 import { readSetting } from '../core/settings';
-import { sentences, shortRanges, splitKnown, splitText } from '../core/split';
+import { distinctKeys, sentences, shortRanges, splitKnown, splitText } from '../core/split';
 import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { Icon } from '../shared/icon';
@@ -91,7 +91,8 @@ export class Home {
     return this.library.texts().flatMap((text): Card[] => {
       const parts = splitKnown(text.text, text.mode);
       if (!parts) return [];
-      const cells = parts.map((part) => band(text.scores[part.key]?.last) || 'none');
+      // a cell per distinct part, as the practice screen counts them: the copies of a repeated sentence are one
+      const cells = distinctKeys(parts).map((key) => band(text.scores[key]?.last) || 'none');
       const saved = Number(readSetting(`part:${text.id}:${text.mode}`, '0'));
       const order = [...parts.keys()].map((partIndex) => (partIndex + saved) % parts.length);
       const nextIndex = order.find((partIndex) => !text.scores[parts[partIndex].key]) ?? saved;
@@ -135,8 +136,9 @@ export class Home {
   }
 
   protected ring(card: Card) {
-    const total = card.parts.length || 1;
-    const done = card.parts.filter((part) => card.t.scores[part.key]).length;
+    const keys = distinctKeys(card.parts);
+    const total = keys.length || 1;
+    const done = keys.filter((key) => card.t.scores[key]).length;
     return { done, total, dash: ringDash(done, total) };
   }
 

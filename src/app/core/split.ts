@@ -57,6 +57,10 @@ export async function partKey(text: string): Promise<string> {
   return 'p-' + hex.slice(0, 10);
 }
 
+/** The keys of `parts`, each once, in reading order: a part said more than once ("Thank you.") is one part to practise,
+ * and a take of it is a take of every copy (the engine keeps the tries by key). */
+export const distinctKeys = (parts: Part[]) => [...new Set(parts.map((part) => part.key))];
+
 /** each text split, by mode and words: the same words always split the same way, so they are split (and hashed) once.
  * Kept for the texts the library has (see forgetSplits): the splits of words edited away or deleted would otherwise
  * stay for the session, hundreds of KB per edit of a long text. */

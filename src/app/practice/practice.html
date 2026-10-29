@@ -1,6 +1,8 @@
 @let text = session.text();
 @let part = session.part();
 @let progress = session.progress();
+<!-- every part in reading order, a repeated one each time it comes: progress counts the distinct ones -->
+@let steps = session.parts().length;
 @let take = result();
 
 <app-sidebar (settings)="settings.emit()" />
@@ -9,9 +11,7 @@
 <main #centre>
   <header>
     <div class="title">
-      <span class="meta"
-        >{{ text?.words }} words · {{ progress.total }} {{ unit().toLowerCase() }}{{ progress.total === 1 ? '' : 's' }}</span
-      >
+      <span class="meta">{{ text?.words }} words · {{ steps }} {{ unit().toLowerCase() }}{{ steps === 1 ? '' : 's' }}</span>
       <div class="named">
         <h1 [title]="text?.title">{{ text?.title }}</h1>
         <button
@@ -46,7 +46,8 @@
               class="current"
               [class]="band(stepScore?.last) || 'none'"
               aria-current="step"
-              [attr.aria-label]="stepLabel(step.label, stepScore?.last)"
+              [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
+              [attr.title]="sameAs(stepIndex)"
               (click)="session.select(stepIndex)"
             >
               <span class="n">{{ step.label }}</span>
@@ -54,7 +55,11 @@
               <span>{{ unit() }} {{ step.label }}@if (stepScore) { · <b class="pct">{{ stepScore.last }}%</b>}</span>
             </button>
           } @else {
-            <button (click)="session.select(stepIndex)" [title]="step.text" [attr.aria-label]="stepLabel(step.label, stepScore?.last)">
+            <button
+              (click)="session.select(stepIndex)"
+              [title]="sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
+              [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
+            >
               <span>{{ step.label }}</span>
               <span class="bar" [class]="band(stepScore?.last) || 'none'"></span>
             </button>
