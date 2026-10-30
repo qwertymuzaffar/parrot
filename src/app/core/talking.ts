@@ -101,6 +101,11 @@ export class Talking {
   private starts = 0;
   /** counts the writing-downs begun, and those given up after a cancel: the answer of an older one is dropped */
   private writes = 0;
+  /** whether the ask for a talk left from the last run went unanswered: it is asked again before a talk starts, as
+   * starting one would drop the talk left */
+  private unasked = false;
+  /** that second ask, while it is under way: two Starts pressed meanwhile wait on the same one */
+  private asking: Promise<boolean> | null = null;
 
   constructor() {
     this.session.whenOpening(() => this.away());
@@ -110,7 +115,9 @@ export class Talking {
       (left) => {
         if (this.state() === 'idle') this.unfinished.set(left);
       },
-      () => {},
+      () => {
+        this.unasked = true;
+      },
     );
   }
 
@@ -132,6 +139,11 @@ export class Talking {
   async start() {
     // a talk left from last time is dealt with first: starting another would drop it
     if (this.recorder.owner() || this.unfinished() || !['idle', 'preview', 'stopped'].includes(this.state())) return;
+    // the ask for one at the start went unanswered: asked again now, rather than one dropped unseen
+    if (this.state() === 'idle' && this.unasked) {
+      this.asking ??= this.askAgain().finally(() => (this.asking = null));
+      if (await this.asking) return;
+    }
     if (this.state() !== 'idle') await this.discard();
     // a talk the engine refused is still being dropped: the engine's talk goes before this one starts
     await this.abandoning;
@@ -169,6 +181,20 @@ export class Talking {
       if (this.recorder.elapsed() >= LONGEST_TALK) void this.stop('longest');
       else if (this.recorder.quietFor() >= QUIET_STOP_MS) void this.stop('quiet');
     }, 250);
+  }
+
+  /** Ask the engine again for a talk left from the last run; whether the talk about to start must wait: one was left
+   * (it is offered, as it would have been at the start), or the engine failed to answer again (the card says so). */
+  private async askAgain() {
+    try {
+      const left = await this.engine.talkLeft();
+      this.unasked = false;
+      if (!left) return false;
+      this.unfinished.set(left);
+    } catch (error) {
+      this.failure.set(errorMessage(error));
+    }
+    return true;
   }
 
   /** The talk's sound so far, sent on in order; the first block starts the talk in the engine. */
