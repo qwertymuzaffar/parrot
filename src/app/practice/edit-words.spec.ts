@@ -140,7 +140,7 @@ describe('editing the words of a text', () => {
       await after(fixture, 0);
       expect(element.querySelector('[role=alert]')!.textContent).toContain("The speech engine hasn't answered");
       expect([dialog.open, textarea.value, textarea.disabled]).toEqual([true, 'Hello there. How old are you?', false]);
-      expect([button(/Save/)?.disabled, element.querySelector<HTMLButtonElement>('[aria-label=Close]')!.disabled]).toEqual([false, false]);
+      expect([button(/Save/)?.disabled, button(/Cancel/)?.disabled]).toEqual([false, false]);
     });
 
     it('gives the engine its time again at every report', async () => {

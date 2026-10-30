@@ -288,6 +288,39 @@ h3 {
   }
 }
 
+// ---- sheets: a dialog as the desktop shows one, down from the top edge of the window (under the title bar strip),
+// closed by its own buttons or Esc, never by an × or a click beside it
+
+dialog.sheet {
+  margin: var(--titlebar) auto auto;
+  padding: 0;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--titlebar) - 24px);
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  &[open] {
+    animation: sheet-down 0.16s ease-out;
+  }
+  &::backdrop {
+    background: rgba(0, 0, 0, 0.25);
+  }
+}
+@keyframes sheet-down {
+  from {
+    transform: translateY(-12px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet[open] {
+    animation: none;
+  }
+}
+
 kbd {
   font:
     600 11px ui-monospace,
