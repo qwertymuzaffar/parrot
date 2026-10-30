@@ -264,7 +264,13 @@ class FakeEngine extends Engine {
   }
   /** the talk left from the last run, if any */
   left: LeftTalk | null = null;
+  /** the next ask for the talk left gets no answer: the call fails */
+  leftUnanswered = false;
   async talkLeft() {
+    if (this.leftUnanswered) {
+      this.leftUnanswered = false;
+      throw new EngineError('The speech engine did not answer.');
+    }
     return this.left;
   }
   nameList: string[] = [];
@@ -1639,6 +1645,32 @@ describe('the practice state', () => {
         expect(fresh.unfinished()).toBeNull();
         await fresh.asked;
         expect(fresh.unfinished()).toEqual(left(null));
+      });
+
+      it('is asked for again when Start talking is pressed after the engine failed to say, rather than dropped', async () => {
+        engine.leftUnanswered = true;
+        const fresh = await startWith(left(null));
+        expect(fresh.unfinished()).toBeNull();
+        // two presses wait on the one ask
+        await Promise.all([fresh.start(), fresh.start()]);
+        expect([fresh.state(), fresh.unfinished(), engine.calls.filter((call) => call.startsWith('talkStart'))]).toEqual([
+          'idle',
+          left(null),
+          [],
+        ]);
+        expect(recorder.owner()).toBeNull();
+      });
+
+      it('is not started over when the engine fails to say again: the card says so', async () => {
+        engine.leftUnanswered = true;
+        const fresh = await startWith(left(null));
+        engine.leftUnanswered = true;
+        await fresh.start();
+        expect([fresh.state(), fresh.unfinished(), fresh.failure()]).toEqual(['idle', null, 'The speech engine did not answer.']);
+        expect(engine.calls.filter((call) => call.startsWith('talkStart'))).toEqual([]);
+        // answered the next time, the talk left is offered
+        await fresh.start();
+        expect([fresh.state(), fresh.unfinished()]).toEqual(['idle', left(null)]);
       });
 
       it('is offered, waits for Start talking, and is written down', async () => {
