@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { Sound } from './sound';
+import { Sound, voiceLabel } from './sound';
 
 /** A system voice, as speech synthesis lists it. */
 const SAMANTHA = {
@@ -19,6 +19,10 @@ const VOICES = [
   { name: 'Ava (Premium)', voiceURI: 'com.apple.voice.premium.en-US.Ava', lang: 'en-US', localService: true },
   { name: 'Google US English', voiceURI: 'Google US English', lang: 'en-US', localService: false },
   { name: 'Anna', voiceURI: 'com.apple.voice.compact.de-DE.Anna', lang: 'de-DE', localService: true },
+  // macOS's novelty voices and the Eloquence family: English, but not offered
+  { name: 'Zarvox', voiceURI: 'com.apple.speech.synthesis.voice.Zarvox', lang: 'en-US', localService: true },
+  { name: 'Bad News', voiceURI: 'com.apple.speech.synthesis.voice.BadNews', lang: 'en-US', localService: true },
+  { name: 'Eddy (English (US))', voiceURI: 'com.apple.eloquence.en-US.Eddy', lang: 'en-US', localService: true },
 ] as SpeechSynthesisVoice[];
 
 /** An utterance as the window makes one: its text, and the voice and volume set on it. */
@@ -63,6 +67,27 @@ describe('the reference voice', () => {
     TestBed.resetTestingModule();
     fakeSynthesis(VOICES.slice(0, 3));
     expect(TestBed.inject(Sound).voiceName()).toBe('Zoe (Premium)');
+  });
+
+  it("is listed by name, grade and place, with the system's novelty voices left out", () => {
+    fakeSynthesis(VOICES);
+    const labels = TestBed.inject(Sound).voices().map(voiceLabel);
+    expect(labels).toEqual([
+      'Ava, Premium, US',
+      'Zoe, Premium, US',
+      'Evan, Enhanced, US',
+      'Samantha, US',
+      'Daniel, UK',
+      'Google US English, US, online',
+    ]);
+    const label = (name: string, lang: string) => voiceLabel({ name, lang, localService: true } as SpeechSynthesisVoice);
+    expect(label('Karen', 'en-AU')).toBe('Karen, Australia');
+    expect(label('Moira', 'en-IE')).toBe('Moira, Ireland');
+    // Windows puts the language after a dash; a voice may name no place at all
+    expect(label('Microsoft Zira Desktop - English (United States)', 'en-US')).toBe('Microsoft Zira Desktop, US');
+    expect(label('Lee', 'en-GB-oed')).toBe('Lee, UK');
+    expect(label('Lee', 'en')).toBe('Lee');
+    expect(label('Lee', 'en-150')).toBe('Lee, Europe');
   });
 
   it("is warmed as soon as it is known, and when another is chosen, so its first words don't wait for it to load", () => {
