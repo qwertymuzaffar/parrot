@@ -30,6 +30,8 @@ export class Sound {
   private onEnd: (() => void) | null = null;
   private synthMode = false;
   private utterance: SpeechSynthesisUtterance | null = null;
+  /** the voice warmed last (see warm) */
+  private warmed = '';
   private synth: { text: string; rate: number; onWord?: (charIndex: number) => void; from: number; at: number } | null = null;
 
   constructor() {
@@ -52,6 +54,7 @@ export class Sound {
       const list = all.filter((voice) => voice.lang.startsWith('en'));
       this.voices.set(list.sort((left, right) => rank(left) - rank(right)));
       if (!list.some((voice) => voice.name === this.voiceName()) && list.length) this.voiceName.set(list[0].name);
+      this.warm();
     };
     if (this.synthesis) this.synthesis.onvoiceschanged = load;
     load();
@@ -61,6 +64,26 @@ export class Sound {
   setVoice(name: string) {
     this.voiceName.set(name);
     writeSetting('voice', name);
+    this.warm();
+  }
+
+  /** Have the system load the voice chosen before it is first read with: the first words of a voice wait for it to
+   * be loaded, up to a second for a large one (macOS's Premium voices), so it says a word without sound as soon as it
+   * is known. Not while a reading is under way: a word spoken then would wait behind the reading, and a reading begun
+   * meanwhile stops the warming word first, as it stops anything. */
+  private warm() {
+    const voice = this.voices().find((voice) => voice.name === this.voiceName());
+    if (!voice || !this.synthesis || this.synthMode || this.warmed === voice.name) return;
+    this.warmed = voice.name;
+    const utterance = new SpeechSynthesisUtterance('Parrot');
+    utterance.voice = voice;
+    utterance.volume = 0;
+    // a word not said (a webview that won't speak before the user has acted, or a reading that stopped it) leaves
+    // the voice to be warmed at the next chance
+    utterance.onerror = () => {
+      if (this.warmed === voice.name) this.warmed = '';
+    };
+    this.synthesis.speak(utterance);
   }
 
   /** The reference reading of a text by the system voice; onWord gets the character index of each word. */

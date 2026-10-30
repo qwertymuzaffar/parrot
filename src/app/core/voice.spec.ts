@@ -21,6 +21,29 @@ const VOICES = [
   { name: 'Anna', voiceURI: 'com.apple.voice.compact.de-DE.Anna', lang: 'de-DE', localService: true },
 ] as SpeechSynthesisVoice[];
 
+/** An utterance as the window makes one: its text, and the voice and volume set on it. */
+class Utterance {
+  voice: SpeechSynthesisVoice | null = null;
+  volume = 1;
+  constructor(readonly text: string) {}
+}
+
+/** The system's speech synthesis with `voices`, noting what it is given to speak: the texts read aloud, and the
+ * voices warmed (a word said without sound). */
+function fakeSynthesis(voices: SpeechSynthesisVoice[]) {
+  const spoken: string[] = [];
+  const warmed: string[] = [];
+  const synthesis = {
+    getVoices: () => voices,
+    speak: (utterance: Utterance) => (utterance.volume === 0 ? warmed.push(utterance.voice?.name ?? '') : spoken.push(utterance.text)),
+    cancel() {},
+    onvoiceschanged: null as (() => void) | null,
+  };
+  vi.stubGlobal('speechSynthesis', synthesis);
+  vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+  return { synthesis, spoken, warmed };
+}
+
 describe('the reference voice', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -28,7 +51,7 @@ describe('the reference voice', () => {
   });
 
   it('is the best one the machine has, a Premium or Enhanced voice before the compact ones, unless one was chosen', () => {
-    vi.stubGlobal('speechSynthesis', { getVoices: () => VOICES, speak() {}, cancel() {}, onvoiceschanged: null });
+    fakeSynthesis(VOICES);
     const sound = TestBed.inject(Sound);
     const names = sound.voices().map((voice) => voice.name);
     expect(names).toEqual(['Ava (Premium)', 'Zoe (Premium)', 'Evan (Enhanced)', 'Samantha', 'Daniel', 'Google US English']);
@@ -38,8 +61,21 @@ describe('the reference voice', () => {
     TestBed.resetTestingModule();
     expect(TestBed.inject(Sound).voiceName()).toBe('Daniel');
     TestBed.resetTestingModule();
-    vi.stubGlobal('speechSynthesis', { getVoices: () => VOICES.slice(0, 3), speak() {}, cancel() {}, onvoiceschanged: null });
+    fakeSynthesis(VOICES.slice(0, 3));
     expect(TestBed.inject(Sound).voiceName()).toBe('Zoe (Premium)');
+  });
+
+  it("is warmed as soon as it is known, and when another is chosen, so its first words don't wait for it to load", () => {
+    const { spoken, warmed } = fakeSynthesis(VOICES);
+    const sound = TestBed.inject(Sound);
+    expect(warmed).toEqual(['Ava (Premium)']);
+    sound.setVoice('Daniel');
+    sound.setVoice('Daniel');
+    expect(warmed).toEqual(['Ava (Premium)', 'Daniel']);
+    // not while a reading is under way: the warming word would make it wait
+    sound.speak('Hello there.');
+    sound.setVoice('Zoe (Premium)');
+    expect([spoken, warmed]).toEqual([['Hello there.'], ['Ava (Premium)', 'Daniel']]);
   });
 
   it('starts without speech synthesis, and says there is no voice rather than staying silent', async () => {
@@ -54,26 +90,13 @@ describe('the reference voice', () => {
 
   it('says there is no voice while the system lists none, and reads once it does', async () => {
     const voices: SpeechSynthesisVoice[] = [];
-    const spoken: string[] = [];
-    const synthesis = {
-      getVoices: () => voices,
-      speak: (utterance: { text: string }) => spoken.push(utterance.text),
-      cancel() {},
-      onvoiceschanged: null as (() => void) | null,
-    };
-    vi.stubGlobal('speechSynthesis', synthesis);
-    vi.stubGlobal(
-      'SpeechSynthesisUtterance',
-      class {
-        constructor(readonly text: string) {}
-      },
-    );
+    const { synthesis, spoken, warmed } = fakeSynthesis(voices);
     const sound = TestBed.inject(Sound);
     await sound.speak('Hello there.');
-    expect([sound.voiceMissing(), spoken]).toEqual([true, []]);
+    expect([sound.voiceMissing(), spoken, warmed]).toEqual([true, [], []]);
     voices.push(SAMANTHA);
     synthesis.onvoiceschanged?.();
-    expect([sound.canSpeak(), sound.voiceMissing(), sound.voiceName()]).toEqual([true, false, 'Samantha']);
+    expect([sound.canSpeak(), sound.voiceMissing(), sound.voiceName(), warmed]).toEqual([true, false, 'Samantha', ['Samantha']]);
     sound.speak('Hello there.');
     expect([spoken, sound.playing()]).toEqual([['Hello there.'], 'ref']);
   });
