@@ -73,16 +73,25 @@ pub fn open(url: &str) -> Result<(), String> {
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let opener = std::process::Command::new("xdg-open");
-    launch(opener, url)
+    launch(opener, url).map(|_| ())
 }
 
-/// Hand `url` to `opener`. One that won't start is said plainly, with the address to go to by hand; the system's
-/// words are only for the log.
-fn launch(mut opener: std::process::Command, url: &str) -> Result<(), String> {
-    opener.arg(url).spawn().map(|_| ()).map_err(|error| {
-        log::warn!("could not open {url} in the browser: {error}");
-        format!("Parrot couldn't open your browser; the page is at {url}")
-    })
+/// Hand `url` to `opener`; the opener's process id. One that won't start is said plainly, with the address to go to by
+/// hand; the system's words are only for the log. The opener is waited for on a thread of its own, so that it is
+/// reaped as soon as it exits rather than left finished until Parrot quits: `open` returns at once, but an xdg-open
+/// with no desktop to hand the page to runs the browser itself, and returns only when it closes.
+fn launch(mut opener: std::process::Command, url: &str) -> Result<u32, String> {
+    match opener.arg(url).spawn() {
+        Ok(mut child) => {
+            let id = child.id();
+            std::thread::spawn(move || drop(child.wait()));
+            Ok(id)
+        }
+        Err(error) => {
+            log::warn!("could not open {url} in the browser: {error}");
+            Err(format!("Parrot couldn't open your browser; the page is at {url}"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -116,6 +125,24 @@ mod tests {
         let url = "https://github.com/qwertymuzaffar/parrot/releases/tag/v0.6.0";
         let said = launch(std::process::Command::new("parrot-no-such-browser"), url).unwrap_err();
         assert_eq!(said, format!("Parrot couldn't open your browser; the page is at {url}"));
+    }
+
+    /// An opener that has run is gone soon after: reaped, not left a finished ("zombie") process, which `ps` would
+    /// show with a state of Z until Parrot quit.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_has_opened_the_page_is_waited_for() {
+        let id = launch(std::process::Command::new("true"), "https://github.com/qwertymuzaffar/parrot/releases/latest").unwrap();
+        let started = std::time::Instant::now();
+        loop {
+            let shown = std::process::Command::new("ps").args(["-o", "stat=", "-p", &id.to_string()]).output().unwrap().stdout;
+            let state = String::from_utf8_lossy(&shown).trim().to_string();
+            if state.is_empty() {
+                break;
+            }
+            assert!(started.elapsed() < std::time::Duration::from_secs(5), "the opener is still there, in state {state}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 
     /// Asks GitHub for real: cargo test --lib -- --ignored asks_github
