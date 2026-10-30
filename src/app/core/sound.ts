@@ -34,10 +34,17 @@ export class Sound {
 
   constructor() {
     const load = () => {
+      // the best voice first, so a fresh install reads with it: the voices on the machine before those that send the
+      // text out to a provider; among them, one the system has added over its compact voices (macOS names these
+      // "Ava (Premium)", "Evan (Enhanced)", and so their URIs), then the names known to read well, then the rest
       const pref = ['Samantha', 'Ava', 'Allison', 'Alex', 'Daniel', 'Google US English'];
+      const grade = (voice: SpeechSynthesisVoice) => {
+        const about = `${voice.name} ${voice.voiceURI}`.toLowerCase();
+        return about.includes('premium') ? 0 : about.includes('enhanced') ? 1 : 2;
+      };
       const rank = (voice: SpeechSynthesisVoice) => {
         const prefIndex = pref.findIndex((name) => voice.name.includes(name));
-        return (prefIndex < 0 ? 50 : prefIndex) + (voice.localService ? 0 : 100);
+        return (voice.localService ? 0 : 1000) + grade(voice) * 100 + (prefIndex < 0 ? 50 : prefIndex);
       };
       const all = this.synthesis?.getVoices() ?? [];
       this.canSpeak.set(all.length > 0);
