@@ -1,7 +1,8 @@
 //! Compare what was read with what the speech recognizer heard, word by word.
 //!
 //! Both sides are turned into the same tokens first: lower case, no punctuation, and numbers as digits whichever
-//! way they were written ("nineteen fifty-nine", "1959" -> "#1959"), so only real differences count.
+//! way they were written ("nineteen fifty-nine", "1959" -> "#1959"), so only real differences count. A run of
+//! numbers ends at a comma, a full stop or the like ("1, 2, 3" is three numbers), on both sides alike.
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -266,11 +267,29 @@ pub fn toks(text: &str) -> Vec<String> {
     numbers_joined(&raw_words(text)).into_iter().map(|(_, token)| token).collect()
 }
 
-/// The lower-case words of `text` before numbers are joined: those of each word of it alone, one after the other.
+/// What stands among the raw words for a comma, semicolon, full stop, exclamation or question mark between them: a
+/// run of numbers ends at it ("1, 2, 3" is three numbers, "nineteen fifty-nine" one), and it is no word itself, so
+/// no token. Never a word: RAW matches letters and digits only.
+const BREAK: &str = ",";
+
+fn is_break(word: &str) -> bool {
+    word == BREAK
+}
+
+/// A BREAK for each punctuation mark in `between`, a stretch of the text with no word in it.
+fn breaks(between: &str) -> impl Iterator<Item = String> + '_ {
+    between.chars().filter(|character| matches!(character, ',' | ';' | '.' | '!' | '?')).map(|_| BREAK.to_string())
+}
+
+/// The lower-case words of `text` before numbers are joined, with a BREAK for each punctuation mark between them:
+/// those of each word of it alone, one after the other.
 fn raw_words(text: &str) -> Vec<String> {
     let lowered = undotted(&fold(&text.to_lowercase())).replace('\u{2019}', "'").replace(['-', ':'], " ");
     let mut words: Vec<String> = vec![];
+    let mut end = 0;
     for found in RAW.find_iter(&lowered) {
+        words.extend(breaks(&lowered[end..found.start()]));
+        end = found.end();
         let mut word = found.as_str().trim_matches(|character| character == '\'' || character == '.').to_string();
         // the table's spelling of the word as written ("it's" is whisper's "its"), else of it without a possessive 's
         if let Some(spelling) = SAME.get(word.as_str()) {
@@ -290,14 +309,18 @@ fn raw_words(text: &str) -> Vec<String> {
             let stem_text = stem.as_str();
             if UNITS.contains_key(stem_text) || TENS.contains_key(stem_text) || SCALES.contains_key(stem_text) || is_digits(stem_text) {
                 words.push(stem);
-                words.push("s".into());
-                continue;
+                word = "s".into();
             }
         }
         if !word.is_empty() {
             words.push(word);
         }
+        // a word of letters is matched with the full stop after it ("three."); a number is not ("3", then ".")
+        if found.as_str().ends_with('.') {
+            words.push(BREAK.into());
+        }
     }
+    words.extend(breaks(&lowered[end..]));
     words
 }
 
@@ -330,11 +353,15 @@ fn joins(word: &str, next: &str, run: &[String]) -> bool {
 }
 
 /// The tokens of `words` (raw words): each run of number words or digits joined into one "#digits" token. Each
-/// token comes with the index of the word it starts at.
+/// token comes with the index of the word it starts at. A BREAK ends a run and is no token.
 fn numbers_joined(words: &[String]) -> Vec<(usize, String)> {
     let mut out = vec![];
     let mut word_index = 0;
     while word_index < words.len() {
+        if is_break(&words[word_index]) {
+            word_index += 1;
+            continue;
+        }
         let start = word_index;
         while word_index < words.len() {
             let next = words.get(word_index + 1).map(String::as_str).unwrap_or("");
@@ -380,19 +407,32 @@ fn owners(words: &[&str]) -> Vec<usize> {
         joins(&raw[start], raw.get(start + 1).map_or("", String::as_str), &[])
     };
     let mut owner: Vec<usize> = vec![];
+    // the last raw word so far that is a word, not a BREAK
+    let mut last_word: Option<usize> = None;
+    let mut raw_start = 0;
     for (word_index, &raw_end) in raw_ends.iter().enumerate() {
+        if let Some(found) = (raw_start..raw_end).rev().find(|&index| !is_break(&raw[index])) {
+            last_word = Some(found);
+        }
+        raw_start = raw_end;
         // up to the last raw word, the first words join as the whole text does (each raw word joins by itself, the
         // one after it and the run before it); the last has nothing after it, so it may leave its run, or join the
-        // run before where in the whole text it began a token of its own
+        // run before where in the whole text it began a token of its own, unless a BREAK stands between. A word
+        // ending in a BREAK ends with the token of the last word before it: the BREAK ends any run there.
         let tokens_so_far = match raw_end {
             0 => 0,
+            _ if is_break(&raw[raw_end - 1]) => last_word.map_or(0, |word| token_of[word] + 1),
             _ => {
                 let last = raw_end - 1;
                 let token_index = token_of[last];
                 let start = joined[token_index].0;
                 if start < last {
                     token_index + if joins(&raw[last], "", &raw[start..last]) { 1 } else { 2 }
-                } else if token_index > 0 && is_run(token_index - 1) && joins(&raw[last], "", &raw[joined[token_index - 1].0..last]) {
+                } else if token_index > 0
+                    && !is_break(&raw[last - 1])
+                    && is_run(token_index - 1)
+                    && joins(&raw[last], "", &raw[joined[token_index - 1].0..last])
+                {
                     token_index
                 } else {
                     token_index + 1
@@ -536,7 +576,7 @@ pub fn heard_words(text: &str, heard: &str) -> (Vec<Option<String>>, Vec<String>
         if owned.contains(&word_index) {
             continue;
         }
-        if raw_words(word).is_empty() && word.chars().any(char::is_alphabetic) {
+        if raw_words(word).iter().all(|raw| is_break(raw)) && word.chars().any(char::is_alphabetic) {
             wrong[word_index] = Some(String::new());
         } else if word_index > 0 {
             wrong[word_index] = wrong[word_index - 1].clone();
@@ -921,6 +961,20 @@ mod tests {
     }
 
     #[test]
+    fn a_run_of_numbers_ends_at_a_comma_or_a_full_stop() {
+        assert_eq!(toks("1, 2, 3"), vec!["#1", "#2", "#3"]);
+        assert_eq!(toks("one, two, three"), toks("1, 2, 3"));
+        assert_eq!(toks("count to three. Four came; 5! 6?"), vec!["count", "to", "#3", "#4", "came", "#5", "#6"]);
+        assert_eq!(toks("in 1990, 1991, 1992"), vec!["in", "#1990", "#1991", "#1992"]);
+        // a comma or a dot inside a number, a clock time and a number spelled over words are one number still
+        assert_eq!(toks("1,000 at 3:30, 4.5; nineteen fifty-nine."), vec!["#1000", "at", "#330", "#4.5", "#1959"]);
+        // "1, 2, 3" read as "one, two, four": the third number alone is wrong
+        let (wrong, extra) = heard_words("1, 2, 3", "one, two, four");
+        assert_eq!(wrong, [None, None, Some("4".into())]);
+        assert!(extra.iter().all(String::is_empty));
+    }
+
+    #[test]
     fn an_ordinal_second_is_the_same_as_digits_or_as_a_word() {
         let matches = |text: &str, recognized: &str| {
             let (verdicts, extra) = heard_words(text, recognized);
@@ -970,6 +1024,10 @@ mod tests {
             "twenty second twenty and second twenty-second and",
             "a hundred a thousand and a a hundred and a",
             "in 1990, 1991 and 1992, and then 1993 and",
+            // runs of numbers ended by punctuation, inside and at the ends of words
+            "1, 2, 3",
+            "count to three. Four came; 5! 6? ...and 7,, 8 .9 (10). 1,000 at 3:30, 4.5",
+            "twenty, second; twenty second. and, 5 point, 5 point 5. a, hundred a hundred, привет. —",
         ] {
             let words: Vec<&str> = text.split_whitespace().collect();
             assert_eq!(owners(&words), by_prefix(&words), "{text}");
@@ -978,16 +1036,18 @@ mod tests {
 
     #[test]
     fn a_long_list_of_numbers_is_compared_with_what_was_heard_in_moments() {
-        // a list of years: commas don't end a run of numbers, so it is one token, which each word joined again whole
-        // (1.6 s in a release build for these 4,000)
-        let text = (0..4000).map(|index| format!("{},", 1900 + index % 100)).collect::<Vec<_>>().join(" ") + " and then";
-        let started = std::time::Instant::now();
-        let (wrong, extra) = heard_words(&text, &text);
-        assert!(started.elapsed().as_secs_f64() < 1.0, "{:?}", started.elapsed());
-        assert!(wrong.iter().all(Option::is_none) && extra.iter().all(String::is_empty));
-        let words: Vec<&str> = text.split_whitespace().collect();
-        // the run is owned by its first word; "and" and "then" by themselves
-        assert_eq!(owners(&words), [0, 4000, 4001]);
+        // a list of years with commas is a token per year, each owned by its word; without them it is one run, one
+        // token owned by its first word, which each word joined again whole (1.6 s in a release build for these 4,000)
+        let listed = (0..4000).map(|index| format!("{},", 1900 + index % 100)).collect::<Vec<_>>().join(" ") + " and then";
+        let run = listed.replace(',', "");
+        for (text, owned) in [(&listed, (0..4002).collect::<Vec<_>>()), (&run, vec![0, 4000, 4001])] {
+            let started = std::time::Instant::now();
+            let (wrong, extra) = heard_words(text, text);
+            assert!(started.elapsed().as_secs_f64() < 1.0, "{:?}", started.elapsed());
+            assert!(wrong.iter().all(Option::is_none) && extra.iter().all(String::is_empty));
+            let words: Vec<&str> = text.split_whitespace().collect();
+            assert_eq!(owners(&words), owned);
+        }
     }
 
     #[test]
