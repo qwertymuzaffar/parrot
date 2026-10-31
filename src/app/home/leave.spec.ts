@@ -53,7 +53,7 @@ describe('leaving the home screen and coming back', () => {
     field.value = value;
     field.dispatchEvent(new Event('input'));
   };
-  const column = () => document.querySelector<HTMLElement>('.right')!;
+  const column = () => document.querySelector<HTMLElement>('.right .scroll')!;
 
   it('keeps the text being written, the way to practise it, and how far the texts were scrolled', async () => {
     const first = await show();

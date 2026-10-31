@@ -67,6 +67,7 @@ export class Home {
   protected deleting = signal<ReadonlySet<string>>(new Set());
   private renameField = viewChild<ElementRef<HTMLInputElement>>('renameField');
   private textsColumn = viewChild.required<ElementRef<HTMLElement>>('textsColumn');
+  private heading = viewChild.required<ElementRef<HTMLElement>>('heading');
 
   /** the draft's words to say: punctuation alone is none, and a draft with none can't be added */
   protected readonly words = computed(() => wordCount(this.draft()));
@@ -226,7 +227,7 @@ export class Home {
     refocus(() => {
       const kept = this.cardOf(text.id)?.querySelector<HTMLElement>('.acts [aria-label="Delete"]');
       const cards = this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.texts > .text .open');
-      return kept ?? cards[index] ?? cards[index - 1] ?? this.textsColumn().nativeElement.querySelector<HTMLElement>('h1');
+      return kept ?? cards[index] ?? cards[index - 1] ?? this.heading().nativeElement;
     }, this.injector);
   }
 
