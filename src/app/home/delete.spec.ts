@@ -66,9 +66,9 @@ describe('deleting a text on the home screen', () => {
 
   afterEach(() => document.body.replaceChildren());
 
-  const card = () => document.querySelector<HTMLElement>('.card.text');
+  const card = () => document.querySelector<HTMLElement>('.text');
   const button = (label: string) =>
-    [...document.querySelectorAll<HTMLButtonElement>('.card.text button')].find(
+    [...document.querySelectorAll<HTMLButtonElement>('.text button')].find(
       (each) => each.getAttribute('aria-label') === label || each.textContent!.trim() === label,
     );
 
@@ -127,7 +127,7 @@ describe('deleting a text on the home screen', () => {
     /** the card of a title, and its button labelled so */
     const on = (title: string, label: string) =>
       [
-        ...[...document.querySelectorAll('.card.text')]
+        ...[...document.querySelectorAll('.text')]
           .find((each) => each.querySelector('h3')?.textContent!.trim() === title)!
           .querySelectorAll<HTMLButtonElement>('button'),
       ].find((each) => each.getAttribute('aria-label') === label || each.textContent!.trim() === label)!;

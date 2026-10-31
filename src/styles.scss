@@ -37,10 +37,6 @@
   --now-ink: #14201a;
   --bar: #b9c2b6;
   --bar-light: #e3e7df;
-  --hero: #14201a;
-  --hero-ink: #ffffff;
-  --hero-2: #b4beb6;
-  --hero-accent: #3cc777;
   --shadow-sm: 0 1px 2px rgba(20, 32, 26, 0.06);
   --shadow: 0 10px 30px rgba(20, 32, 26, 0.06);
   --shadow-lg: 0 24px 70px rgba(20, 32, 26, 0.22);
@@ -78,10 +74,6 @@
   --now-ink: #14201a;
   --bar: #3a453d;
   --bar-light: #29312b;
-  --hero: #1f2a23;
-  --hero-ink: #e9eee9;
-  --hero-2: #b4beb6;
-  --hero-accent: #3cc777;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.6);
@@ -149,19 +141,21 @@ h3 {
   }
 }
 
-// ---- shared controls
+// ---- shared controls, at the desktop's sizes: 32px high (28px small), on an 8px grid, with 6–7px corners
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 16px;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 12px;
-  font-weight: 600;
+  border-radius: 7px;
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   transition:
     border-color 0.12s,
@@ -188,6 +182,7 @@ h3 {
   &.ghost {
     border-color: transparent;
     background: none;
+    box-shadow: none;
     color: var(--ink-2);
     &:hover:not(:disabled, [aria-disabled='true']) {
       background: var(--surface-2);
@@ -199,48 +194,59 @@ h3 {
     border-color: var(--wrong-ink);
   }
   &.small {
-    height: 36px;
-    padding: 0 12px;
-    border-radius: 10px;
-    font-size: 13px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
   }
-  &.square {
-    width: 40px;
-    height: 40px;
+  // as wide as it is high: a button with an icon alone
+  &.square,
+  &.icon {
+    width: 32px;
     padding: 0;
-    border-radius: 11px;
+  }
+  &.small.square,
+  &.small.icon {
+    width: 28px;
   }
 }
 
 .field {
   width: 100%;
-  height: 40px;
+  height: 28px;
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 11px;
-  padding: 0 12px;
+  border-radius: 6px;
+  padding: 0 8px;
   outline: none;
   &:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 4px var(--good-bg);
+    box-shadow: 0 0 0 3px var(--good-bg);
   }
+}
+
+// a field of several lines: as high as it is given, with room over and under its text
+textarea.field {
+  height: auto;
+  padding: 6px 8px;
+  line-height: 1.45;
 }
 
 .seg {
   display: inline-flex;
   gap: 2px;
-  padding: 3px;
-  border-radius: 11px;
+  padding: 2px;
+  border-radius: 7px;
   background: var(--surface-2);
 
   button {
     border: 0;
     background: transparent;
     color: var(--ink-2);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
-    padding: 6px 12px;
-    border-radius: 8px;
+    padding: 4px 10px;
+    border-radius: 5px;
     // the chosen one has the surface, the ink and a shadow, at the same weight: a bolder label is wider (DM Sans is a
     // variable font) and would move the others
     &.on {
@@ -251,26 +257,27 @@ h3 {
   }
 }
 
+// a hairline and a 10px corner, no shadow: a box in a window, not a card on a page
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
+// a section's label, as the Finder's sidebar has them: small, semibold, grey, in sentence case (spaced capitals are
+// a web page's)
 .eyebrow {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
   color: var(--muted);
 }
 
 .pill {
   display: inline-block;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   border-radius: 99px;
-  padding: 1px 8px;
+  padding: 1px 7px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   &.good {
@@ -301,7 +308,7 @@ dialog.sheet {
   max-height: calc(100vh - var(--titlebar) - 24px);
   border: 1px solid var(--line);
   border-top: 0;
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 10px 10px;
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-lg);

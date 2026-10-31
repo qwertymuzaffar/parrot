@@ -193,10 +193,10 @@ export class Home {
     if (title.trim() && title.trim() !== text.title) await this.library.rename(text.id, title.trim());
   }
 
-  /** The card of a text, as drawn: the cards are drawn in the order shown. */
+  /** The row of a text, as drawn: the rows are drawn in the order shown. */
   private cardOf(id: string) {
     const index = this.shown().findIndex((card) => card.t.id === id);
-    return this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.grid > .card.text')[index] ?? null;
+    return this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.texts > .text')[index] ?? null;
   }
 
   /** Asking whether to delete a text (`id`), or keeping it after all (null): the button pressed goes with what it
@@ -220,12 +220,12 @@ export class Home {
       // gone, or kept if the engine wouldn't delete it (the error says why): its card opens again
       this.deleting.update((ids) => new Set([...ids].filter((id) => id !== text.id)));
     }
-    // the card goes, and focus with it: on to the next card, else the one before, else (none left) the heading of the
+    // the row goes, and focus with it: on to the next row, else the one before, else (none left) the heading of the
     // texts. A text kept has its Delete back
     if (!hadFocus) return;
     refocus(() => {
       const kept = this.cardOf(text.id)?.querySelector<HTMLElement>('.acts [aria-label="Delete"]');
-      const cards = this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.grid > .card.text .open');
+      const cards = this.textsColumn().nativeElement.querySelectorAll<HTMLElement>('.texts > .text .open');
       return kept ?? cards[index] ?? cards[index - 1] ?? this.textsColumn().nativeElement.querySelector<HTMLElement>('h1');
     }, this.injector);
   }

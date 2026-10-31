@@ -70,7 +70,9 @@ function kept(): number | null {
     <footer>
       <span class="dot" [class]="library.engineState()"></span>
       <span class="status" [title]="library.error() ?? ''">{{ status() }}</span>
-      <button class="btn ghost square" (click)="settings.emit()" aria-label="Settings"><app-icon name="settings" [size]="17" /></button>
+      <button class="btn ghost small square" (click)="settings.emit()" aria-label="Settings">
+        <app-icon name="settings" [size]="16" />
+      </button>
     </footer>
 
     <!-- the smallest window has no room to give: no edge to drag then -->
@@ -100,7 +102,7 @@ function kept(): number | null {
       position: relative;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
       padding: calc(18px + var(--titlebar)) 14px 12px;
       background: var(--side);
       min-height: 0;
@@ -168,7 +170,7 @@ function kept(): number | null {
       }
     }
     .eyebrow {
-      padding: 4px 6px 0;
+      padding: 2px 8px 0;
     }
     nav {
       flex: 1;
@@ -176,14 +178,14 @@ function kept(): number | null {
       overflow: auto;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
       button {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         text-align: left;
-        padding: 9px 10px;
-        border-radius: 11px;
+        padding: 6px 8px;
+        border-radius: 6px;
         border: 1px solid transparent;
         background: transparent;
         color: var(--ink-2);
@@ -221,7 +223,7 @@ function kept(): number | null {
         overflow: hidden;
       }
       .m {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--muted);
       }
     }
@@ -229,7 +231,7 @@ function kept(): number | null {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 10px 2px 0 8px;
+      padding: 8px 0 0 8px;
       border-top: 1px solid var(--line);
       font-size: 12px;
       color: var(--muted);
