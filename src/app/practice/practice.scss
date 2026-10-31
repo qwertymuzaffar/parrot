@@ -186,6 +186,9 @@ header {
   font-weight: 500;
   line-height: 1.6;
   letter-spacing: -0.015em;
+  // the text to read is text, to drag across and copy
+  user-select: text;
+  -webkit-user-select: text;
   display: flex;
   flex-wrap: wrap;
   align-content: center;
@@ -217,6 +220,7 @@ header {
     background: none;
     letter-spacing: inherit;
     text-align: inherit;
+    // a word acts as a link (it opens its card): the hand, where the buttons keep the arrow
     cursor: pointer;
     transition: background 0.1s;
     &:focus-visible {
@@ -387,6 +391,8 @@ header {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    user-select: text;
+    -webkit-user-select: text;
   }
 }
 
