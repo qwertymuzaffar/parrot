@@ -56,7 +56,6 @@ import { band } from '../shared/score';
       line-height: 1.05;
     }
     b {
-      font-family: var(--display);
       font-size: 24px;
       font-weight: 700;
       font-variant-numeric: tabular-nums;

@@ -300,7 +300,6 @@
     color: #9fd9b6;
   }
   .t {
-    font-family: var(--display);
     font-size: 20px;
     font-weight: 700;
     // a long title would run past the Continue button, or make the card tall: two lines at most
@@ -388,8 +387,6 @@
   }
   h3 {
     flex: 1;
-    font-family: var(--font);
-    letter-spacing: 0;
     font-weight: 700;
     font-size: 15px;
     white-space: nowrap;
@@ -486,7 +483,6 @@
     padding: 60px 20px;
     b {
       color: var(--ink);
-      font-family: var(--display);
       font-size: 20px;
     }
     span {
