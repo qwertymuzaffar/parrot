@@ -93,8 +93,8 @@ import { stopNote } from './talk-card';
                 <span class="pill" [class]="chosen.result.status === 'good' ? 'good' : 'warn'">{{
                   chosen.result.status === 'good' ? 'clear' : 'sounded off'
                 }}</span>
-                <button class="btn ghost close" (click)="selected.set(null)" aria-label="Close">
-                  <app-icon name="close" [size]="15" />
+                <button class="btn ghost small square close" (click)="selected.set(null)" aria-label="Close">
+                  <app-icon name="close" [size]="14" />
                 </button>
               </div>
               @if (chosen.result.score != null) {
@@ -187,8 +187,8 @@ import { stopNote } from './talk-card';
     :host {
       display: flex;
       flex-direction: column;
-      gap: 16px;
-      padding-top: calc(var(--titlebar) + 18px);
+      gap: 12px;
+      padding-top: calc(var(--titlebar) + 16px);
       height: 100%;
       overflow: hidden;
       background: var(--ground);
@@ -196,11 +196,12 @@ import { stopNote } from './talk-card';
     .top {
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 0 24px;
+      gap: 10px;
+      padding: 0 20px;
     }
     h1 {
-      font-size: 22px;
+      font-size: 20px;
+      font-weight: 600;
       margin: 0;
     }
     .body {
@@ -209,9 +210,9 @@ import { stopNote } from './talk-card';
       overflow: auto;
       display: grid;
       grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
-      gap: 16px;
+      gap: 12px;
       align-items: start;
-      padding: 0 24px 24px;
+      padding: 0 20px 16px;
     }
     @media (max-width: 900px) {
       .body {
@@ -221,24 +222,26 @@ import { stopNote } from './talk-card';
     .card {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding: 18px;
+      gap: 10px;
+      padding: 14px;
     }
     .side {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 12px;
     }
     .head {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
     .head .btn {
       margin-left: auto;
     }
+    // what was said is the text to practise: in its type
     .words {
       margin: 0;
+      font-family: var(--display);
       font-size: 20px;
       line-height: 2;
     }
@@ -289,34 +292,32 @@ import { stopNote } from './talk-card';
     .stats {
       display: flex;
       align-items: center;
-      gap: 16px;
-      font-size: 14px;
+      gap: 12px;
     }
     .hint {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
       margin: 0;
     }
+    // the word, in the practised text's type
     h2 {
-      font-size: 26px;
+      font-family: var(--display);
+      letter-spacing: -0.02em;
+      font-size: 24px;
+      font-weight: 700;
       margin: 0;
-    }
-    .close {
-      width: 32px;
-      height: 32px;
-      padding: 0;
     }
     .tip {
       margin: 0;
       font-size: 13px;
       background: var(--surface-2);
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 8px;
+      padding: 8px 10px;
     }
     .buttons {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 6px;
     }
     label.name {
       display: flex;
@@ -334,24 +335,22 @@ import { stopNote } from './talk-card';
     textarea {
       min-height: 160px;
       resize: vertical;
-      font: inherit;
-      line-height: 1.5;
     }
     // as high as a button: the small ones of the confirm don't shrink the card under the pointer
     .go {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 10px;
-      min-height: 44px;
+      gap: 8px;
+      min-height: 32px;
     }
     .ask {
       margin-right: auto;
-      font-size: 13px;
+      font-size: 12px;
     }
     .error {
       margin: 0;
-      font-size: 13px;
+      font-size: 12px;
       color: var(--wrong-ink);
     }
   `,
