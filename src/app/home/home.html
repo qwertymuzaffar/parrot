@@ -1,15 +1,4 @@
-<header class="top">
-  <app-logo [size]="36" />
-  <span class="name">Parrot</span>
-  <span class="grow"></span>
-  <label class="search">
-    <app-icon name="search" [size]="15" />
-    <span class="sr-only">Search your texts</span>
-    <input placeholder="Search your texts" [value]="query()" (input)="query.set($any($event.target).value)" />
-  </label>
-  <button class="btn square" (click)="settings.emit()" aria-label="Settings"><app-icon name="settings" [size]="17" /></button>
-</header>
-
+<!-- no bar with the name across the top: a program's name is in the menu bar and the Dock, its window shows the work -->
 <div class="body">
   <!-- left: a new text, and this week -->
   <div class="left">
@@ -95,142 +84,159 @@
     </section>
   </div>
 
-  <!-- right: your texts -->
-  <div class="right" #textsColumn>
+  <!-- right: your texts, under a toolbar row with the search and Settings -->
+  <div class="right">
     <div class="heading">
-      <h1 tabindex="-1">Your texts</h1>
+      <h1 tabindex="-1" #heading>Your texts</h1>
       @if (library.texts().length) {
         <span class="hint"
           >{{ library.texts().length }} {{ library.texts().length === 1 ? 'text' : 'texts' }} · {{ practisedParts() }} parts practised</span
         >
       }
+      <span class="grow"></span>
+      <label class="search">
+        <app-icon name="search" [size]="14" />
+        <span class="sr-only">Search your texts</span>
+        <input placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+      </label>
+      <button class="btn ghost small square" (click)="settings.emit()" aria-label="Settings" title="Settings">
+        <app-icon name="settings" [size]="16" />
+      </button>
     </div>
 
-    @if (library.engineState() === 'down') {
-      <div class="card down" role="alert">
-        <b>Parrot couldn't load your texts.</b>
-        <span>{{ library.error() }} Parrot tries again every few seconds.</span>
-      </div>
-    }
-
-    <!-- the texts, one under the other as a Mac app lists its documents: the one left off first, with its Continue -->
-    <div class="list card">
-      @if (resume(); as card) {
-        @let progress = ring(card);
-        <button
-          class="resume"
-          [class.opening]="session.opening() === card.t.id"
-          [disabled]="deleting().has(card.t.id)"
-          (click)="continue(card)"
-        >
-          <span class="ring">
-            <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true">
-              <circle cx="32" cy="32" r="27" class="track" />
-              <circle cx="32" cy="32" r="27" class="value" [attr.stroke-dasharray]="progress.dash" />
-            </svg>
-            <span>{{ progress.done }}/{{ progress.total }}</span>
-          </span>
-          <span class="what">
-            <span class="kicker">Continue where you left off</span>
-            <span class="t">{{ card.t.title }}</span>
-            @if (card.next) {
-              <span class="next">Next: “{{ card.next.text }}”</span>
-            }
-          </span>
-          <span class="btn primary small cta"><app-icon name="play" [size]="12" /> Continue</span>
-        </button>
+    <div class="scroll" #textsColumn>
+      @if (library.engineState() === 'down') {
+        <div class="card down" role="alert">
+          <b>Parrot couldn't load your texts.</b>
+          <span>{{ library.error() }} Parrot tries again every few seconds.</span>
+        </div>
       }
 
-      <ul class="texts">
-        @for (card of shown(); track card.t.id) {
-          <li
-            class="text"
+      <!-- the texts, one under the other as a Mac app lists its documents: the one left off first, with its Continue -->
+      <div class="list card">
+        @if (resume(); as card) {
+          @let progress = ring(card);
+          <button
+            class="resume"
             [class.opening]="session.opening() === card.t.id"
-            [class.deleting]="deleting().has(card.t.id)"
-            [attr.aria-busy]="session.opening() === card.t.id || deleting().has(card.t.id) || null"
-            (click)="renaming() !== card.t.id && confirming() !== card.t.id && !deleting().has(card.t.id) && session.open(card.t.id)"
+            [disabled]="deleting().has(card.t.id)"
+            (click)="continue(card)"
           >
-            <div class="row">
-              @if (renaming() === card.t.id) {
-                <input
-                  class="field"
-                  [value]="card.t.title"
-                  (click)="$event.stopPropagation()"
-                  (keydown.enter)="rename(card.t, $any($event.target).value)"
-                  (keydown.escape)="renaming.set(null)"
-                  (blur)="rename(card.t, $any($event.target).value)"
-                  aria-label="Title"
-                  #renameField
-                />
-              } @else {
-                <!-- the row's button for the keyboard: its click goes on to the row, which opens the text -->
-                <h3>
-                  <button type="button" class="open" [disabled]="deleting().has(card.t.id)">{{ card.t.title }}</button>
-                </h3>
+            <span class="ring">
+              <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true">
+                <circle cx="32" cy="32" r="27" class="track" />
+                <circle cx="32" cy="32" r="27" class="value" [attr.stroke-dasharray]="progress.dash" />
+              </svg>
+              <span>{{ progress.done }}/{{ progress.total }}</span>
+            </span>
+            <span class="what">
+              <span class="kicker">Continue where you left off</span>
+              <span class="t">{{ card.t.title }}</span>
+              @if (card.next) {
+                <span class="next">Next: “{{ card.next.text }}”</span>
               }
-              <span class="acts" [class.asking]="confirming() === card.t.id || renaming() === card.t.id" (click)="$event.stopPropagation()">
-                @if (confirming() === card.t.id) {
-                  <!-- described by the question, so a screen reader landing on either one reads it too -->
-                  <button class="btn ghost small" (click)="askDelete(null)" [attr.aria-describedby]="'ask-' + card.t.id">Keep</button>
-                  <button class="btn danger small" (click)="remove(card.t)" [attr.aria-describedby]="'ask-' + card.t.id">Delete</button>
-                } @else if (deleting().has(card.t.id)) {
-                  <!-- nothing to do to a text on its way to the trash -->
-                } @else if (renaming() === card.t.id) {
-                  <!-- keeps the field focused when pressed, so the field isn't saved on blur first -->
-                  <button
-                    class="btn ghost small icon"
-                    (mousedown)="$event.preventDefault()"
-                    (click)="saveRename(card.t)"
-                    aria-label="Save the title"
-                  >
-                    <app-icon name="check" [size]="14" />
-                  </button>
-                } @else {
-                  <button class="btn ghost small icon" (click)="startRename(card.t.id)" aria-label="Rename">
-                    <app-icon name="edit" [size]="14" />
-                  </button>
-                  <button class="btn ghost small icon" (click)="askDelete(card.t.id)" aria-label="Delete">
-                    <app-icon name="trash" [size]="14" />
-                  </button>
-                }
-              </span>
-              <span class="pill" [class]="band(card.t.average) || 'none'">{{ card.t.average != null ? card.t.average + '%' : 'new' }}</span>
-            </div>
-            <p>{{ card.t.text }}</p>
-            <div class="cells" aria-hidden="true">
-              @for (cell of card.cells; track $index) {
-                <span [class]="cell"></span>
-              }
-            </div>
-            <div class="meta">
-              @if (confirming() === card.t.id) {
-                <span class="ask" [id]="'ask-' + card.t.id"
-                  >Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span
-                >
-              } @else if (deleting().has(card.t.id)) {
-                <span role="status">Moving it to the trash…</span>
-              } @else {
-                <span
-                  >{{ card.t.words }} words · {{ card.t.spoken ? 'spoken · ' : '' }}{{ modeName(card.t.mode) }} ·
-                  {{ when(card.t.opened ?? card.t.created) }}</span
-                >
-              }
-            </div>
-          </li>
-        } @empty {
-          @if (query()) {
-            <li class="empty">No text matches “{{ query() }}”.</li>
-          } @else if (library.loaded() && !library.texts().length && library.engineState() !== 'down') {
-            <li class="empty first">
-              <app-logo [size]="56" />
-              <b>Nothing to practise yet</b>
-              <span
-                >Paste a text on the left. Parrot reads it to you, listens to you read it, and shows each word that came out wrong.</span
-              >
-            </li>
-          }
+            </span>
+            <span class="btn primary small cta"><app-icon name="play" [size]="12" /> Continue</span>
+          </button>
         }
-      </ul>
+
+        <ul class="texts">
+          @for (card of shown(); track card.t.id) {
+            <li
+              class="text"
+              [class.opening]="session.opening() === card.t.id"
+              [class.deleting]="deleting().has(card.t.id)"
+              [attr.aria-busy]="session.opening() === card.t.id || deleting().has(card.t.id) || null"
+              (click)="renaming() !== card.t.id && confirming() !== card.t.id && !deleting().has(card.t.id) && session.open(card.t.id)"
+            >
+              <div class="row">
+                @if (renaming() === card.t.id) {
+                  <input
+                    class="field"
+                    [value]="card.t.title"
+                    (click)="$event.stopPropagation()"
+                    (keydown.enter)="rename(card.t, $any($event.target).value)"
+                    (keydown.escape)="renaming.set(null)"
+                    (blur)="rename(card.t, $any($event.target).value)"
+                    aria-label="Title"
+                    #renameField
+                  />
+                } @else {
+                  <!-- the row's button for the keyboard: its click goes on to the row, which opens the text -->
+                  <h3>
+                    <button type="button" class="open" [disabled]="deleting().has(card.t.id)">{{ card.t.title }}</button>
+                  </h3>
+                }
+                <span
+                  class="acts"
+                  [class.asking]="confirming() === card.t.id || renaming() === card.t.id"
+                  (click)="$event.stopPropagation()"
+                >
+                  @if (confirming() === card.t.id) {
+                    <!-- described by the question, so a screen reader landing on either one reads it too -->
+                    <button class="btn ghost small" (click)="askDelete(null)" [attr.aria-describedby]="'ask-' + card.t.id">Keep</button>
+                    <button class="btn danger small" (click)="remove(card.t)" [attr.aria-describedby]="'ask-' + card.t.id">Delete</button>
+                  } @else if (deleting().has(card.t.id)) {
+                    <!-- nothing to do to a text on its way to the trash -->
+                  } @else if (renaming() === card.t.id) {
+                    <!-- keeps the field focused when pressed, so the field isn't saved on blur first -->
+                    <button
+                      class="btn ghost small icon"
+                      (mousedown)="$event.preventDefault()"
+                      (click)="saveRename(card.t)"
+                      aria-label="Save the title"
+                    >
+                      <app-icon name="check" [size]="14" />
+                    </button>
+                  } @else {
+                    <button class="btn ghost small icon" (click)="startRename(card.t.id)" aria-label="Rename">
+                      <app-icon name="edit" [size]="14" />
+                    </button>
+                    <button class="btn ghost small icon" (click)="askDelete(card.t.id)" aria-label="Delete">
+                      <app-icon name="trash" [size]="14" />
+                    </button>
+                  }
+                </span>
+                <span class="pill" [class]="band(card.t.average) || 'none'">{{
+                  card.t.average != null ? card.t.average + '%' : 'new'
+                }}</span>
+              </div>
+              <p>{{ card.t.text }}</p>
+              <div class="cells" aria-hidden="true">
+                @for (cell of card.cells; track $index) {
+                  <span [class]="cell"></span>
+                }
+              </div>
+              <div class="meta">
+                @if (confirming() === card.t.id) {
+                  <span class="ask" [id]="'ask-' + card.t.id"
+                    >Move it and its recordings to the trash? Parrot erases them for good after 30 days.</span
+                  >
+                } @else if (deleting().has(card.t.id)) {
+                  <span role="status">Moving it to the trash…</span>
+                } @else {
+                  <span
+                    >{{ card.t.words }} words · {{ card.t.spoken ? 'spoken · ' : '' }}{{ modeName(card.t.mode) }} ·
+                    {{ when(card.t.opened ?? card.t.created) }}</span
+                  >
+                }
+              </div>
+            </li>
+          } @empty {
+            @if (query()) {
+              <li class="empty">No text matches “{{ query() }}”.</li>
+            } @else if (library.loaded() && !library.texts().length && library.engineState() !== 'down') {
+              <li class="empty first">
+                <app-logo [size]="56" />
+                <b>Nothing to practise yet</b>
+                <span
+                  >Paste a text on the left. Parrot reads it to you, listens to you read it, and shows each word that came out wrong.</span
+                >
+              </li>
+            }
+          }
+        </ul>
+      </div>
     </div>
   </div>
 </div>

@@ -4,7 +4,6 @@ import { Library } from '../core/library';
 import { Session } from '../core/session';
 import { forgetSetting, readSetting, writeSetting } from '../core/settings';
 import { Icon } from '../shared/icon';
-import { Logo } from '../shared/logo';
 import { band } from '../shared/score';
 import { matchesSearch } from '../shared/search';
 
@@ -29,20 +28,13 @@ function kept(): number | null {
 /** Your texts, always at hand while practising. The column's right edge is dragged to make room for long titles. */
 @Component({
   selector: 'app-sidebar',
-  imports: [Icon, Logo],
+  imports: [Icon],
   template: `
-    <button class="brand" (click)="session.home()" title="Home">
-      <app-logo [size]="34" />
-      <span>
-        <b>Parrot</b>
-        <small>say it right</small>
-      </span>
-    </button>
-
+    <!-- no logo or name at the top: a program's name is in the menu bar and the Dock, the column shows the texts -->
     <button class="btn primary new" (click)="session.home()"><app-icon name="plus" [size]="16" /> New text</button>
 
     <label class="search">
-      <app-icon name="search" [size]="15" />
+      <app-icon name="search" [size]="14" />
       <span class="sr-only">Search texts</span>
       <input placeholder="Search texts" [value]="query()" (input)="query.set($any($event.target).value)" />
     </label>
@@ -103,7 +95,7 @@ function kept(): number | null {
       display: flex;
       flex-direction: column;
       gap: 10px;
-      padding: calc(18px + var(--titlebar)) 14px 12px;
+      padding: calc(12px + var(--titlebar)) 12px 12px;
       background: var(--side);
       min-height: 0;
     }
@@ -121,40 +113,13 @@ function kept(): number | null {
     :host(.dragging) {
       cursor: col-resize;
     }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 2px 6px 6px;
-      border: 0;
-      background: none;
-      text-align: left;
-      span {
-        display: flex;
-        flex-direction: column;
-      }
-      b {
-        font-family: var(--display);
-        font-size: 20px;
-        letter-spacing: -0.02em;
-        line-height: 1;
-      }
-      small {
-        font-size: 12px;
-        color: var(--muted);
-      }
-    }
-    .new {
-      height: 40px;
-      border-radius: 11px;
-    }
     .search {
       display: flex;
       align-items: center;
-      gap: 8px;
-      height: 36px;
-      border-radius: 10px;
-      padding: 0 10px;
+      gap: 6px;
+      height: 28px;
+      border-radius: 6px;
+      padding: 0 8px;
       background: var(--surface);
       border: 1px solid var(--line);
       color: var(--muted);
