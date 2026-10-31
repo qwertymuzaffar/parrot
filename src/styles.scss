@@ -239,10 +239,11 @@ h3 {
     font-weight: 500;
     padding: 6px 12px;
     border-radius: 8px;
+    // the chosen one has the surface, the ink and a shadow, at the same weight: a bolder label is wider (DM Sans is a
+    // variable font) and would move the others
     &.on {
       background: var(--surface);
       color: var(--ink);
-      font-weight: 600;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     }
   }
