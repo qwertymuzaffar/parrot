@@ -3,12 +3,17 @@ import { TestBed } from '@angular/core/testing';
 import { App, SLOW_START_MS } from './app';
 import { Engine, EngineInfo } from './core/engine';
 import { Library } from './core/library';
+import { Menu } from './core/menu';
 import { Session } from './core/session';
 import { Talking } from './core/talking';
 import { Theme } from './core/theme';
 
 // the screens stood in for: only which one shows is looked at here
-@Component({ selector: 'app-home', template: '<h1 tabindex="-1">Your texts</h1><button>A text</button>' })
+@Component({
+  selector: 'app-home',
+  template:
+    '<h1 tabindex="-1">Your texts</h1><button>A text</button><textarea id="body"></textarea><label class="search"><input /></label>',
+})
 class HomeStandIn {
   readonly settings = output<void>();
 }
@@ -183,5 +188,74 @@ describe('focus as the window goes from screen to screen', () => {
     view.set('practice');
     await app.update();
     expect(app.focused()).toBe('Close');
+  });
+});
+
+describe('the app menu', () => {
+  const view = signal<'home' | 'practice'>('home');
+  const home = vi.fn(() => view.set('home'));
+
+  beforeEach(() => {
+    view.set('home');
+    home.mockClear();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Engine, useValue: { info: async () => INFO } },
+        { provide: Talking, useValue: { asked: Promise.resolve(), checking: signal(false) } },
+        { provide: Session, useValue: { view, home } },
+        { provide: Library, useValue: { loadTexts: vi.fn().mockResolvedValue(undefined), loadActivity: vi.fn() } },
+        { provide: Theme, useValue: { apply: vi.fn() } },
+      ],
+    });
+    TestBed.overrideComponent(App, { set: { imports: [HomeStandIn, PracticeStandIn, SettingsStandIn] } });
+  });
+
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  async function render() {
+    const fixture = TestBed.createComponent(App);
+    const element: HTMLElement = fixture.nativeElement;
+    document.body.append(element);
+    const update = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await fixture.whenStable();
+    };
+    await update();
+    return { element, update, menu: TestBed.inject(Menu) };
+  }
+
+  it('is told which screen is shown, as it changes', async () => {
+    const screens: string[] = [];
+    vi.spyOn(TestBed.inject(Menu), 'screen').mockImplementation((name) => void screens.push(name));
+    const app = await render();
+    view.set('practice');
+    await app.update();
+    expect(screens).toEqual(['waiting', 'home', 'practice']);
+  });
+
+  it('New text goes Home with the cursor in the text, Find to the search, Settings to the sheet', async () => {
+    const open = vi.spyOn(SettingsStandIn.prototype, 'open');
+    view.set('practice');
+    const app = await render();
+    app.menu.fire('new');
+    await app.update();
+    expect([home.mock.calls.length, !!app.element.querySelector('app-home'), document.activeElement?.id]).toEqual([1, true, 'body']);
+    app.menu.fire('find');
+    expect(document.activeElement).toBe(app.element.querySelector('app-home .search input'));
+    app.menu.fire('settings');
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('Home leaves the practice screen; on Home, New text only moves the cursor', async () => {
+    view.set('practice');
+    const app = await render();
+    app.menu.fire('home');
+    await app.update();
+    expect([home.mock.calls.length, !!app.element.querySelector('app-home')]).toEqual([1, true]);
+    app.menu.fire('new');
+    expect([home.mock.calls.length, document.activeElement?.id]).toEqual([1, 'body']);
   });
 });

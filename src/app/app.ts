@@ -1,7 +1,9 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -13,6 +15,7 @@ import {
 } from '@angular/core';
 import { Engine, EngineInfo, IN_APP } from './core/engine';
 import { Library } from './core/library';
+import { Menu, MenuAction } from './core/menu';
 import { Session } from './core/session';
 import { Theme } from './core/theme';
 import { Home } from './home/home';
@@ -49,7 +52,7 @@ export const SLOW_START_MS = 4_000;
     } @else {
       <app-home (settings)="settings().open()" />
     }
-    <app-settings />
+    <app-settings #sheet />
   `,
   styleUrl: './app.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -60,7 +63,9 @@ export class App implements OnInit {
   private library = inject(Library);
   private engine = inject(Engine);
   private theme = inject(Theme);
-  protected settings = viewChild.required(Settings);
+  private menu = inject(Menu);
+  // by its reference, not its class: a test stands another component in for it
+  protected settings = viewChild.required<Settings>('sheet');
   /** the first launch: the speech models still to download; null once Parrot is ready, undefined until the engine
    * has said which */
   protected setup = signal<EngineInfo | null | undefined>(undefined);
@@ -91,11 +96,45 @@ export class App implements OnInit {
         refocus(() => this.host.nativeElement.querySelector<HTMLElement>(`${SCREENS[screen]} h1[tabindex="-1"]`), this.injector);
       });
     });
+    // the app menu: told which screen is shown, so its items are enabled for it; its items chosen come to act()
+    effect(() => this.menu.screen(this.screen()));
+    inject(DestroyRef).onDestroy(this.menu.on((action) => this.act(action)));
+  }
+
+  /** An item of the app menu chosen: what the window does for it (the practice screen takes the Practice menu's). */
+  private act(action: MenuAction) {
+    const screen = this.screen();
+    switch (action) {
+      case 'settings':
+        this.settings().open();
+        break;
+      case 'home':
+        if (screen === 'practice') this.session.home();
+        break;
+      case 'new': {
+        // Home, with the cursor in the text to paste
+        const field = () => this.host.nativeElement.querySelector<HTMLElement>('app-home #body');
+        if (screen === 'home') field()?.focus();
+        else if (screen === 'practice') {
+          this.session.home();
+          afterNextRender(() => field()?.focus(), { injector: this.injector });
+        }
+        break;
+      }
+      case 'find': {
+        // the screen's search: Home's over the texts, the practice screen's over its column
+        const search = this.host.nativeElement.querySelector<HTMLInputElement>('app-home .search input, app-sidebar .search input');
+        search?.focus();
+        search?.select();
+        break;
+      }
+    }
   }
 
   async ngOnInit() {
     // in the desktop app on macOS the title bar is hidden and the window buttons sit over the app
     if (IN_APP && /Mac/.test(navigator.userAgent)) document.documentElement.classList.add('mac-app');
+    void this.menu.connect();
     this.theme.apply();
     const slow = window.setTimeout(() => this.slow.set(true), SLOW_START_MS);
     // a talk left from the last run is known too, so the Just talk card is drawn as it will stay

@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Menu } from '../core/menu';
 import { Attempt, WordResult, WordStatus } from '../core/models';
 import { Playback } from '../core/playback';
 import { Recorder } from '../core/recorder';
@@ -66,6 +67,25 @@ describe('the practice screen', () => {
     target.dispatchEvent(event);
     return event.defaultPrevented;
   }
+
+  it('does from the Practice menu what the keys do, not while a sheet is open over the screen', () => {
+    const menu = TestBed.inject(Menu);
+    menu.fire('listen');
+    menu.fire('next');
+    menu.fire('stop');
+    expect([
+      playback.toggleReference.mock.calls,
+      session.next.mock.calls.length,
+      playback.stop.mock.calls.length,
+      session.selectWord.mock.calls,
+    ]).toEqual([[['Hello there.']], 1, 1, [[null]]]);
+    const sheet = document.createElement('dialog');
+    sheet.setAttribute('open', '');
+    document.body.append(sheet);
+    menu.fire('listen');
+    sheet.remove();
+    expect(playback.toggleReference).toHaveBeenCalledTimes(1);
+  });
 
   it('listens on Space away from the controls', () => {
     expect(press(page, ' ')).toBe(true);
