@@ -36,7 +36,7 @@
   h2 {
     font-size: 17px;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
   label,
   .lbl {
@@ -48,8 +48,9 @@
     font-weight: 500;
     margin-bottom: 4px;
   }
+  // the column fits the window at its first size (820px high) with nothing to scroll: the week's bars take the rest
   textarea {
-    height: 120px;
+    height: 100px;
     resize: none;
     border-radius: 6px;
     border: 1px solid var(--line);
@@ -110,7 +111,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 6px;
+    margin-top: 4px;
     .hint {
       flex: 1;
     }
@@ -119,7 +120,7 @@
 
 .week {
   flex: 1;
-  min-height: 120px;
+  min-height: 110px;
   display: flex;
   flex-direction: column;
   gap: 8px;
