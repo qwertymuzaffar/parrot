@@ -73,7 +73,7 @@ describe("a card's date on the home screen", () => {
   });
 
   const dates = () =>
-    [...fixture.nativeElement.querySelectorAll('.grid li.text .meta')].map((meta) => meta.textContent.split('·').at(-1).trim());
+    [...fixture.nativeElement.querySelectorAll('.texts li.text .meta')].map((meta) => meta.textContent.split('·').at(-1).trim());
 
   it('says today, yesterday, or the day and month in the language of the computer', () => {
     const short = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });

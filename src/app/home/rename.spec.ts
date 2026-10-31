@@ -60,8 +60,8 @@ describe('renaming a text on the home screen', () => {
 
   afterEach(() => document.body.replaceChildren());
 
-  const button = (label: string) => document.querySelector<HTMLButtonElement>(`.card.text [aria-label="${label}"]`);
-  const field = () => document.querySelector<HTMLInputElement>('.card.text input')!;
+  const button = (label: string) => document.querySelector<HTMLButtonElement>(`.text [aria-label="${label}"]`);
+  const field = () => document.querySelector<HTMLInputElement>('.text input')!;
 
   it('shows a button to save the title in place of the pencil, which saves what was typed', async () => {
     button('Rename')!.click();
