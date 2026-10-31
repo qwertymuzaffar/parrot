@@ -311,11 +311,11 @@ export function length(seconds: number) {
       padding: 4px 11px;
       border-radius: 99px;
     }
+    // the chosen chip has the outline and the fill, at the same weight: a bolder label is wider and would move the others
     .chip.on {
       border-color: var(--accent);
       background: var(--good-bg);
       color: var(--ink);
-      font-weight: 600;
     }
     .asked {
       display: flex;

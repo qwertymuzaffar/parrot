@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injec
 import { Engine } from '../core/engine';
 import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
-import { Sound } from '../core/sound';
+import { Sound, voiceLabel } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
 import { UpdateCheck, Updates } from '../core/updates';
 import { focusIn, refocus } from '../shared/focus';
@@ -30,7 +30,7 @@ const MB = 1_000_000;
           <div class="row">
             <select class="field" [value]="sound.voiceName()" (change)="sound.setVoice($any($event.target).value)">
               @for (voice of sound.voices(); track voice.name) {
-                <option [value]="voice.name">{{ voice.name }} · {{ voice.lang }}{{ voice.localService ? '' : ' · online' }}</option>
+                <option [value]="voice.name">{{ label(voice) }}</option>
               }
             </select>
             <button class="btn" (click)="sound.speak('Parrot reads it, you repeat it.', 1, null)">
@@ -293,6 +293,7 @@ export class Settings {
   private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
+  protected readonly label = voiceLabel;
   private updates = inject(Updates);
   protected health = resource({ loader: () => this.engine.info() });
   /** the running version, read from the app (no network); none in a plain browser */

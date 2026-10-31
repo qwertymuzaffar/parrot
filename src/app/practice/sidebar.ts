@@ -190,14 +190,13 @@ function kept(): number | null {
         &:hover {
           background: var(--surface-2);
         }
+        // the text open has the surface, the outline and the ink, at the same weight: a bolder title is wider and
+        // re-renders
         &.on {
           border-color: var(--line);
           background: var(--surface);
           color: var(--ink);
           box-shadow: var(--shadow-sm);
-          .t {
-            font-weight: 600;
-          }
         }
         // a text taking a moment to open: shown after the moment every open takes
         &.opening {

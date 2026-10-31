@@ -136,13 +136,11 @@
         font-size: 11px;
         color: var(--muted);
       }
+      // the chosen one has the thick outline and the fill, at the same weight: a bolder label is wider and re-renders
       &.on {
         border: 2px solid var(--accent);
         padding: 8px 9px;
         background: var(--good-bg);
-        b {
-          font-weight: 700;
-        }
         span {
           color: var(--good-ink);
         }
