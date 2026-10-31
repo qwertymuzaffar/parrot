@@ -51,8 +51,8 @@ import { Icon } from '../shared/icon';
     :host {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      padding: 16px 18px;
+      gap: 8px;
+      padding: 12px 14px;
       min-height: 0;
     }
     .head {
@@ -60,16 +60,12 @@ import { Icon } from '../shared/icon';
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      min-height: 36px;
+      min-height: 28px;
     }
     .acts {
       display: flex;
       align-items: center;
       gap: 4px;
-    }
-    .icon {
-      width: 36px;
-      padding: 0;
     }
     .hint {
       font-size: 12px;
@@ -89,8 +85,8 @@ import { Icon } from '../shared/icon';
       overflow: hidden;
       display: flex;
       align-items: flex-end;
-      gap: 8px;
-      min-height: 80px;
+      gap: 6px;
+      min-height: 72px;
     }
     .bars button {
       // bars share the width and may get narrow: nothing in them sets a minimum
@@ -108,14 +104,14 @@ import { Icon } from '../shared/icon';
     }
     b {
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 600;
       color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
     .bar {
       width: 100%;
-      max-width: 38px;
-      border-radius: 8px 8px 4px 4px;
+      max-width: 32px;
+      border-radius: 5px 5px 3px 3px;
       background: var(--bar);
       transition: height 0.3s;
     }

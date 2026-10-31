@@ -199,12 +199,14 @@ h3 {
     border-radius: 6px;
     font-size: 12px;
   }
-  // as wide as it is high
-  &.square {
+  // as wide as it is high: a button with an icon alone
+  &.square,
+  &.icon {
     width: 32px;
     padding: 0;
   }
-  &.small.square {
+  &.small.square,
+  &.small.icon {
     width: 28px;
   }
 }
@@ -221,6 +223,13 @@ h3 {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--good-bg);
   }
+}
+
+// a field of several lines: as high as it is given, with room over and under its text
+textarea.field {
+  height: auto;
+  padding: 6px 8px;
+  line-height: 1.45;
 }
 
 .seg {

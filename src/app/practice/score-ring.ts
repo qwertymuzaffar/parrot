@@ -18,8 +18,8 @@ import { band } from '../shared/score';
   styles: `
     :host {
       position: relative;
-      width: 84px;
-      height: 84px;
+      width: 72px;
+      height: 72px;
       flex-shrink: 0;
     }
     svg {
@@ -56,22 +56,22 @@ import { band } from '../shared/score';
       line-height: 1.05;
     }
     b {
-      font-size: 24px;
+      font-size: 21px;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
     }
     small {
-      font-size: 13px;
+      font-size: 12px;
     }
     // three digits fit inside the ring only a size down
     .wide b {
-      font-size: 19px;
+      font-size: 17px;
     }
     .wide small {
-      font-size: 11px;
+      font-size: 10px;
     }
     span {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--muted);
     }
   `,
