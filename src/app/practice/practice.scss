@@ -316,12 +316,10 @@ header {
     color: var(--rec);
   }
   .time {
-    /* as wide as the longest time, so what follows doesn't move as the digits change; DM Sans has no digits of one
-       width, the system font does */
+    // as wide as the longest time, in digits of one width, so what follows doesn't move as the digits change
     display: inline-block;
     min-width: 5.5ch;
     color: var(--ink);
-    font-family: system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
   }
   .grow {

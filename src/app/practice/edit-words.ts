@@ -81,7 +81,8 @@ export const STUCK_MS = 15_000;
     }
     h2 {
       margin: 0;
-      font-size: 18px;
+      font-size: 15px;
+      font-weight: 600;
     }
     .hint {
       margin: 0;

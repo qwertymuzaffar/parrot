@@ -194,7 +194,10 @@ import { SoundUnits } from './sound-units';
       align-items: center;
       gap: 10px;
     }
+    // the word, in the practised text's type
     h2 {
+      font-family: var(--display);
+      letter-spacing: -0.02em;
       font-size: 30px;
       font-weight: 700;
       min-width: 0;
@@ -339,13 +342,11 @@ import { SoundUnits } from './sound-units';
         color: var(--rec);
       }
     }
-    /* a slot as wide as the longest time, so the label doesn't move as the digits change; DM Sans has no digits of
-       one width, the system font does */
+    /* a slot as wide as the longest time, in digits of one width, so the label doesn't move as the digits change */
     .time {
       display: inline-block;
       min-width: 5.5ch;
       text-align: left;
-      font-family: system-ui, sans-serif;
       font-weight: 500;
       font-variant-numeric: tabular-nums;
     }
