@@ -7,6 +7,7 @@ mod asr;
 mod audio;
 mod disk;
 mod edit;
+mod menu;
 mod models;
 mod sounds;
 mod store;
@@ -633,10 +634,13 @@ fn cannot_start(why: &str) -> ! {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // the window opens where it was left, at the size it had (the smallest size stays tauri.conf.json's)
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())?;
             }
+            menu::install(app.handle())?;
             // macOS: ~/Library/Application Support/io.github.qwertymuzaffar.parrot (the first engine's folder too)
             let data = app.path().app_data_dir()?;
             disk::keep_in(&data);
@@ -700,7 +704,8 @@ pub fn run() {
             edit_text,
             download_models,
             latest_release,
-            open_url
+            open_url,
+            menu::set_screen
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

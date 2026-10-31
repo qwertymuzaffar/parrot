@@ -12,6 +12,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { Menu, PRACTICE_ACTIONS, PracticeAction } from '../core/menu';
 import { Mode } from '../core/models';
 import { Playback, RATES } from '../core/playback';
 import { Recorder } from '../core/recorder';
@@ -49,6 +50,7 @@ export class Practice {
   protected recorder = inject(Recorder);
   private words = inject(WordPractice);
   protected names = inject(Names);
+  private menu = inject(Menu);
   private injector = inject(Injector);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private destroyRef = inject(DestroyRef);
@@ -146,6 +148,10 @@ export class Practice {
       if (from.part !== untracked(this.session.index)) return;
       afterNextRender(() => document.activeElement === document.body && this.wordButton(from.word)?.focus(), { injector: this.injector });
     });
+    // the Practice menu's items do what the keys do
+    this.destroyRef.onDestroy(
+      this.menu.on((action) => PRACTICE_ACTIONS.includes(action as PracticeAction) && this.act(action as PracticeAction)),
+    );
   }
 
   protected fit() {
@@ -248,22 +254,38 @@ export class Practice {
           : 'a natural pace';
   }
 
-  /** the keyboard shortcuts while practising */
-  private readonly shortcuts: Record<string, () => void> = {
-    ' ': () => this.toggleReference(),
-    r: () => this.toggleRecord(),
-    R: () => this.toggleRecord(),
-    m: () => this.toggleMine(),
-    M: () => this.toggleMine(),
-    ArrowDown: () => this.session.next(),
-    ArrowRight: () => this.session.next(),
-    ArrowUp: () => this.session.previous(),
-    ArrowLeft: () => this.session.previous(),
-    Escape: () => {
+  /** what the screen does for each key, and for each item of the Practice menu, which names the keys */
+  private readonly actions: Record<PracticeAction, () => void> = {
+    listen: () => this.toggleReference(),
+    record: () => this.toggleRecord(),
+    mine: () => this.toggleMine(),
+    next: () => this.session.next(),
+    previous: () => this.session.previous(),
+    stop: () => {
       this.playback.stop();
       this.session.selectWord(null);
     },
   };
+
+  /** the keyboard shortcuts while practising */
+  private readonly keys: Record<string, PracticeAction> = {
+    ' ': 'listen',
+    r: 'record',
+    R: 'record',
+    m: 'mine',
+    M: 'mine',
+    ArrowDown: 'next',
+    ArrowRight: 'next',
+    ArrowUp: 'previous',
+    ArrowLeft: 'previous',
+    Escape: 'stop',
+  };
+
+  /** An item of the Practice menu chosen: not while a sheet is open over the screen, as with the keys. */
+  act(action: PracticeAction) {
+    if (document.querySelector('dialog[open]')) return;
+    this.actions[action]();
+  }
 
   protected key(event: KeyboardEvent) {
     // a control that took the key for itself (the texts column's edge takes the arrows) keeps it
@@ -273,9 +295,9 @@ export class Practice {
     // Space presses the button or ticks the box that has focus, as everywhere else: it means Listen only away from the controls
     if (event.key === ' ' && el.closest?.('button, a[href], [role="button"], input')) return;
     if (document.querySelector('dialog[open]')) return;
-    const action = this.shortcuts[event.key];
+    const action = this.keys[event.key];
     if (!action) return;
-    action();
+    this.actions[action]();
     event.preventDefault();
   }
 }

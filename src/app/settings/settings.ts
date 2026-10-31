@@ -332,6 +332,8 @@ export class Settings {
   protected failure = signal<string | null>(null);
 
   open() {
+    // already open (asked again from the menu): as it is
+    if (this.dialog().nativeElement.open) return;
     // asked again on each open; a reload keeps the last answer on screen until the new one comes, so the dialog doesn't
     // shrink, re-centre and grow back
     this.health.reload();
