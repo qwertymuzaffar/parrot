@@ -107,11 +107,11 @@ const MB = 1_000_000;
                 <li>
                   {{ name }}
                   <button
-                    class="btn ghost small icon"
+                    class="btn ghost small square"
                     (click)="removeName(name, nameIndex)"
                     [attr.aria-label]="'Remove ' + name + ' from the names'"
                   >
-                    <app-icon name="close" [size]="13" />
+                    <app-icon name="close" [size]="12" />
                   </button>
                 </li>
               }
@@ -182,29 +182,28 @@ const MB = 1_000_000;
     .names li {
       display: flex;
       align-items: center;
-      gap: 2px;
-      padding: 2px 4px 2px 10px;
+      padding: 1px 2px 1px 8px;
       border-radius: 999px;
       background: var(--surface-2);
-      font-size: 13px;
+      font-size: 12px;
     }
     .box {
-      padding: 18px 22px 22px;
+      padding: 16px 20px 20px;
       outline: none;
     }
     footer {
       display: flex;
       justify-content: flex-end;
-      margin: 22px -22px 0;
-      padding: 14px 22px 0;
+      margin: 20px -20px 0;
+      padding: 12px 20px 0;
       border-top: 1px solid var(--line);
     }
     header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin: 0 -22px;
-      padding: 0 22px 14px;
+      margin: 0 -20px;
+      padding: 0 20px 12px;
       border-bottom: 1px solid var(--line);
       h2 {
         margin: 0;
@@ -213,7 +212,7 @@ const MB = 1_000_000;
       }
     }
     section {
-      margin-top: 18px;
+      margin-top: 16px;
       > .eyebrow {
         display: block;
       }
@@ -222,9 +221,9 @@ const MB = 1_000_000;
       display: flex;
       gap: 8px;
       margin-top: 8px;
-      // the menu and the button side by side: one height (the button's, a comfortable click target)
+      // the menu and the button side by side: one height (the button's)
       > * {
-        height: 44px;
+        height: 32px;
       }
       select {
         flex: 1;
@@ -246,20 +245,20 @@ const MB = 1_000_000;
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
-      margin-top: 10px;
-      min-height: 36px;
+      margin-top: 8px;
+      min-height: 28px;
     }
     .ask {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--ink-2);
     }
     .hint {
       color: var(--ink-2);
-      font-size: 13px;
+      font-size: 12px;
       margin: 4px 0 0;
     }
     code {
-      font-size: 12px;
+      font-size: 11px;
       word-break: break-all;
     }
     .ok,
