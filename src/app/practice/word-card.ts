@@ -34,7 +34,9 @@ import { SoundUnits } from './sound-units';
           <span class="pill bad">{{ mine()?.heard ? 'misheard' : 'not heard' }}</span>
         }
       }
-      <button class="btn ghost close" (click)="session.selectWord(null)" aria-label="Close"><app-icon name="close" [size]="16" /></button>
+      <button class="btn ghost small square close" (click)="session.selectWord(null)" aria-label="Close">
+        <app-icon name="close" [size]="14" />
+      </button>
     </div>
 
     <div class="sounds">
@@ -181,8 +183,8 @@ import { SoundUnits } from './sound-units';
     :host {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding: 18px;
+      gap: 10px;
+      padding: 14px;
       outline: none;
     }
     :host(:focus-visible) {
@@ -192,13 +194,13 @@ import { SoundUnits } from './sound-units';
     .head {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
     // the word, in the practised text's type
     h2 {
       font-family: var(--display);
       letter-spacing: -0.02em;
-      font-size: 30px;
+      font-size: 28px;
       font-weight: 700;
       min-width: 0;
       overflow: hidden;
@@ -206,18 +208,15 @@ import { SoundUnits } from './sound-units';
     }
     .close {
       margin-left: auto;
-      width: 36px;
-      height: 36px;
-      padding: 0;
     }
     .sounds {
       display: flex;
       flex-direction: column;
       gap: 2px;
-      min-height: 64px;
+      min-height: 56px;
     }
     .spell {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 500;
       b {
         color: var(--accent);
@@ -230,7 +229,7 @@ import { SoundUnits } from './sound-units';
       }
     }
     .ipa {
-      font-size: 15px;
+      font-size: 13px;
       color: var(--muted);
     }
     .none {
@@ -240,9 +239,9 @@ import { SoundUnits } from './sound-units';
       display: flex;
       flex-direction: column;
       gap: 8px;
-      padding: 12px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 8px;
     }
     .take-head {
       display: flex;
@@ -254,7 +253,7 @@ import { SoundUnits } from './sound-units';
       font-size: 13px;
       color: var(--muted);
       b {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
         color: var(--good-ink);
         font-variant-numeric: tabular-nums;
@@ -296,23 +295,21 @@ import { SoundUnits } from './sound-units';
       font-size: 13px;
       color: var(--ink-2);
       background: var(--surface-2);
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 8px;
+      padding: 8px 10px;
     }
     .buttons {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
+      gap: 6px;
     }
     // ---- practising the word alone
     .tried {
       display: flex;
       align-items: center;
-      gap: 10px;
-      min-height: 36px;
+      gap: 8px;
+      min-height: 28px;
       .icon {
-        width: 36px;
-        padding: 0;
         margin-left: auto;
       }
     }

@@ -37,6 +37,13 @@
   </header>
 
   <nav class="steps" aria-label="Parts">
+    <!-- the part you're on, by name and score, beside the row: every pill is one shape, so moving on moves nothing -->
+    @let here = session.parts()[session.index()];
+    @if (here) {
+      @let hereScore = session.scores()[here.key]?.last;
+      <!-- prettier-ignore -->
+      <span class="now">{{ unit() }} {{ here.label }}@if (hereScore != null) { · <span class="pct" [class]="band(hereScore)">{{ hereScore }}%</span>}</span>
+    }
     <ol #stepper>
       @for (step of session.parts(); track step.key + $index; let stepIndex = $index) {
         @let stepScore = session.scores()[step.key];
@@ -45,20 +52,14 @@
           <!-- one button a step, whichever is current: the one pressed stays, and keeps the focus -->
           <button
             [class.current]="current"
-            [class]="current ? band(stepScore?.last) || 'none' : ''"
+            [class]="band(stepScore?.last) || 'none'"
             [attr.aria-current]="current ? 'step' : null"
-            [attr.title]="current ? sameAs(stepIndex) : sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
+            [attr.title]="sameAs(stepIndex) ? sameAs(stepIndex) + ': ' + step.text : step.text"
             [attr.aria-label]="stepLabel(step.label, stepScore?.last, sameAs(stepIndex))"
             (click)="session.select(stepIndex)"
           >
-            @if (current) {
-              <span class="n">{{ step.label }}</span>
-              <!-- prettier-ignore -->
-              <span>{{ unit() }} {{ step.label }}@if (stepScore) { · <b class="pct">{{ stepScore.last }}%</b>}</span>
-            } @else {
-              <span>{{ step.label }}</span>
-              <span class="bar" [class]="band(stepScore?.last) || 'none'"></span>
-            }
+            <span>{{ step.label }}</span>
+            <span class="bar"></span>
           </button>
         </li>
       }
@@ -176,7 +177,7 @@
       [attr.aria-label]="recording() ? 'Stop recording (R)' : 'Record (R)'"
       [title]="recording() ? 'Stop (R)' : 'Record (R)'"
     >
-      <app-icon [name]="recording() ? 'stop' : 'mic'" [size]="recording() ? 24 : 28" />
+      <app-icon [name]="recording() ? 'stop' : 'mic'" [size]="recording() ? 20 : 24" />
     </button>
 
     <div class="side after">
