@@ -14,11 +14,12 @@ const MB = 1_000_000;
   selector: 'app-settings',
   imports: [Icon],
   template: `
-    <dialog #dialog (close)="(0)" (click)="backdrop($event)">
+    <!-- a sheet, as on the desktop: down from the top of the window, closed with Done or Esc, not with an × or a
+         click beside it -->
+    <dialog #dialog class="sheet" (close)="(0)">
       <div class="box" tabindex="-1" autofocus>
         <header>
           <h2>Settings</h2>
-          <button class="btn ghost icon" (click)="close()" aria-label="Close"><app-icon name="close" /></button>
         </header>
 
         <section>
@@ -163,6 +164,9 @@ const MB = 1_000_000;
             }
           </section>
         }
+        <footer>
+          <button class="btn primary" (click)="close()">Done</button>
+        </footer>
       </div>
     </dialog>
   `,
@@ -184,21 +188,16 @@ const MB = 1_000_000;
       background: var(--surface-2);
       font-size: 13px;
     }
-    dialog {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 0;
-      width: min(520px, calc(100vw - 32px));
-      background: var(--surface);
-      color: var(--ink);
-      box-shadow: var(--shadow-lg);
-    }
-    dialog::backdrop {
-      background: rgba(0, 0, 0, 0.35);
-    }
     .box {
       padding: 18px 22px 22px;
       outline: none;
+    }
+    footer {
+      display: flex;
+      justify-content: flex-end;
+      margin: 22px -22px 0;
+      padding: 14px 22px 0;
+      border-top: 1px solid var(--line);
     }
     header {
       display: flex;
@@ -392,9 +391,5 @@ export class Settings {
 
   close() {
     this.dialog().nativeElement.close();
-  }
-
-  protected backdrop(event: MouseEvent) {
-    if (event.target === this.dialog().nativeElement) this.close();
   }
 }

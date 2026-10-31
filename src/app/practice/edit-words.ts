@@ -5,7 +5,6 @@ import { Recorder } from '../core/recorder';
 import { Session } from '../core/session';
 import { inEnglish, wordCount } from '../core/split';
 import { WordPractice } from '../core/word-practice';
-import { Icon } from '../shared/icon';
 
 /** How long the engine may go without a word (a report of progress) before the user is offered to give up waiting (ms). */
 export const STUCK_MS = 15_000;
@@ -13,13 +12,13 @@ export const STUCK_MS = 15_000;
 /** Fixing the words of the text open: the tries of each part whose words change are scored again against them. */
 @Component({
   selector: 'app-edit-words',
-  imports: [Icon],
   template: `
-    <dialog #dialog (click)="backdrop($event)" (cancel)="escape($event)" aria-labelledby="edit-words-title">
+    <!-- a sheet, as on the desktop: down from the top of the window, closed with Cancel, Save or Esc, not with an × or
+         a click beside it -->
+    <dialog #dialog class="sheet" (cancel)="escape($event)" aria-labelledby="edit-words-title">
       <div class="box">
         <header>
           <h2 id="edit-words-title">Edit the words</h2>
-          <button class="btn ghost icon" (click)="close()" [disabled]="busy()" aria-label="Close"><app-icon name="close" /></button>
         </header>
         <p class="hint">
           Fix a word, or add or remove some. The tries of each part you change are scored again from their recordings, against its words
@@ -64,16 +63,7 @@ export const STUCK_MS = 15_000;
   `,
   styles: `
     dialog {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 0;
       width: min(620px, calc(100vw - 32px));
-      background: var(--surface);
-      color: var(--ink);
-      box-shadow: var(--shadow-lg);
-    }
-    dialog::backdrop {
-      background: rgba(0, 0, 0, 0.35);
     }
     .box {
       display: flex;
@@ -154,10 +144,6 @@ export class EditWords {
 
   close() {
     if (!this.busy()) this.dialog().nativeElement.close();
-  }
-
-  protected backdrop(event: MouseEvent) {
-    if (event.target === this.dialog().nativeElement) this.close();
   }
 
   /** Esc closes the dialog; while a save is under way it does nothing, unless the engine has gone quiet: then it gives up
