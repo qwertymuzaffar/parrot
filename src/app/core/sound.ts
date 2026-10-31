@@ -3,6 +3,41 @@ import { readSetting, writeSetting } from './settings';
 
 export type Track = 'ref' | 'mine';
 
+/** The voices not offered: macOS's novelty and legacy voices (Albert, Bad News, Bells, Bubbles, Zarvox… and the
+ * Eloquence family), of no use for practising and more of them than the voices worth choosing. */
+const NOVELTY = /^com\.apple\.(speech\.synthesis\.voice|eloquence)\./;
+
+/** Where a voice's English is from, as a list says it. */
+const PLACES: Record<string, string> = {
+  US: 'US',
+  GB: 'UK',
+  AU: 'Australia',
+  IE: 'Ireland',
+  IN: 'India',
+  ZA: 'South Africa',
+  CA: 'Canada',
+  NZ: 'New Zealand',
+  SG: 'Singapore',
+};
+
+/** A voice as the list of voices shows it: "Ava, Premium, US", "Daniel, UK", "Google US English, US, online". The
+ * name without the grade macOS puts in brackets after it or the language Windows puts after a dash, then the grade,
+ * the place its English is from, and whether it sends the text out to a provider. */
+export function voiceLabel(voice: SpeechSynthesisVoice): string {
+  const grade = /\((Premium|Enhanced)\)/.exec(voice.name)?.[1];
+  const name = voice.name.replace(/\s*\((Premium|Enhanced)\)/, '').replace(/\s*-\s*English\s*\(.*\)$/, '');
+  const region: string | undefined = voice.lang.split(/[-_]/)[1];
+  let place: string | undefined = region && PLACES[region];
+  if (region && !place) {
+    try {
+      place = new Intl.DisplayNames(['en'], { type: 'region' }).of(region) ?? region;
+    } catch {
+      place = region;
+    }
+  }
+  return [name, grade, place, voice.localService ? '' : 'online'].filter(Boolean).join(', ');
+}
+
 /**
  * Everything that makes a sound: the reference voice (the system's English voices, through the Web Speech API),
  * saved recordings with a time callback for the word highlight, and single-word clips.
@@ -51,7 +86,7 @@ export class Sound {
       const all = this.synthesis?.getVoices() ?? [];
       this.canSpeak.set(all.length > 0);
       if (all.length) this.voiceMissing.set(false);
-      const list = all.filter((voice) => voice.lang.startsWith('en'));
+      const list = all.filter((voice) => voice.lang.startsWith('en') && !NOVELTY.test(voice.voiceURI));
       this.voices.set(list.sort((left, right) => rank(left) - rank(right)));
       if (!list.some((voice) => voice.name === this.voiceName()) && list.length) this.voiceName.set(list[0].name);
       this.warm();
