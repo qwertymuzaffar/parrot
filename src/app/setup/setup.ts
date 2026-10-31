@@ -61,31 +61,31 @@ const MB = 1_000_000;
       flex-direction: column;
       align-items: center;
       text-align: center;
-      gap: 14px;
+      gap: 12px;
     }
     h1 {
-      font-size: 30px;
+      font-size: 24px;
+      font-weight: 600;
     }
     .lead {
       margin: 0;
       color: var(--ink-2);
-      font-size: 15px;
     }
     .models {
       list-style: none;
-      margin: 10px 0 0;
+      margin: 8px 0 0;
       padding: 0;
       width: 100%;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
       text-align: left;
     }
     li {
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px 16px;
+      border-radius: 10px;
+      padding: 12px 14px;
     }
     .row {
       display: flex;
@@ -97,12 +97,12 @@ const MB = 1_000_000;
       display: flex;
       flex-direction: column;
       span {
-        font-size: 13px;
+        font-size: 12px;
         color: var(--muted);
       }
     }
     .size {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
@@ -110,7 +110,7 @@ const MB = 1_000_000;
       height: 6px;
       border-radius: 6px;
       background: var(--surface-2);
-      margin-top: 10px;
+      margin-top: 8px;
       overflow: hidden;
       i {
         display: block;
@@ -124,17 +124,16 @@ const MB = 1_000_000;
       margin: 0;
       color: var(--wrong-ink);
       background: var(--wrong-bg);
-      border-radius: 10px;
-      padding: 8px 12px;
-      font-size: 14px;
+      border-radius: 8px;
+      padding: 6px 10px;
     }
     .btn {
-      margin-top: 6px;
-      min-width: 220px;
+      margin-top: 4px;
+      min-width: 200px;
     }
     .fine {
       margin: 0;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--muted);
     }
   `,

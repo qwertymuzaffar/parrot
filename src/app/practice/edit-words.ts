@@ -68,15 +68,15 @@ export const STUCK_MS = 15_000;
     .box {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding: 18px 22px 22px;
+      gap: 10px;
+      padding: 16px 20px 20px;
     }
     header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin: 0 -22px;
-      padding: 0 22px 14px;
+      margin: 0 -20px;
+      padding: 0 20px 12px;
       border-bottom: 1px solid var(--line);
     }
     h2 {
@@ -87,27 +87,25 @@ export const STUCK_MS = 15_000;
     .hint {
       margin: 0;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
       display: inline-flex;
       align-items: center;
       gap: 8px;
     }
     textarea {
-      min-height: 220px;
+      min-height: 200px;
       resize: vertical;
-      font: inherit;
-      line-height: 1.5;
     }
     .error {
       margin: 0;
-      font-size: 13px;
+      font-size: 12px;
       color: var(--wrong-ink);
     }
     .go {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 10px;
+      gap: 8px;
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

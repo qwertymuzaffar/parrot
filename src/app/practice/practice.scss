@@ -18,8 +18,8 @@ main {
 header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: calc(16px + var(--titlebar)) 26px 0;
+  gap: 12px;
+  padding: calc(14px + var(--titlebar)) 20px 0;
 
   .title {
     display: flex;
@@ -38,27 +38,44 @@ header {
     min-width: 0;
   }
   h1 {
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 }
 
-// ---- parts stepper
+// ---- parts stepper: the part you're on by name, then one pill a part, all of one shape, so moving on to the next
+// moves nothing else in the row
 
 .steps {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 26px 0;
+  gap: 12px;
+  padding: 12px 20px 0;
 
+  .now {
+    white-space: nowrap;
+    font-weight: 600;
+    .pct {
+      font-variant-numeric: tabular-nums;
+      &.good {
+        color: var(--good-ink);
+      }
+      &.warn {
+        color: var(--warn-ink);
+      }
+      &.bad {
+        color: var(--wrong-ink);
+      }
+    }
+  }
   ol {
     flex: 1;
     min-width: 0;
     display: flex;
-    gap: 8px;
+    gap: 6px;
     list-style: none;
     margin: 0;
     padding: 2px;
@@ -76,54 +93,43 @@ header {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    min-width: 44px;
-    height: 38px;
-    padding: 0 8px;
-    border-radius: 12px;
+    gap: 4px;
+    min-width: 36px;
+    height: 32px;
+    padding: 0 6px;
+    border-radius: 7px;
     border: 1px solid var(--line);
     background: var(--surface);
     color: var(--ink-2);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1;
+    font-variant-numeric: tabular-nums;
     &:hover {
       border-color: var(--muted);
     }
-  }
-  .bar {
-    width: 20px;
-    height: 4px;
-    border-radius: 4px;
-    background: var(--bar-light);
-    &.good {
+    .bar {
+      width: 18px;
+      height: 3px;
+      border-radius: 3px;
+      background: var(--bar-light);
+    }
+    &.good .bar {
       background: var(--accent);
     }
-    &.warn {
+    &.warn .bar {
       background: var(--warn-line);
     }
-    &.bad {
+    &.bad .bar {
       background: var(--wrong-ink);
     }
   }
-  // the part you're on: the thick outline says "here", and the whole pill takes the score's colour
-  // (dark until the part has been practised)
+  // the part you're on: the thick outline says "here", in the score's colour (dark until the part has been practised),
+  // at the size of the others
   .current {
-    flex-direction: row;
-    gap: 8px;
-    padding: 0 12px 0 5px;
+    padding: 0 5px;
     border: 2px solid var(--ink);
     color: var(--ink);
-    .n {
-      min-width: 26px;
-      height: 26px;
-      padding: 0 4px;
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
-      background: var(--ink);
-      color: var(--surface);
-    }
     &.good {
       border-color: var(--accent);
       color: var(--good-ink);
@@ -136,21 +142,9 @@ header {
       border-color: var(--wrong-ink);
       color: var(--wrong-ink);
     }
-    &.good .n {
-      background: var(--accent);
-      color: var(--accent-ink);
-    }
-    &.warn .n {
-      background: var(--warn-line);
-      color: #14201a;
-    }
-    &.bad .n {
-      background: var(--wrong-ink);
-      color: var(--tag-ink);
-    }
   }
   .sum {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--muted);
     white-space: nowrap;
     b {
@@ -166,19 +160,18 @@ header {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px 26px 0;
+  gap: 12px;
+  padding: 14px 20px 0;
 }
 
+// the box the text is read from: a card like the others, no deeper
 .sheet {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 26px 32px 20px;
-  border-radius: 22px;
-  box-shadow: var(--shadow);
+  gap: 16px;
+  padding: 20px 24px 16px;
 }
 
 .sentence {
@@ -403,8 +396,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 22px;
-  padding: 16px 26px 18px;
+  gap: 16px;
+  padding: 12px 20px 16px;
 
   .side {
     display: flex;
@@ -416,11 +409,12 @@ header {
     }
   }
   .rates button {
-    width: 44px;
-    height: 36px;
+    width: 38px;
+    height: 24px;
     padding: 0;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   // hidden (so not focused or read out) while nothing plays, its room kept
   .stop.idle {
@@ -430,7 +424,7 @@ header {
 
 // a dock button reduced to its icon: its label stays for screen readers, and its title for the pointer
 @mixin icon-only {
-  width: 44px;
+  width: 32px;
   padding: 0;
   .label {
     position: absolute;
@@ -443,8 +437,7 @@ header {
 }
 
 // "Mine, then correct" gives up its label in a centre too narrow for it, Mine and Stop's room beside the record
-// button (about 330 px a side, with the dock's padding and gaps 830 px): wider than its side, it pushes the record
-// button off the centre
+// button: wider than its side, it pushes the record button off the centre
 @container centre (width < 840px) {
   .dock .compare {
     @include icon-only;
@@ -456,28 +449,28 @@ header {
   .dock {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: 14px;
-    padding-inline: 16px;
+    gap: 12px;
+    padding-inline: 12px;
     .side {
       flex-wrap: wrap;
     }
     .rates button {
-      width: 36px;
+      width: 32px;
     }
   }
 }
 
 .record {
-  width: 78px;
-  height: 78px;
+  width: 64px;
+  height: 64px;
   flex-shrink: 0;
   border-radius: 50%;
-  border: 6px solid var(--rec-ring);
+  border: 5px solid var(--rec-ring);
   background: var(--rec);
   color: #ffffff;
   display: grid;
   place-items: center;
-  box-shadow: 0 10px 26px color-mix(in srgb, var(--rec) 35%, transparent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--rec) 30%, transparent);
   transition: transform 0.12s;
 
   &:hover:not(:disabled, .checking) {
@@ -507,13 +500,13 @@ header {
   0%,
   100% {
     box-shadow:
-      0 0 0 10px color-mix(in srgb, var(--rec) 14%, transparent),
-      0 0 0 22px color-mix(in srgb, var(--rec) 6%, transparent);
+      0 0 0 8px color-mix(in srgb, var(--rec) 14%, transparent),
+      0 0 0 18px color-mix(in srgb, var(--rec) 6%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--rec) 18%, transparent),
-      0 0 0 14px color-mix(in srgb, var(--rec) 8%, transparent);
+      0 0 0 5px color-mix(in srgb, var(--rec) 18%, transparent),
+      0 0 0 12px color-mix(in srgb, var(--rec) 8%, transparent);
   }
 }
 
@@ -531,8 +524,8 @@ header {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px 18px 14px 0;
+  gap: 10px;
+  padding: 16px 16px 16px 0;
   overflow: auto;
 }
 
@@ -551,13 +544,13 @@ b.warn {
 .score {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px;
+  gap: 12px;
+  padding: 12px 14px;
 
   .stats {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     font-size: 13px;
     color: var(--ink-2);
   }
@@ -577,36 +570,36 @@ b.warn {
 
 .tries {
   flex: 1 0 auto;
-  min-height: 190px;
+  min-height: 170px;
 }
 
 .tips,
 .start {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px;
+  gap: 10px;
+  padding: 14px;
 }
 
 .tip {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: flex-start;
   color: var(--ink-2);
   b {
     color: var(--ink);
   }
   .num {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
-    border-radius: 9px;
+    border-radius: 7px;
     display: grid;
     place-items: center;
     background: var(--good-bg);
     color: var(--good-ink);
-    font-weight: 700;
-    font-size: 13px;
+    font-weight: 600;
+    font-size: 12px;
   }
 }
 
@@ -614,17 +607,17 @@ b.warn {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 18px 20px;
+  padding: 12px 14px;
 
   .meter {
-    height: 10px;
-    border-radius: 10px;
+    height: 6px;
+    border-radius: 6px;
     background: var(--surface-2);
     overflow: hidden;
     i {
       display: block;
       height: 100%;
-      border-radius: 10px;
+      border-radius: 6px;
       background: var(--accent);
       transition: width 0.05s;
     }
@@ -637,15 +630,15 @@ b.warn {
   align-items: center;
   text-align: center;
   gap: 8px;
-  padding: 22px 26px;
+  padding: 16px 18px;
   color: var(--muted);
 }
 
 .keys {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 0 4px;
+  gap: 4px 10px;
+  padding: 0 2px;
   margin-top: auto;
   font-size: 11px;
   color: var(--muted);
