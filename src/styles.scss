@@ -111,6 +111,20 @@ body {
   font: 13px/1.4 var(--font);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  // the interface is not text to drag across: no I-beam over a label, no highlight on a drag
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+// what is text: the fields, and whatever a user may want to copy (an error, a path); the text to read, the word on
+// its card and what was heard say so where they are drawn
+input,
+textarea,
+code,
+.error,
+[role='alert'] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 button,
@@ -121,8 +135,9 @@ select {
   color: inherit;
 }
 
+// the arrow over a button, as on the desktop: the hand is for links, and for the practised words, which act as links
 button {
-  cursor: pointer;
+  cursor: default;
 }
 
 h1,
@@ -349,13 +364,16 @@ kbd {
   white-space: nowrap;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 10px;
-  border: 3px solid transparent;
-  background-clip: content-box;
+// a thin scrollbar where the system draws a heavy one; on a Mac the system's own, which hides until you scroll
+:root:not(.mac-app) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 10px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
 }
