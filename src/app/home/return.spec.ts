@@ -74,9 +74,9 @@ describe('coming back to the home screen', () => {
   });
 
   const shown = () => ({
-    cards: [...home.querySelectorAll('.grid li.text h3')].map((title) => title.textContent!.trim()),
+    cards: [...home.querySelectorAll('.texts li.text h3')].map((title) => title.textContent!.trim()),
     resume: home.querySelector('.resume .t')?.textContent!.trim() ?? null,
-    empty: !!home.querySelector('.grid .empty'),
+    empty: !!home.querySelector('.texts .empty'),
   });
 
   it('shows the cards and Continue from the first frame, not “Nothing to practise yet”', () => {
@@ -117,7 +117,7 @@ describe('coming back to the home screen', () => {
     const scores = { [await partKey('I like tea.')]: { last: 83, best: 83, tries: 1 } };
     texts.set([{ ...TEXTS[0], id: '0123456789', title: 'Tea', text, words: 12, scores }]);
     await fixture.whenStable();
-    const cells = [...home.querySelectorAll('.grid li.text .cells span')].map((cell) => cell.className);
+    const cells = [...home.querySelectorAll('.texts li.text .cells span')].map((cell) => cell.className);
     const ring = home.querySelector('.resume .ring')!.textContent!.trim();
     const next = home.querySelector('.resume .next')!.textContent!.trim();
     expect([cells, ring, next]).toEqual([[band(83), 'none'], '1/2', 'Next: “I like coffee.”']);

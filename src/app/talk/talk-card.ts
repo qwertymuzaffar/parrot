@@ -218,24 +218,24 @@ export function length(seconds: number) {
     .talk {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      padding: 18px;
+      gap: 8px;
+      padding: 14px 16px;
     }
     h2 {
-      font-size: 17px;
-      font-weight: 700;
+      font-size: 15px;
+      font-weight: 600;
       margin: 0;
     }
     .hint {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
       margin: 0;
     }
     .live {
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 14px;
+      font-size: 13px;
     }
     .time {
       margin-left: auto;
@@ -248,8 +248,8 @@ export function length(seconds: number) {
     }
     .meter,
     .progress {
-      height: 8px;
-      border-radius: 8px;
+      height: 6px;
+      border-radius: 6px;
       background: var(--surface-2);
       overflow: hidden;
     }
@@ -257,7 +257,7 @@ export function length(seconds: number) {
     .progress i {
       display: block;
       height: 100%;
-      border-radius: 8px;
+      border-radius: 6px;
       background: var(--accent);
       transition: width 0.2s;
     }
@@ -266,24 +266,24 @@ export function length(seconds: number) {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 10px;
-      min-height: 44px;
+      gap: 8px;
+      min-height: 32px;
     }
     .go .hint {
       margin-right: auto;
     }
     .error {
       margin: 0;
-      font-size: 13px;
+      font-size: 12px;
       color: var(--wrong-ink);
     }
     .so-far {
       margin: 0;
-      padding: 10px 12px;
-      border-radius: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
       background: var(--surface-2);
       color: var(--ink-2);
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.5;
     }
     // three lines, the newest at the foot: the lines before are cut off at the top, a whole line at a time
@@ -306,9 +306,9 @@ export function length(seconds: number) {
       border: 1px solid var(--line);
       background: var(--surface);
       color: var(--ink-2);
-      font-size: 12.5px;
+      font-size: 12px;
       font-weight: 500;
-      padding: 4px 11px;
+      padding: 3px 10px;
       border-radius: 99px;
     }
     // the chosen chip has the outline and the fill, at the same weight: a bolder label is wider and would move the others
@@ -324,8 +324,8 @@ export function length(seconds: number) {
     }
     .prompt {
       flex: 1;
-      font-size: 15px;
-      font-weight: 600;
+      font-size: 14px;
+      font-weight: 500;
       color: var(--ink);
       quotes: '“' '”';
     }
