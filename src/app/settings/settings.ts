@@ -208,7 +208,8 @@ const MB = 1_000_000;
       border-bottom: 1px solid var(--line);
       h2 {
         margin: 0;
-        font-size: 18px;
+        font-size: 15px;
+        font-weight: 600;
       }
     }
     section {
