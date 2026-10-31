@@ -244,6 +244,8 @@ import { stopNote } from './talk-card';
       font-family: var(--display);
       font-size: 20px;
       line-height: 2;
+      user-select: text;
+      -webkit-user-select: text;
     }
     .w {
       border: 0;
@@ -325,7 +327,6 @@ import { stopNote } from './talk-card';
       gap: 8px;
       font-size: 13px;
       color: var(--ink-2);
-      cursor: pointer;
     }
     label.name input {
       width: 16px;

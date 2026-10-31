@@ -202,6 +202,8 @@ import { SoundUnits } from './sound-units';
       letter-spacing: -0.02em;
       font-size: 28px;
       font-weight: 700;
+      user-select: text;
+      -webkit-user-select: text;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -283,7 +285,6 @@ import { SoundUnits } from './sound-units';
       gap: 8px;
       font-size: 13px;
       color: var(--ink-2);
-      cursor: pointer;
     }
     .name input {
       width: 16px;

@@ -285,6 +285,8 @@ export function length(seconds: number) {
       color: var(--ink-2);
       font-size: 13px;
       line-height: 1.5;
+      user-select: text;
+      -webkit-user-select: text;
     }
     // three lines, the newest at the foot: the lines before are cut off at the top, a whole line at a time
     .so-far span {
