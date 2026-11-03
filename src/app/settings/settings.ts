@@ -25,12 +25,24 @@ const MB = 1_000_000;
         <section>
           <span class="eyebrow">Reference voice</span>
           <p class="hint">
-            The voice that reads your texts and single words. Voices marked “online” send the text (never your recordings) to the provider.
+            The voice that reads your texts and single words. Parrot's own voices read offline and sound the same on every computer; the
+            system's voices marked “online” send the text (never your recordings) to the provider.
           </p>
           <div class="row">
             <select class="field" [value]="sound.voice()?.id ?? ''" (change)="sound.setVoice($any($event.target).value)">
-              @for (voice of sound.voices(); track voice.id) {
-                <option [value]="voice.id">{{ voice.label }}</option>
+              @if (own().length) {
+                <optgroup label="Parrot's voices">
+                  @for (voice of own(); track voice.id) {
+                    <option [value]="voice.id">{{ voice.label }}</option>
+                  }
+                </optgroup>
+              }
+              @if (system().length) {
+                <optgroup label="System voices">
+                  @for (voice of system(); track voice.id) {
+                    <option [value]="voice.id">{{ voice.label }}</option>
+                  }
+                </optgroup>
               }
             </select>
             <button class="btn" (click)="sound.speak('Parrot reads it, you repeat it.', 1, null)">
@@ -38,7 +50,9 @@ const MB = 1_000_000;
             </button>
           </div>
           @if (!sound.canSpeak()) {
-            <p class="bad">No system voice found. Add an English voice in your system's settings.</p>
+            <p class="bad">No voice found. Add an English voice in your system's settings.</p>
+          } @else if (sound.failure(); as failure) {
+            <p class="bad" role="alert">{{ failure }}</p>
           }
         </section>
 
@@ -293,6 +307,9 @@ export class Settings {
   private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
+  /** the voices under their headings: the engine's own, and the system's */
+  protected readonly own = computed(() => this.sound.voices().filter((voice) => voice.engine));
+  protected readonly system = computed(() => this.sound.voices().filter((voice) => voice.system));
   protected readonly ready = modelsReady;
   private updates = inject(Updates);
   protected health = resource({ loader: () => this.engine.info() });
