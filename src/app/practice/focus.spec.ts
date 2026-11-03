@@ -68,6 +68,8 @@ describe('keyboard focus on the practice screen', () => {
             paused: signal(false),
             rate: signal(1),
             voiceMissing: signal(false),
+            preparing: signal(false),
+            failure: signal(null),
             stop: vi.fn(),
           },
         },

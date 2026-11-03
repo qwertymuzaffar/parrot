@@ -112,6 +112,9 @@
             } @else if (session.error()) {
               <!-- before the take: a take that failed leaves the try before it on screen -->
               <span class="error">{{ session.error() }}</span>
+            } @else if (playback.preparing()) {
+              <span class="spinner"></span>
+              <span>Getting the reading ready…</span>
             } @else if (take) {
               <b>Your take</b>
               <span>· {{ take.duration.toFixed(1) }} s · try {{ tryNumber() }}{{ take.cut ? ' · from your talk' : '' }}</span>
@@ -143,6 +146,8 @@
         <p class="no-voice" role="alert">
           No system voice found, so Parrot can't read aloud. Add an English voice in your system's settings.
         </p>
+      } @else if (playback.failure(); as failure) {
+        <p class="no-voice" role="alert">{{ failure }}</p>
       }
     </section>
   }

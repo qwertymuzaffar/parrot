@@ -39,6 +39,26 @@ export interface Reading {
   words: [number, number][];
 }
 
+/** One of the engine's own voices (Kokoro's): its name in the voices file, and as the list of voices shows it. */
+export interface EngineVoice {
+  id: string;
+  name: string;
+  place: string;
+}
+
+/** The engine's voices worth choosing, of Kokoro's 54, best first: the ones its makers rate highest, five American
+ * (Heart, the one trained longest, first) and three British. */
+export const KOKORO_VOICES: EngineVoice[] = [
+  { id: 'af_heart', name: 'Heart', place: 'US' },
+  { id: 'af_bella', name: 'Bella', place: 'US' },
+  { id: 'af_nicole', name: 'Nicole', place: 'US' },
+  { id: 'am_michael', name: 'Michael', place: 'US' },
+  { id: 'am_fenrir', name: 'Fenrir', place: 'US' },
+  { id: 'bf_emma', name: 'Emma', place: 'UK' },
+  { id: 'bm_george', name: 'George', place: 'UK' },
+  { id: 'bm_fable', name: 'Fable', place: 'UK' },
+];
+
 /** What the interface asks of the speech engine. The app provides the one it runs on (app.config.ts):
  * TauriEngine inside the desktop app, DemoEngine in a plain browser. */
 export abstract class Engine {
@@ -138,6 +158,10 @@ export abstract class Engine {
   /** A reading of `text` by the engine's voice `voice` ("af_heart") at `speed` (1 as it speaks, 0.75 slower), with the
    * time of each word in it. */
   abstract reading(text: string, voice: string, speed: number): Promise<Reading>;
+
+  /** The engine's own voices, the ones worth choosing, best first; none in a plain browser, which reads with the
+   * system's. */
+  abstract voices(): EngineVoice[];
 
   /** A saved recording's path inside the data folder. */
   protected relative(path: string) {

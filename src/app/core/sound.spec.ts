@@ -49,6 +49,10 @@ describe('sound', () => {
       },
     );
     vi.stubGlobal('speechSynthesis', { getVoices: () => [], cancel() {}, speak() {}, onvoiceschanged: null });
+    // the engine has no voice of its own here: the recordings and clips are what these tests are about
+    TestBed.configureTestingModule({
+      providers: [{ provide: Engine, useValue: { voices: () => [], audioUrl: (path: string) => `audio:${path}` } }],
+    });
   });
 
   afterEach(() => vi.unstubAllGlobals());
@@ -174,7 +178,7 @@ describe('sound', () => {
       };
       TestBed.configureTestingModule({
         providers: [
-          { provide: Engine, useValue: { audioUrl: (path: string) => `audio:${path}` } },
+          { provide: Engine, useValue: { voices: () => [], audioUrl: (path: string) => `audio:${path}` } },
           { provide: Clips, useValue: { cut } },
         ],
       });

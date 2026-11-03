@@ -1,7 +1,20 @@
-import { Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, signal } from '@angular/core';
+import { Engine, EngineVoice } from './engine';
+import { errorMessage } from './library';
 import { readSetting, writeSetting } from './settings';
+import { forVoice, wordForVoice } from './voice-text';
 
 export type Track = 'ref' | 'mine';
+
+/** A voice to read with: one of the engine's own (Kokoro's, the same on every computer), or one of the system's. */
+export interface Voice {
+  /** what the choice is kept as: "kokoro:af_heart" for the engine's, the system voice's name for the system's */
+  id: string;
+  /** as the list of voices shows it: "Heart, Kokoro, US", "Ava, Premium, US" */
+  label: string;
+  engine?: EngineVoice;
+  system?: SpeechSynthesisVoice;
+}
 
 /** The voices not offered: macOS's novelty and legacy voices (Albert, Bad News, Bells, Bubbles, Zarvox… and the
  * Eloquence family), of no use for practising and more of them than the voices worth choosing. */
@@ -20,9 +33,9 @@ const PLACES: Record<string, string> = {
   SG: 'Singapore',
 };
 
-/** A voice as the list of voices shows it: "Ava, Premium, US", "Daniel, UK", "Google US English, US, online". The
- * name without the grade macOS puts in brackets after it or the language Windows puts after a dash, then the grade,
- * the place its English is from, and whether it sends the text out to a provider. */
+/** A system voice as the list of voices shows it: "Ava, Premium, US", "Daniel, UK", "Google US English, US, online".
+ * The name without the grade macOS puts in brackets after it or the language Windows puts after a dash, then the
+ * grade, the place its English is from, and whether it sends the text out to a provider. */
 export function voiceLabel(voice: SpeechSynthesisVoice): string {
   const grade = /\((Premium|Enhanced)\)/.exec(voice.name)?.[1];
   const name = voice.name.replace(/\s*\((Premium|Enhanced)\)/, '').replace(/\s*-\s*English\s*\(.*\)$/, '');
@@ -38,19 +51,44 @@ export function voiceLabel(voice: SpeechSynthesisVoice): string {
   return [name, grade, place, voice.localService ? '' : 'online'].filter(Boolean).join(', ');
 }
 
+/** The speed the engine's voice reads at for a rate of the system voice's (1 as the voice speaks): the slowest it
+ * goes is the slowest Listen speed, so a word said slowly on its card is read that slow too. */
+export function speedFor(rate: number): number {
+  return Math.max(0.6, rate);
+}
+
+/** Which word of a reading is being said at `seconds`, from when each starts: the last whose start has passed (a
+ * moment early, as the eye should lead the ear), -1 before the first. */
+export function wordAt(words: [number, number][], seconds: number): number {
+  return words.findLastIndex(([from]) => from - 0.02 <= seconds);
+}
+
 /**
- * Everything that makes a sound: the reference voice (the system's English voices, through the Web Speech API),
- * saved recordings with a time callback for the word highlight, and single-word clips.
- * One thing plays at a time: starting anything stops the rest.
+ * Everything that makes a sound: the reference voice (the engine's own, played from the reading it makes, or one of
+ * the system's English voices through the Web Speech API), saved recordings with a time callback for the word
+ * highlight, and single-word clips. One thing plays at a time: starting anything stops the rest.
  */
 @Injectable({ providedIn: 'root' })
 export class Sound {
-  readonly voices = signal<SpeechSynthesisVoice[]>([]);
-  readonly voiceName = signal<string>(readSetting('voice', ''));
+  private engine = inject(Engine);
+
+  /** the voices to choose from: the engine's own first, then the system's English ones, best first */
+  readonly voices = signal<Voice[]>([]);
+  /** the voice chosen, by id; "" until one is chosen, and the first of the list reads */
+  readonly voiceId = signal<string>(readSetting('voice', ''));
+  /** the voice that reads: the one chosen, while the list has it, else the first of the list */
+  readonly voice = computed(() => {
+    const list = this.voices();
+    return list.find((voice) => voice.id === this.voiceId()) ?? list[0] ?? null;
+  });
   /** which sentence-length track is playing, if any (single words don't count) */
   readonly playing = signal<Track | null>(null);
   readonly paused = signal(false);
-  /** whether the system has a voice to read with (some list theirs a moment after start) */
+  /** the engine is making the reading asked for: the interface says it is getting ready */
+  readonly preparing = signal(false);
+  /** why the engine could not make the last reading asked of it, in plain words; gone with the next it could */
+  readonly failure = signal<string | null>(null);
+  /** whether there is a voice to read with (some systems list theirs a moment after start) */
   readonly canSpeak = signal(false);
   /** the reference voice was asked for when there was none: the interface says so, rather than staying silent */
   readonly voiceMissing = signal(false);
@@ -70,10 +108,13 @@ export class Sound {
   private synth: { text: string; rate: number; onWord?: (charIndex: number) => void; from: number; at: number } | null = null;
 
   constructor() {
+    const own: Voice[] = this.engine
+      .voices()
+      .map((voice) => ({ id: `kokoro:${voice.id}`, label: `${voice.name}, Kokoro, ${voice.place}`, engine: voice }));
     const load = () => {
-      // the best voice first, so a fresh install reads with it: the voices on the machine before those that send the
-      // text out to a provider; among them, one the system has added over its compact voices (macOS names these
-      // "Ava (Premium)", "Evan (Enhanced)", and so their URIs), then the names known to read well, then the rest
+      // the best system voice first: the voices on the machine before those that send the text out to a provider;
+      // among them, one the system has added over its compact voices (macOS names these "Ava (Premium)", "Evan
+      // (Enhanced)", and so their URIs), then the names known to read well, then the rest
       const pref = ['Samantha', 'Ava', 'Allison', 'Alex', 'Daniel', 'Google US English'];
       const grade = (voice: SpeechSynthesisVoice) => {
         const about = `${voice.name} ${voice.voiceURI}`.toLowerCase();
@@ -84,11 +125,13 @@ export class Sound {
         return (voice.localService ? 0 : 1000) + grade(voice) * 100 + (prefIndex < 0 ? 50 : prefIndex);
       };
       const all = this.synthesis?.getVoices() ?? [];
-      this.canSpeak.set(all.length > 0);
-      if (all.length) this.voiceMissing.set(false);
-      const list = all.filter((voice) => voice.lang.startsWith('en') && !NOVELTY.test(voice.voiceURI));
-      this.voices.set(list.sort((left, right) => rank(left) - rank(right)));
-      if (!list.some((voice) => voice.name === this.voiceName()) && list.length) this.voiceName.set(list[0].name);
+      const system = all
+        .filter((voice) => voice.lang.startsWith('en') && !NOVELTY.test(voice.voiceURI))
+        .sort((left, right) => rank(left) - rank(right))
+        .map((voice) => ({ id: voice.name, label: voiceLabel(voice), system: voice }));
+      this.voices.set([...own, ...system]);
+      this.canSpeak.set(own.length + system.length > 0);
+      if (this.canSpeak()) this.voiceMissing.set(false);
       this.warm();
     };
     if (this.synthesis) this.synthesis.onvoiceschanged = load;
@@ -96,18 +139,18 @@ export class Sound {
     this.player.onended = () => this.ended();
   }
 
-  setVoice(name: string) {
-    this.voiceName.set(name);
-    writeSetting('voice', name);
+  setVoice(id: string) {
+    this.voiceId.set(id);
+    writeSetting('voice', id);
     this.warm();
   }
 
-  /** Have the system load the voice chosen before it is first read with: the first words of a voice wait for it to
-   * be loaded, up to a second for a large one (macOS's Premium voices), so it says a word without sound as soon as it
-   * is known. Not while a reading is under way: a word spoken then would wait behind the reading, and a reading begun
-   * meanwhile stops the warming word first, as it stops anything. */
+  /** Have the system load the system voice chosen before it is first read with: the first words of a voice wait for it
+   * to be loaded, up to a second for a large one (macOS's Premium voices), so it says a word without sound as soon as
+   * it is known. Not while a reading is under way: a word spoken then would wait behind the reading, and a reading
+   * begun meanwhile stops the warming word first, as it stops anything. */
   private warm() {
-    const voice = this.voices().find((voice) => voice.name === this.voiceName());
+    const voice = this.voice()?.system;
     if (!voice || !this.synthesis || this.synthMode || this.warmed === voice.name) return;
     this.warmed = voice.name;
     const utterance = new SpeechSynthesisUtterance('Parrot');
@@ -121,8 +164,51 @@ export class Sound {
     this.synthesis.speak(utterance);
   }
 
-  /** The reference reading of a text by the system voice; onWord gets the character index of each word. */
-  speak(text: string, rate = 1, track: Track | null = 'ref', onWord?: (charIndex: number) => void): Promise<void> {
+  /** The reference reading of a text; onWord gets the index of each word as it is spoken (the words split on spaces,
+   * as the screen splits them). */
+  speak(text: string, rate = 1, track: Track | null = 'ref', onWord?: (wordIndex: number) => void): Promise<void> {
+    const voice = this.voice();
+    if (voice?.engine) return this.read(text, voice.engine.id, rate, track, onWord);
+    // the text as the system voice should have it (abbreviations spelled out), with where each word starts in it
+    const { spoken, starts } = forVoice(text);
+    return this.synthesize(spoken, rate, track, onWord && ((charIndex) => onWord(starts.findLastIndex((start) => start <= charIndex))));
+  }
+
+  /** A word said on its own (its punctuation already gone), as it should sound. */
+  sayWord(word: string, rate: number): Promise<void> {
+    const voice = this.voice();
+    if (voice?.engine) return this.read(word, voice.engine.id, rate, null);
+    return this.synthesize(wordForVoice(word), rate, null);
+  }
+
+  /** The reading by the engine's voice: made by the engine (or kept from before), then played as a recording is, the
+   * word whose start has passed lit. Until it comes the interface says it is getting ready; a reading that can't be
+   * made is said to have failed, in the engine's words. */
+  private read(text: string, voice: string, rate: number, track: Track | null, onWord?: (wordIndex: number) => void): Promise<void> {
+    this.stop();
+    return new Promise((resolve) => {
+      this.onEnd = resolve;
+      this.playing.set(track);
+      this.preparing.set(true);
+      this.engine.reading(text, voice, speedFor(rate)).then(
+        (reading) => {
+          // stopped, or something else played, while it was made: the engine keeps it for the next time
+          if (this.onEnd !== resolve) return;
+          this.preparing.set(false);
+          this.failure.set(null);
+          this.start(this.engine.audioUrl(reading.audio), onWord && ((seconds) => onWord(wordAt(reading.words, seconds))), resolve);
+        },
+        (error) => {
+          if (this.onEnd !== resolve) return;
+          this.failure.set(errorMessage(error));
+          this.ended();
+        },
+      );
+    });
+  }
+
+  /** Speak `spoken` through the system voice; onWord gets the character index of each word. */
+  private synthesize(spoken: string, rate: number, track: Track | null, onWord?: (charIndex: number) => void): Promise<void> {
     this.stop();
     // without a voice nothing is read (some systems never even end the reading): the interface says why instead
     if (!this.canSpeak()) {
@@ -130,7 +216,7 @@ export class Sound {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
-      this.synth = { text, rate, onWord, from: 0, at: 0 };
+      this.synth = { text: spoken, rate, onWord, from: 0, at: 0 };
       this.onEnd = resolve;
       this.synthMode = true;
       this.playing.set(track);
@@ -144,7 +230,7 @@ export class Sound {
     const synth = this.synth!;
     synth.from = from;
     const utterance = new SpeechSynthesisUtterance(synth.text.slice(from));
-    utterance.voice = this.voices().find((voice) => voice.name === this.voiceName()) ?? null;
+    utterance.voice = this.voice()?.system ?? null;
     utterance.lang = 'en-US';
     utterance.rate = synth.rate;
     utterance.onboundary = (event) => {
@@ -164,17 +250,22 @@ export class Sound {
   play(url: string, track: Track, onTime?: (seconds: number) => void): Promise<void> {
     this.stop();
     return new Promise((resolve) => {
-      this.player.src = url;
-      this.onTime = onTime ?? null;
       this.onEnd = resolve;
       this.playing.set(track);
-      // only this take may end itself: one replaced while starting fails to play after the next has begun
-      const ended = () => this.onEnd === resolve && this.ended();
-      this.player
-        .play()
-        .then(() => this.onEnd === resolve && this.tick())
-        .catch(ended);
+      this.start(url, onTime, resolve);
     });
+  }
+
+  /** Start the player on `url` for the sound whose end is `resolve`: only that sound may end itself (one replaced
+   * while starting fails to play after the next has begun). */
+  private start(url: string, onTime: ((seconds: number) => void) | undefined, resolve: () => void) {
+    this.player.src = url;
+    this.onTime = onTime ?? null;
+    const ended = () => this.onEnd === resolve && this.ended();
+    this.player
+      .play()
+      .then(() => this.onEnd === resolve && this.tick())
+      .catch(ended);
   }
 
   /** A single word or a word try; it ends when it plays out, or when anything else is played or stopped. */
@@ -192,6 +283,8 @@ export class Sound {
 
   togglePause() {
     if (!this.playing()) return;
+    // a reading still being made has nothing to pause: asked again, it is not wanted after all
+    if (this.preparing()) return this.stop();
     if (this.synthMode) {
       if (this.paused()) {
         this.paused.set(false);
@@ -246,5 +339,6 @@ export class Sound {
     this.synth = null;
     this.playing.set(null);
     this.paused.set(false);
+    this.preparing.set(false);
   }
 }
