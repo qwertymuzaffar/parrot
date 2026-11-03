@@ -5,11 +5,18 @@
 //! readings/<voice>/<sha1 of the words>-<speed>.wav    the reading, 24 kHz mono
 //! readings/<voice>/<sha1 of the words>-<speed>.json   when each word starts and ends (seconds)
 //! ```
+//!
+//! A reading is made once and kept: the folder is capped (CAP), the readings not played for longest going first, and
+//! emptied with the trash. The texts' own files are never touched: a reading is a copy the engine can make again.
 
 use crate::audio::Pcm;
 use crate::disk;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+/// How much the readings may take on disk (bytes): about 20 minutes of reading, a dozen texts at every speed.
+pub const CAP: u64 = 300_000_000;
 
 /// A reading, as the window gets it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -30,6 +37,61 @@ pub fn valid_voice(voice: &str) -> bool {
 /// without its extension: readings/af_heart/<sha1>-0.75.
 pub fn place(voice: &str, text: &str, speed: f32) -> String {
     format!("readings/{voice}/{}-{speed}", crate::store::sha(text))
+}
+
+/// The reading kept at `place`, if both its files are there and read; it counts as played now, so it stays while others
+/// go (see trim).
+pub fn load(data: &Path, place: &str) -> Option<Reading> {
+    let times = std::fs::read(data.join(format!("{place}.json"))).ok()?;
+    let words: Vec<[f64; 2]> = serde_json::from_slice(&times).ok()?;
+    let wav = std::fs::OpenOptions::new().write(true).open(data.join(format!("{place}.wav"))).ok()?;
+    let _ = wav.set_modified(SystemTime::now());
+    Some(Reading { audio: format!("{place}.wav"), words })
+}
+
+/// Bring the readings under `cap` bytes: the ones not played for longest go first, each with its words' times. A
+/// reading made just now is as good as played.
+pub fn trim(data: &Path, cap: u64) {
+    let mut readings: Vec<(SystemTime, PathBuf, u64)> = vec![];
+    for voice in std::fs::read_dir(dir(data)).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(voice.path()).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|extension| extension == "wav")
+                && let Ok(metadata) = entry.metadata()
+            {
+                let times = std::fs::metadata(path.with_extension("json")).map(|metadata| metadata.len()).unwrap_or(0);
+                readings.push((metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH), path, metadata.len() + times));
+            }
+        }
+    }
+    let mut total: u64 = readings.iter().map(|(_, _, size)| size).sum();
+    readings.sort_by_key(|(played, _, _)| *played);
+    for (_, wav, size) in readings {
+        if total <= cap {
+            break;
+        }
+        if let Err(error) = std::fs::remove_file(&wav) {
+            log::warn!("could not remove the reading {}: {error}", wav.display());
+            continue;
+        }
+        let _ = std::fs::remove_file(wav.with_extension("json"));
+        total -= size;
+    }
+}
+
+/// Remove every reading (with the trash emptied): they are made again as texts are opened.
+pub fn clear(data: &Path) {
+    let folder = dir(data);
+    if let Err(error) = std::fs::remove_dir_all(&folder)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!("could not remove the readings in {}: {error}", folder.display());
+    }
+}
+
+/// The folder of the readings.
+fn dir(data: &Path) -> PathBuf {
+    data.join("readings")
 }
 
 /// Keep a reading at `place`: its words' times, then the WAV, written whole or not at all.
@@ -96,6 +158,53 @@ mod tests {
         assert_eq!(crate::audio::read_wav_file(&data.join("readings/af_heart/abc-1.wav")).unwrap().samples.len(), 2400);
         let times: Vec<[f64; 2]> = serde_json::from_slice(&std::fs::read(data.join("readings/af_heart/abc-1.json")).unwrap()).unwrap();
         assert_eq!(times, reading.words);
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    /// Keep `seconds` of silence as a reading at `place`, last played at `age` seconds before now.
+    fn kept(data: &Path, place: &str, seconds: usize, age: u64) -> PathBuf {
+        let pcm = Pcm { samples: vec![0.0; 24000 * seconds], rate: 24000 };
+        save(data, place, &pcm, &[[0.0, seconds as f64]]).unwrap();
+        let wav = data.join(format!("{place}.wav"));
+        let played = SystemTime::now() - std::time::Duration::from_secs(age);
+        std::fs::OpenOptions::new().write(true).open(&wav).unwrap().set_modified(played).unwrap();
+        wav
+    }
+
+    #[test]
+    fn a_reading_kept_is_found_again_and_counts_as_played_now() {
+        let data = std::env::temp_dir().join(format!("parrot-readings-load-{}", std::process::id()));
+        let wav = kept(&data, "readings/af_heart/abc-1", 1, 3600);
+        let reading = load(&data, "readings/af_heart/abc-1").unwrap();
+        assert_eq!(reading, Reading { audio: "readings/af_heart/abc-1.wav".into(), words: vec![[0.0, 1.0]] });
+        let since = SystemTime::now().duration_since(std::fs::metadata(&wav).unwrap().modified().unwrap()).unwrap();
+        assert!(since.as_secs() < 60, "played now");
+        // without its words' times, or its WAV, it is no reading
+        std::fs::remove_file(data.join("readings/af_heart/abc-1.json")).unwrap();
+        assert!(load(&data, "readings/af_heart/abc-1").is_none());
+        assert!(load(&data, "readings/af_heart/nothing-1").is_none());
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn the_readings_are_kept_under_the_cap_the_longest_unplayed_going_first() {
+        let data = std::env::temp_dir().join(format!("parrot-readings-trim-{}", std::process::id()));
+        let old = kept(&data, "readings/af_heart/old-1", 2, 3000);
+        let older = kept(&data, "readings/bm_george/older-1", 2, 6000);
+        let new = kept(&data, "readings/af_heart/new-0.75", 2, 10);
+        let size = |path: &Path| std::fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0);
+        let each = size(&new) + size(&new.with_extension("json"));
+        // room for two: the oldest goes, with its times; the rest stay
+        trim(&data, 2 * each + 10);
+        assert!(!older.exists() && !older.with_extension("json").exists());
+        assert!(old.exists() && new.exists());
+        // under the cap: nothing goes
+        trim(&data, 2 * each + 10);
+        assert!(old.exists() && new.exists());
+        clear(&data);
+        assert!(!data.join("readings").exists());
+        // nothing to clear is fine
+        clear(&data);
         std::fs::remove_dir_all(&data).unwrap();
     }
 

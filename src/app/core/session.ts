@@ -4,6 +4,7 @@ import { Engine } from './engine';
 import { errorMessage, Library } from './library';
 import { Attempt, AttemptSummary, Mode, Part, PartScore, TextItem } from './models';
 import { Playback } from './playback';
+import { ReadAhead } from './read-ahead';
 import { MIC_LOST, micError, Recorder } from './recorder';
 import { readSetting, writeSetting } from './settings';
 import { bare, distinctKeys, splitText } from './split';
@@ -25,6 +26,7 @@ export class Session {
   private library = inject(Library);
   private playback = inject(Playback);
   private recorder = inject(Recorder);
+  private readAhead = inject(ReadAhead);
 
   readonly view = signal<'home' | 'practice'>('home');
   /** the text clicked, while its parts and scores are fetched: its card says it is coming */
@@ -83,6 +85,14 @@ export class Session {
     // practice screen would have no title, no words and dead controls
     effect(() => {
       if (this.view() === 'practice' && this.openId() && !this.text()) this.home();
+    });
+    // the open text's parts are read ahead by the engine's voice, so Listen plays at once; a take of the text comes
+    // first, and so does loading its parts
+    this.readAhead.follow({
+      text: this.text,
+      parts: this.parts,
+      index: this.index,
+      busy: computed(() => this.checkingText() || this.loading()),
     });
   }
 
