@@ -4,8 +4,8 @@ import { Setup } from './setup';
 
 const INFO: EngineInfo = {
   data: '/data',
-  models: { whisper: false, aligner: false },
-  sizes: { whisper: 480_000_000, aligner: 380_000_000 },
+  models: { whisper: false, aligner: false, kokoro: false, 'kokoro-voices': false },
+  sizes: { whisper: 480_000_000, aligner: 380_000_000, kokoro: 92_000_000, 'kokoro-voices': 28_000_000 },
 };
 
 describe('the first launch', () => {

@@ -13,7 +13,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { Engine, EngineInfo, IN_APP } from './core/engine';
+import { Engine, EngineInfo, IN_APP, modelsReady } from './core/engine';
 import { Library } from './core/library';
 import { Menu, MenuAction } from './core/menu';
 import { Session } from './core/session';
@@ -140,7 +140,7 @@ export class App implements OnInit {
     // a talk left from the last run is known too, so the Just talk card is drawn as it will stay
     const [info] = await Promise.all([this.engine.info().catch(() => null), this.talking.asked]);
     clearTimeout(slow);
-    if (info && !(info.models.whisper && info.models.aligner)) {
+    if (info && !modelsReady(info)) {
       this.setup.set(info);
       return;
     }

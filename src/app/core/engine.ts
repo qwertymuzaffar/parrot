@@ -11,15 +11,23 @@ export const TALK_CANCELLED = 'the writing-down was cancelled';
 /** What it says when there is no talk to write down, or its recording has gone (src-tauri/src/talk.rs). */
 export const TALK_GONE = "the talk's recording is no longer there";
 
+/** The files the engine downloads: two speech models, and the reading voice with its voices file. */
+export type ModelKey = 'whisper' | 'aligner' | 'kokoro' | 'kokoro-voices';
+
 export interface EngineInfo {
   data: string;
-  /** whether each speech model is downloaded */
-  models: Record<'whisper' | 'aligner', boolean>;
-  sizes: Record<'whisper' | 'aligner', number>;
+  /** whether each model is downloaded */
+  models: Record<ModelKey, boolean>;
+  sizes: Record<ModelKey, number>;
+}
+
+/** Whether every model is there, so Parrot can start without Setup. */
+export function modelsReady(info: EngineInfo): boolean {
+  return Object.values(info.models).every(Boolean);
 }
 
 export interface ModelProgress {
-  model: 'whisper' | 'aligner';
+  model: ModelKey;
   received: number;
   total: number;
 }

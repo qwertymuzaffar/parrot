@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, resource, signal, viewChild } from '@angular/core';
-import { Engine } from '../core/engine';
+import { Engine, modelsReady } from '../core/engine';
 import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
 import { Sound, voiceLabel } from '../core/sound';
@@ -58,7 +58,7 @@ const MB = 1_000_000;
           @if (info(); as info) {
             <p class="ok">
               <span class="dot"></span>
-              {{ info.models.whisper && info.models.aligner ? 'Ready, on this computer' : 'Speech models not downloaded yet' }}
+              {{ ready(info) ? 'Ready, on this computer' : 'Speech models not downloaded yet' }}
             </p>
           } @else if (health.error()) {
             <p class="bad">The speech engine is not answering.</p>
@@ -294,6 +294,7 @@ export class Settings {
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
   protected readonly label = voiceLabel;
+  protected readonly ready = modelsReady;
   private updates = inject(Updates);
   protected health = resource({ loader: () => this.engine.info() });
   /** the running version, read from the app (no network); none in a plain browser */

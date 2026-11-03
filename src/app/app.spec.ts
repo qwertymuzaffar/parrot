@@ -33,7 +33,11 @@ class SettingsStandIn {
   open() {}
 }
 
-const INFO: EngineInfo = { data: '/data', models: { whisper: true, aligner: true }, sizes: { whisper: 1, aligner: 1 } };
+const INFO: EngineInfo = {
+  data: '/data',
+  models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true },
+  sizes: { whisper: 1, aligner: 1, kokoro: 1, 'kokoro-voices': 1 },
+};
 
 /** a promise and the function that settles it */
 function later<T>() {
@@ -94,7 +98,7 @@ describe('the window as Parrot starts', () => {
     asked.settle();
     await app.update();
     expect(app.shown()).toEqual([]);
-    info.settle({ ...INFO, models: { whisper: false, aligner: true } });
+    info.settle({ ...INFO, models: { whisper: false, aligner: true, kokoro: true, 'kokoro-voices': true } });
     await app.update();
     expect([app.shown(), library.loadTexts.mock.calls.length]).toEqual([['app-setup'], 0]);
   });

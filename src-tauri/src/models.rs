@@ -1,5 +1,5 @@
-//! The two speech models Parrot needs, downloaded into the app's data folder the first time it opens (on Windows,
-//! the local one: see lib.rs).
+//! The models Parrot needs, two for listening and one for reading (with its voices), downloaded into the app's data
+//! folder the first time it opens (on Windows, the local one: see lib.rs).
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
@@ -40,7 +40,26 @@ pub const ALIGNER: Model = Model {
     sha256: "29a3de614cd24ea8b28c9f6d98ff674843db2273e666bcf1444da71d9aec3b7e",
 };
 
-pub const ALL: [&Model; 2] = [&WHISPER, &ALIGNER];
+/// hexgrad/Kokoro-82M (Apache 2.0), the reading voice, as exported to ONNX and quantised to 8 bits by
+/// thewh1teagle/kokoro-onnx (its model-files-v1.0 release)
+pub const KOKORO: Model = Model {
+    key: "kokoro",
+    file: "kokoro-v1.0.int8.onnx",
+    url: "https://github.com/qwertymuzaffar/parrot/releases/download/models-v2/kokoro-v1.0.int8.onnx",
+    bytes: 92_361_271,
+    sha256: "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+};
+
+/// Kokoro's 54 voices, a table of style vectors each (NumPy's npz), from the same release
+pub const VOICES: Model = Model {
+    key: "kokoro-voices",
+    file: "voices-v1.0.bin",
+    url: "https://github.com/qwertymuzaffar/parrot/releases/download/models-v2/voices-v1.0.bin",
+    bytes: 28_214_398,
+    sha256: "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+};
+
+pub const ALL: [&Model; 4] = [&WHISPER, &ALIGNER, &KOKORO, &VOICES];
 
 /// how long a download may receive nothing before it counts as stalled
 const STALL: Duration = Duration::from_secs(30);

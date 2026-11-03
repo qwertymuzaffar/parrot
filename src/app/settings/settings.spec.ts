@@ -34,7 +34,7 @@ describe('Settings: check for updates', () => {
         {
           provide: Engine,
           useValue: {
-            info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }),
+            info: async () => ({ data: '/data', models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true }, sizes: {} }),
             names: async () => names,
             setName: async (word: string, name: boolean) => (names = name ? [...names, word] : names.filter((kept) => kept !== word)),
           },
@@ -176,7 +176,7 @@ describe('Settings when the engine fails', () => {
     return { element, section, click };
   }
 
-  const info = async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} });
+  const info = async () => ({ data: '/data', models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true }, sizes: {} });
   const fails = () => Promise.reject(new EngineError('The speech engine is not running.'));
 
   afterEach(() => localStorage.clear());
@@ -239,7 +239,7 @@ describe('Settings: opening again', () => {
           useValue: {
             info: async () => {
               await waiting;
-              return { data: '/data', models: { whisper: true, aligner: true }, sizes: {} };
+              return { data: '/data', models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true }, sizes: {} };
             },
             trashSize: async () => {
               await waiting;
@@ -292,7 +292,7 @@ describe('Settings: emptying the trash, on the keyboard', () => {
         {
           provide: Engine,
           useValue: {
-            info: async () => ({ data: '/data', models: { whisper: true, aligner: true }, sizes: {} }),
+            info: async () => ({ data: '/data', models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true }, sizes: {} }),
             names: async () => [],
             trashSize: async () => 2_000_000,
             emptyTrash: () => emptied(),
