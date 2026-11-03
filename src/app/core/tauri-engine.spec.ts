@@ -31,7 +31,12 @@ describe('TauriEngine', () => {
     calls = [];
     mockIPC((cmd, args) => {
       calls.push({ cmd, args });
-      if (cmd === 'info') return { data: '/data', models: { whisper: true, aligner: true }, sizes: { whisper: 1, aligner: 2 } };
+      if (cmd === 'info')
+        return {
+          data: '/data',
+          models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true },
+          sizes: { whisper: 1, aligner: 2, kokoro: 3, 'kokoro-voices': 4 },
+        };
       if (cmd === 'attempt') throw 'not found: 20260101-120000';
       // a clip: its rate, then two samples, 1 and -2
       if (cmd === 'clip') return new Uint8Array([0x80, 0xbb, 0, 0, 1, 0, 254, 255]).buffer;

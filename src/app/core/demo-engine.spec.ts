@@ -11,7 +11,7 @@ describe('DemoEngine', () => {
   });
 
   it('has its speech models, so the browser goes straight to the texts', async () => {
-    expect((await new DemoEngine().info()).models).toEqual({ whisper: true, aligner: true });
+    expect((await new DemoEngine().info()).models).toEqual({ whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true });
   });
 
   it('serves sample texts, the last opened first, with the scores of their practised parts', async () => {

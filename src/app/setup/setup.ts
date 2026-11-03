@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
-import { Engine, EngineInfo, ModelProgress } from '../core/engine';
+import { Engine, EngineInfo, ModelKey, ModelProgress } from '../core/engine';
 import { Logo } from '../shared/logo';
 
 // megabytes as Finder and the download page count them
 const MB = 1_000_000;
 
-/** The first launch: download the two speech models, with progress, then Parrot works offline. */
+/** The first launch: download the models, with progress, then Parrot works offline. */
 @Component({
   selector: 'app-setup',
   imports: [Logo],
@@ -14,8 +14,8 @@ const MB = 1_000_000;
       <app-logo [size]="64" />
       <h1>Getting Parrot ready</h1>
       <p class="lead">
-        Parrot listens with two speech models that run on your computer, so your voice never leaves it. They are downloaded once, about
-        {{ totalMb() }} MB, and then Parrot works offline.
+        Parrot listens with two speech models and reads with a third, all running on your computer, so your voice never leaves it. They are
+        downloaded once, about {{ totalMb() }} MB, and then Parrot works offline.
       </p>
 
       <ul class="models">
@@ -42,8 +42,8 @@ const MB = 1_000_000;
         <p class="error">{{ error() }}</p>
       }
       <p class="fine">
-        The models come from Hugging Face (Whisper, MIT licence) and from Parrot's GitHub releases (wav2vec2 trained on Common Voice, Apache
-        2.0).
+        The models come from Hugging Face (Whisper, MIT licence) and from Parrot's GitHub releases (wav2vec2 trained on Common Voice, and
+        the Kokoro voice, both Apache 2.0).
       </p>
     </div>
   `,
@@ -151,23 +151,29 @@ export class Setup {
   protected readonly models = computed(() => {
     const info = this.info();
     const progress = this.progress();
-    const row = (key: 'whisper' | 'aligner', name: string, role: string) => {
-      const got = progress[key];
+    // a row for one file, or for the voice and its voices file together: ready when all are, its bar over all their bytes
+    const row = (keys: ModelKey[], name: string, role: string) => {
+      const done = (key: ModelKey) => info.models[key] || (progress[key] != null && progress[key].received >= progress[key].total);
+      const total = keys.reduce((sum, key) => sum + info.sizes[key], 0);
+      const received = keys.reduce((sum, key) => sum + (info.models[key] ? info.sizes[key] : (progress[key]?.received ?? 0)), 0);
       return {
-        key,
+        key: keys[0],
         name,
         role,
-        ready: info.models[key] || (got != null && got.received >= got.total),
-        mb: Math.round(info.sizes[key] / MB),
-        pct: got ? (100 * got.received) / got.total : 0,
+        ready: keys.every(done),
+        mb: Math.round(total / MB),
+        pct: total ? (100 * received) / total : 0,
       };
     };
     return [
-      row('whisper', 'Speech recognition', 'Whisper small, English: writes down what you said'),
-      row('aligner', 'Pronunciation check', 'wav2vec2, many accents: finds each word and scores its sounds'),
+      row(['whisper'], 'Speech recognition', 'Whisper small, English: writes down what you said'),
+      row(['aligner'], 'Pronunciation check', 'wav2vec2, many accents: finds each word and scores its sounds'),
+      row(['kokoro', 'kokoro-voices'], 'Reading voice', 'Kokoro, with its voices: reads your texts to you'),
     ];
   });
-  protected readonly totalMb = computed(() => Math.round((this.info().sizes.whisper + this.info().sizes.aligner) / MB / 10) * 10);
+  protected readonly totalMb = computed(
+    () => Math.round(Object.values(this.info().sizes).reduce((sum, bytes) => sum + bytes, 0) / MB / 10) * 10,
+  );
 
   protected async start() {
     this.busy.set(true);

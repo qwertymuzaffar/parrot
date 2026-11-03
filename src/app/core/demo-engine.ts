@@ -200,8 +200,8 @@ export class DemoEngine extends Engine {
   async info(): Promise<EngineInfo> {
     return {
       data: 'nowhere: this is the browser demo, which forgets everything on reload',
-      models: { whisper: true, aligner: true },
-      sizes: { whisper: 0, aligner: 0 },
+      models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true },
+      sizes: { whisper: 0, aligner: 0, kokoro: 0, 'kokoro-voices': 0 },
     };
   }
 
