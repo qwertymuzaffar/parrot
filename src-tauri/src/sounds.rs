@@ -25,6 +25,11 @@ static DICT: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
     out
 });
 
+/// The dictionary's sounds of a lowercase word ("things": TH IH1 NG Z), for the voice to read a word the lexicons lack.
+pub fn phones(word: &str) -> Option<&'static [String]> {
+    DICT.get(word).map(Vec::as_slice)
+}
+
 /// respelling and IPA of each vowel
 fn vowel(phone: &str) -> Option<(&'static str, &'static str)> {
     Some(match phone {

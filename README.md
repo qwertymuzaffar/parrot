@@ -72,7 +72,9 @@ Parrot downloads its models once, about 930 MB, then works offline: two to liste
 | wav2vec2 large XLSR-53, English, for the sound scores | 317 MB | [jonatasgrosman/wav2vec2-large-xlsr-53-english](https://huggingface.co/jonatasgrosman/wav2vec2-large-xlsr-53-english), exported to ONNX and quantised to 8 bits; served from this repository's `models-v1` release | Apache 2.0 |
 | Kokoro-82M, the reading voice, with its 54 voices | 92 MB + 28 MB | [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), exported to ONNX and quantised to 8 bits by [thewh1teagle/kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx); served from this repository's `models-v2` release | Apache 2.0 |
 
-The pronunciation dictionary ([CMUdict](https://github.com/cmusphinx/cmudict), BSD-style licence) is built in.
+The pronunciation dictionary ([CMUdict](https://github.com/cmusphinx/cmudict), BSD-style licence) is built in, and so are the
+voice's lexicon ([misaki](https://github.com/hexgrad/misaki), Apache 2.0) and the Naval Research Laboratory's letter-to-sound
+rules (public domain) for a word it lacks.
 
 Texts and recordings are plain files in the app's data folder (macOS:
 `~/Library/Application Support/io.github.qwertymuzaffar.parrot`, Windows: `%APPDATA%\io.github.qwertymuzaffar.parrot`,

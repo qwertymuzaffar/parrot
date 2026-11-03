@@ -9,11 +9,15 @@ mod disk;
 mod edit;
 mod menu;
 mod models;
+mod nrl;
+mod numbers;
+mod phonemes;
 mod sounds;
 mod store;
 mod talk;
 mod text;
 mod updates;
+mod voice;
 
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -28,6 +32,7 @@ pub struct Engine {
     models: PathBuf,
     aligner: Mutex<Option<align::Aligner>>,
     recognizer: Mutex<Option<asr::Recognizer>>,
+    reader: Mutex<Option<voice::Reader>>,
 }
 
 type Shared = Arc<Engine>;
@@ -66,6 +71,26 @@ impl Engine {
         work(guard.as_ref().unwrap())
     }
 
+    /// The reading voice, loaded on first use from its two files; the one that will not load is set aside.
+    fn with_reader<T>(&self, work: impl FnOnce(&mut voice::Reader) -> Result<T, String>) -> Result<T, String> {
+        let mut guard = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        if guard.is_none() {
+            align::environment()?;
+            for model in [&models::KOKORO, &models::VOICES] {
+                if !models::ready(&self.models, model) {
+                    return Err(format!("{} is missing or damaged; restart Parrot to download it again", model.file));
+                }
+            }
+            let reader =
+                voice::Reader::load(&models::path(&self.models, &models::KOKORO), &models::path(&self.models, &models::VOICES)).map_err(|error| {
+                    let model = if error.contains("the voices") { &models::VOICES } else { &models::KOKORO };
+                    models::set_aside(&self.models, model, error)
+                })?;
+            *guard = Some(reader);
+        }
+        work(guard.as_mut().unwrap())
+    }
+
     /// Load a model. A file that is there but will not load (damaged, or not the model) is set aside, so the next start
     /// shows Setup and downloads it again instead of every take failing.
     fn load<M>(&self, model: &models::Model, load: impl FnOnce(&Path) -> Result<M, String>) -> Result<M, String> {
@@ -85,13 +110,17 @@ impl Engine {
         if let Some(mut aligner) = lock_unless_busy(&self.aligner) {
             aligner.take();
         }
+        if let Some(mut reader) = lock_unless_busy(&self.reader) {
+            reader.take();
+        }
     }
 
-    /// Load both models ahead of the first take, so it isn't slow.
+    /// Load the models ahead of the first take and the first reading, so they aren't slow.
     fn warm(&self) {
         if models::ALL.iter().all(|model| models::ready(&self.models, model)) {
             let _ = self.with_aligner(|_| Ok(()));
             let _ = self.with_recognizer(|_| Ok(()));
+            let _ = self.with_reader(|_| Ok(()));
         }
     }
 
@@ -589,6 +618,15 @@ async fn clip(engine: State<'_, Shared>, audio: String, from: f64, to: f64) -> R
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// A reading of `text` by the engine's voice `voice` ("af_heart") at `speed` (1 as it speaks, 0.7 slower), as a WAV
+/// file: 24 kHz, 16-bit, mono.
+#[tauri::command]
+async fn read_aloud(engine: State<'_, Shared>, text: String, voice: String, speed: f32) -> Result<tauri::ipc::Response, String> {
+    let engine = engine.inner().clone();
+    let samples = blocking(move || engine.with_reader(|reader| reader.read(&text, &voice, speed))).await?;
+    Ok(tauri::ipc::Response::new(voice::wav(&samples)))
+}
+
 /// Drop the talk and its recording.
 #[tauri::command]
 async fn talk_discard(talks: State<'_, Arc<talk::Talks>>) -> Result<(), String> {
@@ -660,7 +698,8 @@ pub fn run() {
             #[cfg(not(target_os = "windows"))]
             let models = data.join("models");
             app.manage(Arc::new(talk::Talks::open(data.join("talks"))));
-            let engine = Arc::new(Engine { models, store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None) });
+            let engine =
+                Arc::new(Engine { models, store: Store { data }, aligner: Mutex::new(None), recognizer: Mutex::new(None), reader: Mutex::new(None) });
             let warm = engine.clone();
             std::thread::spawn(move || {
                 // deleted texts are erased for good TRASH_DAYS on, as the confirmation says
@@ -701,6 +740,7 @@ pub fn run() {
             talk_left,
             peaks,
             clip,
+            read_aloud,
             edit_text,
             download_models,
             latest_release,
@@ -865,7 +905,8 @@ mod tests {
         let models = home.join("Library/Application Support/io.github.qwertymuzaffar.parrot/models");
         let data = std::env::temp_dir().join(format!("parrot-e2e-{}", std::process::id()));
         std::fs::create_dir_all(data.join("texts")).unwrap();
-        let engine = Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine =
+            Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None), reader: Mutex::new(None) };
         let text = "The northern lights are one of the most beautiful things you can see in the night sky.";
         let added = engine.store.add(text, Some("Lights".into()), Some("sentences".into())).unwrap();
         let id = added.id;
@@ -909,7 +950,8 @@ mod tests {
         let home = PathBuf::from(std::env::var("HOME").unwrap());
         let models = home.join("Library/Application Support/io.github.qwertymuzaffar.parrot/models");
         let data = std::env::temp_dir().join(format!("parrot-e2e-talk-{}", std::process::id()));
-        let engine = Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine =
+            Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None), reader: Mutex::new(None) };
         engine.warm();
         let talks = talk::Talks::open(data.join("talks"));
         {
@@ -998,8 +1040,13 @@ mod tests {
         std::fs::create_dir_all(&models).unwrap();
         // the full size, so it passes for ready, but all zeros: not a whisper model
         std::fs::File::create(models::path(&models, &models::WHISPER)).unwrap().set_len(models::WHISPER.bytes).unwrap();
-        let engine =
-            Engine { store: Store { data: models.clone() }, models: models.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: models.clone() },
+            models: models.clone(),
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         let error = engine.with_recognizer(|_| Ok(())).unwrap_err();
         assert!(error.contains("damaged; restart Parrot"), "{error}");
         assert!(!models::ready(&models, &models::WHISPER), "Setup offers the download again");
@@ -1012,7 +1059,13 @@ mod tests {
     #[test]
     fn a_take_of_a_deleted_text_is_not_kept() {
         let data = std::env::temp_dir().join(format!("parrot-deleted-take-{}", std::process::id()));
-        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: data.clone() },
+            models: data.clone(),
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         let id = engine.store.add("Hello there.", None, None).unwrap().id;
         let tone: Vec<f32> =
             (0..16000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
@@ -1033,7 +1086,13 @@ mod tests {
     #[test]
     fn a_take_of_words_edited_while_it_was_scored_is_not_kept() {
         let data = std::env::temp_dir().join(format!("parrot-edited-take-{}", std::process::id()));
-        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: data.clone() },
+            models: data.clone(),
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         let tone: Vec<f32> =
             (0..16000).map(|sample_index| 0.5 * (2.0 * std::f32::consts::PI * 220.0 * sample_index as f32 / 16000.0).sin()).collect();
         let wav_path = data.join("take.wav");
@@ -1067,7 +1126,13 @@ mod tests {
     #[test]
     fn a_saved_try_keeps_its_long_pauses() {
         let data = std::env::temp_dir().join(format!("parrot-pauses-{}", std::process::id()));
-        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: data.clone() },
+            models: data.clone(),
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         let id = engine.store.add("Well, I think so.", None, None).unwrap().id;
         let part = engine.store.part_dir(&id, "Well, I think so.").unwrap();
         let tone: Vec<f32> =
@@ -1089,7 +1154,13 @@ mod tests {
     #[test]
     fn a_take_of_exact_zeros_says_the_microphone_was_withheld() {
         let data = std::env::temp_dir().join(format!("parrot-withheld-{}", std::process::id()));
-        let engine = Engine { store: Store { data: data.clone() }, models: data.clone(), aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: data.clone() },
+            models: data.clone(),
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         let id = engine.store.add("Hello there.", None, None).unwrap().id;
         let part = engine.store.part_dir(&id, "Hello there.").unwrap();
         let take = |name: &str, samples: Vec<f32>| {
@@ -1120,7 +1191,13 @@ mod tests {
     #[test]
     fn a_panic_in_a_model_does_not_stop_the_next_take() {
         let models = std::env::temp_dir().join(format!("parrot-poisoned-{}", std::process::id()));
-        let engine = Engine { store: Store { data: models.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None) };
+        let engine = Engine {
+            store: Store { data: models.clone() },
+            models,
+            aligner: Mutex::new(None),
+            recognizer: Mutex::new(None),
+            reader: Mutex::new(None),
+        };
         // a panic while the model is in use poisons its lock
         std::thread::scope(|scope| {
             let _ = scope
