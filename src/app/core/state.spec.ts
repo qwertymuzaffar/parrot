@@ -192,6 +192,9 @@ class FakeEngine extends Engine {
   async clip() {
     return null;
   }
+  async reading(): Promise<never> {
+    throw new EngineError('no voice of its own here');
+  }
   /** the talk under way: the samples fed in, and what writing it down gives (or why it fails) */
   talk: { rate: number; samples: number; written: boolean } | null = null;
   nextTalk: Talk | string | null = null;

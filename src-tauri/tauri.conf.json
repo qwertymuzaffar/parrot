@@ -42,7 +42,8 @@
         "enable": true,
         "scope": [
           "$APPDATA/texts/**",
-          "$APPDATA/talks/**"
+          "$APPDATA/talks/**",
+          "$APPDATA/readings/**"
         ]
       }
     }

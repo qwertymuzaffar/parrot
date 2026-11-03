@@ -307,6 +307,11 @@ export class DemoEngine extends Engine {
     return 0;
   }
 
+  // the demo reads with the system voice: it has no engine to make a reading
+  async reading(): Promise<never> {
+    throw new EngineError("Reading with Parrot's own voice needs the desktop app");
+  }
+
   async openDataFolder(): Promise<never> {
     throw new EngineError('Opening the data folder needs the desktop app');
   }

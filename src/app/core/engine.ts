@@ -32,6 +32,13 @@ export interface ModelProgress {
   total: number;
 }
 
+/** A reading of a text by one of the engine's voices: its WAV file (a path in the data folder, for audioUrl) and when
+ * each word of the text is said in it, start and end in seconds. */
+export interface Reading {
+  audio: string;
+  words: [number, number][];
+}
+
 /** What the interface asks of the speech engine. The app provides the one it runs on (app.config.ts):
  * TauriEngine inside the desktop app, DemoEngine in a plain browser. */
 export abstract class Engine {
@@ -127,6 +134,10 @@ export abstract class Engine {
   /** A stretch of a recording, from `from` to `to` seconds, as 16-bit mono; null when the interface is to decode
    * the recording itself. */
   abstract clip(audio: string, from: number, to: number): Promise<{ rate: number; samples: Int16Array } | null>;
+
+  /** A reading of `text` by the engine's voice `voice` ("af_heart") at `speed` (1 as it speaks, 0.75 slower), with the
+   * time of each word in it. */
+  abstract reading(text: string, voice: string, speed: number): Promise<Reading>;
 
   /** A saved recording's path inside the data folder. */
   protected relative(path: string) {
