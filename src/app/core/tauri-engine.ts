@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { convertFileSrc, invoke, InvokeArgs, InvokeOptions } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Engine, EngineError, EngineInfo, ModelProgress, Reading } from './engine';
+import { Engine, EngineError, EngineInfo, KOKORO_VOICES, ModelProgress, Reading } from './engine';
 import { Activity, Attempt, AttemptSummary, KeptTalk, LeftTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** How long the window waits for a command (ms). Generous, so that only a command that will never answer (a deadlock,
@@ -247,6 +247,10 @@ export class TauriEngine extends Engine {
   reading(text: string, voice: string, speed: number) {
     const patience = new Patience(READING_LIMIT_MS + 500 * text.split(' ').length);
     return this.call<Reading>('reading', { text, voice, speed }, undefined, patience);
+  }
+
+  voices() {
+    return KOKORO_VOICES;
   }
 
   audioUrl(path: string) {

@@ -312,6 +312,10 @@ export class DemoEngine extends Engine {
     throw new EngineError("Reading with Parrot's own voice needs the desktop app");
   }
 
+  voices() {
+    return [];
+  }
+
   async openDataFolder(): Promise<never> {
     throw new EngineError('Opening the data folder needs the desktop app');
   }

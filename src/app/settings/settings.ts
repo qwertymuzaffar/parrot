@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injec
 import { Engine, modelsReady } from '../core/engine';
 import { Names } from '../core/names';
 import { errorMessage } from '../core/library';
-import { Sound, voiceLabel } from '../core/sound';
+import { Sound } from '../core/sound';
 import { Theme, ThemeChoice } from '../core/theme';
 import { UpdateCheck, Updates } from '../core/updates';
 import { focusIn, refocus } from '../shared/focus';
@@ -28,9 +28,9 @@ const MB = 1_000_000;
             The voice that reads your texts and single words. Voices marked “online” send the text (never your recordings) to the provider.
           </p>
           <div class="row">
-            <select class="field" [value]="sound.voiceName()" (change)="sound.setVoice($any($event.target).value)">
-              @for (voice of sound.voices(); track voice.name) {
-                <option [value]="voice.name">{{ label(voice) }}</option>
+            <select class="field" [value]="sound.voice()?.id ?? ''" (change)="sound.setVoice($any($event.target).value)">
+              @for (voice of sound.voices(); track voice.id) {
+                <option [value]="voice.id">{{ voice.label }}</option>
               }
             </select>
             <button class="btn" (click)="sound.speak('Parrot reads it, you repeat it.', 1, null)">
@@ -293,7 +293,6 @@ export class Settings {
   private keepTrash = viewChild<ElementRef<HTMLElement>>('keepTrash');
   private injector = inject(Injector);
   protected readonly themes: ThemeChoice[] = ['system', 'light', 'dark'];
-  protected readonly label = voiceLabel;
   protected readonly ready = modelsReady;
   private updates = inject(Updates);
   protected health = resource({ loader: () => this.engine.info() });

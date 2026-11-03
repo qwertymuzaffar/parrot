@@ -39,7 +39,10 @@ describe('Settings: check for updates', () => {
             setName: async (word: string, name: boolean) => (names = name ? [...names, word] : names.filter((kept) => kept !== word)),
           },
         },
-        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+        {
+          provide: Sound,
+          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+        },
       ],
     });
     const fixture = TestBed.createComponent(Settings);
@@ -156,7 +159,10 @@ describe('Settings when the engine fails', () => {
       providers: [
         { provide: Updates, useValue: new FakeUpdates() },
         { provide: Engine, useValue: { ...engine, names: async () => [] } },
-        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+        {
+          provide: Sound,
+          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+        },
       ],
     });
     const fixture = TestBed.createComponent(Settings);
@@ -248,7 +254,10 @@ describe('Settings: opening again', () => {
             names: async () => [],
           },
         },
-        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+        {
+          provide: Sound,
+          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+        },
       ],
     });
     const fixture = TestBed.createComponent(Settings);
@@ -298,7 +307,10 @@ describe('Settings: emptying the trash, on the keyboard', () => {
             emptyTrash: () => emptied(),
           },
         },
-        { provide: Sound, useValue: { voices: signal([]), voiceName: signal(''), canSpeak: signal(true), setVoice() {}, speak() {} } },
+        {
+          provide: Sound,
+          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+        },
       ],
     });
     const fixture = TestBed.createComponent(Settings);

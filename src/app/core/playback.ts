@@ -5,7 +5,6 @@ import { Attempt } from './models';
 import { readSetting, writeSetting } from './settings';
 import { Sound } from './sound';
 import { bare } from './split';
-import { forVoice, wordForVoice } from './voice-text';
 
 /** The speeds the reference can be read at. */
 export const RATES = [0.6, 0.75, 1];
@@ -27,6 +26,9 @@ export class Playback {
   readonly paused = this.sound.paused.asReadonly();
   /** the reference was asked for, and the system has no voice to read it */
   readonly voiceMissing = this.sound.voiceMissing.asReadonly();
+  /** the engine is making the reading asked for, and why it could not make the last one */
+  readonly preparing = this.sound.preparing.asReadonly();
+  readonly failure = this.sound.failure.asReadonly();
   /** the word being spoken: in the reference line and in your own */
   readonly nowRef = signal<number | null>(null);
   readonly nowMine = signal<number | null>(null);
@@ -46,11 +48,7 @@ export class Playback {
 
   /** The reference reading of a part, with the word being spoken lit up. */
   playReference(text: string) {
-    // the text as the voice should have it (abbreviations spelled out), with where each word starts in it
-    const { spoken, starts } = forVoice(text);
-    return this.sound
-      .speak(spoken, this.rate(), 'ref', (charIndex) => this.nowRef.set(starts.findLastIndex((start) => start <= charIndex)))
-      .then(() => this.nowRef.set(null));
+    return this.sound.speak(text, this.rate(), 'ref', (wordIndex) => this.nowRef.set(wordIndex)).then(() => this.nowRef.set(null));
   }
 
   playMine(attempt: Attempt) {
@@ -94,7 +92,7 @@ export class Playback {
   sayWord(word: string, slow = false) {
     if (!word) return;
     this.run++;
-    this.sound.speak(wordForVoice(bare(word)), slow ? 0.55 : 0.85, null);
+    this.sound.sayWord(bare(word), slow ? 0.55 : 0.85);
   }
 
   /** A word as it was said, cut out of my take. */

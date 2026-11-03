@@ -195,6 +195,9 @@ class FakeEngine extends Engine {
   async reading(): Promise<never> {
     throw new EngineError('no voice of its own here');
   }
+  voices() {
+    return [];
+  }
   /** the talk under way: the samples fed in, and what writing it down gives (or why it fails) */
   talk: { rate: number; samples: number; written: boolean } | null = null;
   nextTalk: Talk | string | null = null;
@@ -295,8 +298,10 @@ class FakeSound {
   readonly playing = signal<Track | null>(null);
   readonly paused = signal(false);
   readonly voiceMissing = signal(false);
+  readonly preparing = signal(false);
+  readonly failure = signal<string | null>(null);
   log: string[] = [];
-  onWord?: (charIndex: number) => void;
+  onWord?: (wordIndex: number) => void;
   onTime?: (seconds: number) => void;
   private finish: (() => void) | null = null;
 
@@ -306,9 +311,12 @@ class FakeSound {
     this.playing.set(track);
     return new Promise<void>((resolve) => (this.finish = resolve));
   }
-  speak(text: string, rate = 1, track: Track | null = 'ref', onWord?: (charIndex: number) => void) {
+  speak(text: string, rate = 1, track: Track | null = 'ref', onWord?: (wordIndex: number) => void) {
     this.onWord = onWord;
     return this.start(`speak "${text}" at ${rate}`, track);
+  }
+  sayWord(word: string, rate: number) {
+    return this.start(`speak "${word}" at ${rate}`, null);
   }
   play(url: string, track: Track, onTime?: (seconds: number) => void) {
     this.onTime = onTime;
@@ -958,7 +966,8 @@ describe('the practice state', () => {
       app.setRate(0.75);
       const done = app.playReference();
       expect(sound.log).toEqual(['speak "How are you?" at 0.75']);
-      sound.onWord?.(4);
+      // the voice reaches the second word
+      sound.onWord?.(1);
       expect(app.nowRef()).toBe(1);
       sound.end();
       await done;
@@ -1043,18 +1052,16 @@ describe('the practice state', () => {
       expect([sound.log.length, app.nowMine()]).toEqual([2, 2]);
     });
 
-    it('spells out an abbreviation for the voice, still lighting the word as written, and says a lone I as a word', () => {
+    it('hands the voice the part as written, lighting the word it reaches, and a word alone without its punctuation', () => {
       const playback = TestBed.inject(Playback);
       void playback.playReference('so I asked the GSA product owner');
-      expect(sound.log).toEqual(['speak "so I asked the G S A product owner" at 1']);
-      // the voice reaches the S of "G S A": the word lit is GSA, the fifth as written
-      sound.onWord?.(17);
+      expect(sound.log).toEqual(['speak "so I asked the GSA product owner" at 1']);
+      // the voice reaches GSA, the fifth word
+      sound.onWord?.(4);
       expect(playback.nowRef()).toBe(4);
-      sound.onWord?.(21);
-      expect(playback.nowRef()).toBe(5);
       playback.sayWord('I');
       playback.sayWord('GSA,');
-      expect(sound.log.slice(1)).toEqual(['speak "I." at 0.85', 'speak "G S A" at 0.85']);
+      expect(sound.log.slice(1)).toEqual(['speak "I" at 0.85', 'speak "GSA" at 0.85']);
     });
 
     it('says a word alone, slower on request, without its punctuation', () => {
