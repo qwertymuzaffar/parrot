@@ -300,6 +300,8 @@ class FakeSound {
   readonly voiceMissing = signal(false);
   readonly preparing = signal(false);
   readonly failure = signal<string | null>(null);
+  /** a system voice: nothing is read ahead */
+  readonly voice = signal(null);
   log: string[] = [];
   onWord?: (wordIndex: number) => void;
   onTime?: (seconds: number) => void;

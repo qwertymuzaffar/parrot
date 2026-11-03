@@ -125,8 +125,9 @@ impl Engine {
         }
     }
 
-    /// A reading of `text` by the engine's voice `voice` at `speed`, kept in the data folder with the time of each word
-    /// (readings.rs): the voice reads it, then the aligner places its words in the reading, the text being known.
+    /// A reading of `text` by the engine's voice `voice` at `speed`: the one kept in the data folder (readings.rs), or
+    /// made now and kept, with the time of each word: the voice reads it, then the aligner places its words in the
+    /// reading, the text being known.
     fn reading(&self, text: &str, voice: &str, speed: f32) -> Result<readings::Reading, String> {
         let text = store::norm(text);
         if !store::has_words(&text) {
@@ -138,10 +139,16 @@ impl Engine {
         if !(0.5..=1.5).contains(&speed) {
             return Err(format!("the voice can't read at {speed} times its speed"));
         }
+        let place = readings::place(voice, &text, speed);
+        if let Some(reading) = readings::load(&self.store.data, &place) {
+            return Ok(reading);
+        }
         let samples = self.with_reader(|reader| reader.read(&text, voice, speed))?;
         let pcm = audio::Pcm { samples, rate: voice::RATE };
         let words = self.word_times(&pcm, &text)?;
-        readings::save(&self.store.data, &readings::place(voice, &text, speed), &pcm, &words)
+        let reading = readings::save(&self.store.data, &place, &pcm, &words)?;
+        readings::trim(&self.store.data, readings::CAP);
+        Ok(reading)
     }
 
     /// When each word of `text` is said in its reading `pcm`: the aligner places them (a single word is the whole
@@ -430,11 +437,16 @@ async fn trash_size(engine: State<'_, Shared>) -> Result<u64, String> {
     blocking(move || Ok(engine.store.trash_size())).await
 }
 
-/// Erase the deleted texts now rather than TRASH_DAYS on; what is left in the trash, in bytes.
+/// Erase the deleted texts now rather than TRASH_DAYS on, and the readings kept (made again as texts are opened);
+/// what is left in the trash, in bytes.
 #[tauri::command]
 async fn empty_trash(engine: State<'_, Shared>) -> Result<u64, String> {
     let engine = engine.inner().clone();
-    blocking(move || Ok(engine.store.empty_trash())).await
+    blocking(move || {
+        readings::clear(&engine.store.data);
+        Ok(engine.store.empty_trash())
+    })
+    .await
 }
 
 /// What the window says when the file manager won't start: Settings shows the data folder's path just above.
@@ -1275,6 +1287,10 @@ mod tests {
         // "things", the ninth word, is said in the middle of the reading
         let [from, to] = reading.words[8];
         assert!(from > seconds * 0.3 && to < seconds * 0.7, "things at {from}-{to} of {seconds}");
+        // asked again, the reading kept comes back as it is, at once
+        let started = std::time::Instant::now();
+        assert_eq!(engine.reading(text, "af_heart", 1.0).unwrap(), reading);
+        assert!(started.elapsed().as_millis() < 100, "kept, not made again");
         // a word alone is the whole reading
         let word = engine.reading("things", "af_heart", 0.85).unwrap();
         assert_eq!((word.words.len(), word.words[0][0]), (1, 0.0));
