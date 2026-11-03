@@ -122,7 +122,9 @@ fn chunks(phonemes: &str, limit: usize) -> Vec<String> {
     cut(phonemes, limit, &[".!?;…", ",", " "]).into_iter().filter(|piece| !piece.trim().is_empty()).collect()
 }
 
-/// A WAV file of the samples: 24 kHz, 16-bit, mono.
+/// A WAV file of the samples: 24 kHz, 16-bit, mono, for the tests' sample readings (the app keeps its readings as
+/// files, readings.rs).
+#[cfg(test)]
 pub fn wav(samples: &[f32]) -> Vec<u8> {
     let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut cursor = std::io::Cursor::new(Vec::with_capacity(44 + samples.len() * 2));

@@ -12,6 +12,7 @@ mod models;
 mod nrl;
 mod numbers;
 mod phonemes;
+mod readings;
 mod sounds;
 mod store;
 mod talk;
@@ -122,6 +123,36 @@ impl Engine {
             let _ = self.with_recognizer(|_| Ok(()));
             let _ = self.with_reader(|_| Ok(()));
         }
+    }
+
+    /// A reading of `text` by the engine's voice `voice` at `speed`, kept in the data folder with the time of each word
+    /// (readings.rs): the voice reads it, then the aligner places its words in the reading, the text being known.
+    fn reading(&self, text: &str, voice: &str, speed: f32) -> Result<readings::Reading, String> {
+        let text = store::norm(text);
+        if !store::has_words(&text) {
+            return Err("there is nothing to read".into());
+        }
+        if !readings::valid_voice(voice) {
+            return Err(format!("Parrot has no voice named {voice}"));
+        }
+        if !(0.5..=1.5).contains(&speed) {
+            return Err(format!("the voice can't read at {speed} times its speed"));
+        }
+        let samples = self.with_reader(|reader| reader.read(&text, voice, speed))?;
+        let pcm = audio::Pcm { samples, rate: voice::RATE };
+        let words = self.word_times(&pcm, &text)?;
+        readings::save(&self.store.data, &readings::place(voice, &text, speed), &pcm, &words)
+    }
+
+    /// When each word of `text` is said in its reading `pcm`: the aligner places them (a single word is the whole
+    /// reading); one it can't place takes the gap between its neighbours.
+    fn word_times(&self, pcm: &audio::Pcm, text: &str) -> Result<Vec<[f64; 2]>, String> {
+        let seconds = pcm.seconds();
+        if text.split_whitespace().count() == 1 {
+            return Ok(vec![[0.0, readings::round3(seconds)]]);
+        }
+        let placed = self.with_aligner(|aligner| aligner.align(&audio::resample(pcm, 16000), text))?;
+        Ok(readings::fill(&placed.iter().map(|word| word.t).collect::<Vec<_>>(), seconds))
     }
 
     /// Save a take (a WAV file), score it against `part` and keep the result next to it.
@@ -618,13 +649,12 @@ async fn clip(engine: State<'_, Shared>, audio: String, from: f64, to: f64) -> R
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// A reading of `text` by the engine's voice `voice` ("af_heart") at `speed` (1 as it speaks, 0.7 slower), as a WAV
-/// file: 24 kHz, 16-bit, mono.
+/// A reading of `text` by the engine's voice `voice` ("af_heart") at `speed` (1 as it speaks, 0.75 slower), kept in the
+/// data folder as a WAV file (24 kHz, 16-bit, mono) with the time of each word in it.
 #[tauri::command]
-async fn read_aloud(engine: State<'_, Shared>, text: String, voice: String, speed: f32) -> Result<tauri::ipc::Response, String> {
+async fn reading(engine: State<'_, Shared>, text: String, voice: String, speed: f32) -> Result<readings::Reading, String> {
     let engine = engine.inner().clone();
-    let samples = blocking(move || engine.with_reader(|reader| reader.read(&text, &voice, speed))).await?;
-    Ok(tauri::ipc::Response::new(voice::wav(&samples)))
+    blocking(move || engine.reading(&text, &voice, speed)).await
 }
 
 /// Drop the talk and its recording.
@@ -740,7 +770,7 @@ pub fn run() {
             talk_left,
             peaks,
             clip,
-            read_aloud,
+            reading,
             edit_text,
             download_models,
             latest_release,
@@ -1219,6 +1249,40 @@ mod tests {
         let busy = Mutex::new(Some(2));
         let _held = busy.lock().unwrap();
         assert!(lock_unless_busy(&busy).is_none());
+    }
+
+    /// A reading through the engine, with the time of each word: needs the voice, its voices and the aligner in
+    /// ~/.cache/parrot-build; skipped elsewhere (CI).
+    #[test]
+    fn a_reading_comes_with_the_time_of_each_word() {
+        let models = PathBuf::from(std::env::var("HOME").unwrap()).join(".cache/parrot-build");
+        if ![&models::KOKORO, &models::VOICES, &models::ALIGNER].iter().all(|model| models::ready(&models, model)) {
+            eprintln!("skipped: no voice or aligner in {}", models.display());
+            return;
+        }
+        let data = std::env::temp_dir().join(format!("parrot-reading-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        let engine =
+            Engine { store: Store { data: data.clone() }, models, aligner: Mutex::new(None), recognizer: Mutex::new(None), reader: Mutex::new(None) };
+        let text = "The northern lights are one of the most beautiful things you can see in the night sky.";
+        let reading = engine.reading(text, "af_heart", 1.0).unwrap();
+        assert_eq!(reading.audio, format!("readings/af_heart/{}-1.wav", store::sha(text)));
+        let pcm = audio::read_wav_file(&data.join(&reading.audio)).unwrap();
+        let seconds = pcm.seconds();
+        assert_eq!((pcm.rate, reading.words.len()), (voice::RATE, 17));
+        assert!(reading.words.iter().all(|[from, to]| 0.0 <= *from && from < to && *to <= seconds + 0.01), "{:?}", reading.words);
+        assert!(reading.words.windows(2).all(|pair| pair[0][1] <= pair[1][0] + 1e-6), "in order: {:?}", reading.words);
+        // "things", the ninth word, is said in the middle of the reading
+        let [from, to] = reading.words[8];
+        assert!(from > seconds * 0.3 && to < seconds * 0.7, "things at {from}-{to} of {seconds}");
+        // a word alone is the whole reading
+        let word = engine.reading("things", "af_heart", 0.85).unwrap();
+        assert_eq!((word.words.len(), word.words[0][0]), (1, 0.0));
+        assert!(word.words[0][1] > 0.2);
+        assert!(engine.reading("Hello.", "../texts", 1.0).is_err());
+        assert!(engine.reading("...", "af_heart", 1.0).is_err());
+        assert!(engine.reading("Hello.", "af_heart", 3.0).is_err());
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     #[test]

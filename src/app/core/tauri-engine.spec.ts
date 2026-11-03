@@ -64,6 +64,7 @@ describe('TauriEngine', () => {
     await engine.trashSize();
     await engine.emptyTrash();
     await engine.openDataFolder();
+    await engine.reading('Hello there.', 'af_heart', 0.75);
     expect(calls).toEqual([
       { cmd: 'texts', args: {} },
       { cmd: 'add_text', args: { text: 'Hello there.', title: 'Greeting', mode: 'sentences' } },
@@ -80,6 +81,7 @@ describe('TauriEngine', () => {
       { cmd: 'trash_size', args: {} },
       { cmd: 'empty_trash', args: {} },
       { cmd: 'open_data_folder', args: {} },
+      { cmd: 'reading', args: { text: 'Hello there.', voice: 'af_heart', speed: 0.75 } },
     ]);
   });
 

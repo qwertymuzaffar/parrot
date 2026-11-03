@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { convertFileSrc, invoke, InvokeArgs, InvokeOptions } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Engine, EngineError, EngineInfo, ModelProgress } from './engine';
+import { Engine, EngineError, EngineInfo, ModelProgress, Reading } from './engine';
 import { Activity, Attempt, AttemptSummary, KeptTalk, LeftTalk, Mode, PartScore, SoundsLike, Talk, TalkProgress, TextItem } from './models';
 
 /** How long the window waits for a command (ms). Generous, so that only a command that will never answer (a deadlock,
@@ -14,6 +14,9 @@ export const CHECK_LIMIT_MS = 60_000;
 export const PROGRESS_LIMIT_MS = 120_000;
 /** a text's words changed: its tries are scored again one by one, and a try can be a long take */
 export const EDIT_LIMIT_MS = 300_000;
+/** a reading: this, and half a second a word on top (the voice takes about a third of the reading's own length to
+ * make it, and the aligner then places its words) */
+export const READING_LIMIT_MS = 60_000;
 /** what the window says when it stops waiting */
 export const NO_ANSWER = "The speech engine hasn't answered. Try again, or restart Parrot.";
 
@@ -239,6 +242,11 @@ export class TauriEngine extends Engine {
   async clip(audio: string, from: number, to: number) {
     const bytes = await this.call<ArrayBuffer>('clip', { audio, from, to });
     return { rate: new DataView(bytes).getUint32(0, true), samples: new Int16Array(bytes, 4) };
+  }
+
+  reading(text: string, voice: string, speed: number) {
+    const patience = new Patience(READING_LIMIT_MS + 500 * text.split(' ').length);
+    return this.call<Reading>('reading', { text, voice, speed }, undefined, patience);
   }
 
   audioUrl(path: string) {

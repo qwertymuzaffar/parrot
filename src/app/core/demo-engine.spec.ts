@@ -46,6 +46,8 @@ describe('DemoEngine', () => {
     expect(off[1].letters!.slice(0, 3)).toEqual([0.2, 0.2, 0.62]);
     expect((await engine.soundsLike('Things,')).ipa).toBe('/ˈθɪŋz/');
     expect(await engine.soundsLike('constructor')).toEqual({});
+    // and no voice of its own: the demo reads with the system voice
+    await expect((engine as Engine).reading('Things.', 'af_heart', 1)).rejects.toBeInstanceOf(EngineError);
   });
 
   it('keeps texts added, changed and deleted while the page is open', async () => {
