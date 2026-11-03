@@ -385,3 +385,70 @@ describe('Settings: emptying the trash, on the keyboard', () => {
     expect(document.activeElement).toBe(document.body);
   });
 });
+
+describe('Settings: the voices', () => {
+  const HEART = { id: 'kokoro:af_heart', label: 'Heart, Kokoro, US', engine: { id: 'af_heart', name: 'Heart', place: 'US' } };
+  const GEORGE = { id: 'kokoro:bm_george', label: 'George, Kokoro, UK', engine: { id: 'bm_george', name: 'George', place: 'UK' } };
+  const AVA = { id: 'Ava (Premium)', label: 'Ava, Premium, US', system: { name: 'Ava (Premium)' } as SpeechSynthesisVoice };
+  const sound = {
+    voices: signal([HEART, GEORGE, AVA]),
+    voice: signal<typeof HEART | typeof AVA | null>(HEART),
+    failure: signal<string | null>(null),
+    canSpeak: signal(true),
+    setVoice: vi.fn(),
+    speak: vi.fn(),
+  };
+
+  async function settings() {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Updates, useValue: new FakeUpdates() },
+        {
+          provide: Engine,
+          useValue: {
+            info: async () => ({ data: '/data', models: { whisper: true, aligner: true, kokoro: true, 'kokoro-voices': true }, sizes: {} }),
+            names: async () => [],
+            trashSize: async () => 0,
+          },
+        },
+        { provide: Sound, useValue: sound },
+      ],
+    });
+    const fixture = TestBed.createComponent(Settings);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    return { fixture, element, select: element.querySelector('select')! };
+  }
+
+  beforeEach(() => {
+    sound.voice.set(HEART);
+    sound.failure.set(null);
+    sound.canSpeak.set(true);
+  });
+
+  it("lists Parrot's own voices under their heading, then the system's, the one that reads chosen", async () => {
+    const { select } = await settings();
+    const groups = [...select.querySelectorAll('optgroup')].map((group) => [
+      group.label,
+      [...group.querySelectorAll('option')].map((option) => option.textContent!.trim()),
+    ]);
+    expect(groups).toEqual([
+      ["Parrot's voices", ['Heart, Kokoro, US', 'George, Kokoro, UK']],
+      ['System voices', ['Ava, Premium, US']],
+    ]);
+    expect(select.value).toBe('kokoro:af_heart');
+    select.value = 'Ava (Premium)';
+    select.dispatchEvent(new Event('change'));
+    expect(sound.setVoice).toHaveBeenCalledWith('Ava (Premium)');
+  });
+
+  it('says why the engine could not read, where it says when there is no voice at all', async () => {
+    sound.failure.set("Parrot's disk is full: free up some space, then try again");
+    const { element, fixture } = await settings();
+    expect(element.querySelector('[role=alert]')!.textContent!.trim()).toBe("Parrot's disk is full: free up some space, then try again");
+    sound.failure.set(null);
+    sound.canSpeak.set(false);
+    await fixture.whenStable();
+    expect(element.querySelector('.bad')!.textContent!.trim()).toBe("No voice found. Add an English voice in your system's settings.");
+  });
+});

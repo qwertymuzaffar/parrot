@@ -16,7 +16,9 @@ Transcription runs on your device (Whisper, offline): your voice is never upload
 ## How it works
 
 - **Listen.** Your text is split into sentences or short parts, and each one is read to you at the speed you choose,
-  with the word being spoken lit up.
+  with the word being spoken lit up. The voice is Parrot's own ([Kokoro](https://huggingface.co/hexgrad/Kokoro-82M),
+  offline, the same on every computer; eight of its voices to choose from in Settings), or any English voice your
+  system has. A text is read ahead as you open it, so Listen plays at once.
 - **Record.** Read the part aloud. Parrot checks it two ways:
   - **Speech recognition** ([Whisper](https://github.com/openai/whisper) through
     [whisper.cpp](https://github.com/ggerganov/whisper.cpp)) writes down what it heard, without knowing the text. A word
@@ -131,7 +133,7 @@ ORT_LIB_LOCATION=$PWD/.ort-intel/lib ORT_PREFER_DYNAMIC_LINK=1 MACOSX_DEPLOYMENT
 
 ## Roadmap
 
-1. A natural offline reference voice (Kokoro) for every text, which also makes the sound scores more exact.
+1. Sound scores measured against the reference reading, now that every text has one.
 2. More languages than English.
 
 ## Website
