@@ -147,6 +147,7 @@ page.
 
 MIT. The models keep their own licences (above). The app builds in [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
 (MIT), [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT), the [ort](https://github.com/pykeio/ort) crate
-(MIT) and CMUdict (BSD-style); their notices are in [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES), which ships with every
-installer. The app and the website use the
+(MIT), CMUdict (BSD-style), [misaki](https://github.com/hexgrad/misaki)'s lexicon and rules (Apache 2.0) and the
+Naval Research Laboratory's letter-to-sound rules (public domain); their notices are in
+[`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES), which ships with every installer. The app and the website use the
 [DM Sans](https://github.com/googlefonts/dm-fonts) font (SIL Open Font License, `docs/fonts/OFL-dm-sans.txt`).
