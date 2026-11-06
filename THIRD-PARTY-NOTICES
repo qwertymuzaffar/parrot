@@ -177,6 +177,44 @@ Fine-tuned model by Jonatas Grosman; base model wav2vec2-large-xlsr-53 by Facebo
 (Meta). Training data: Mozilla Common Voice (CC0).
 
 ===============================================================================
+Kokoro-82M model and voices
+===============================================================================
+
+Downloaded on first launch from this repository's models-v2 release.
+hexgrad/Kokoro-82M (https://huggingface.co/hexgrad/Kokoro-82M), the voice that
+reads a text aloud, with its 54 voices, licensed under the Apache License,
+Version 2.0 (full text at the end of this file). Modified: exported to ONNX,
+quantised to 8 bits, and the voices packed into one file, by
+thewh1teagle/kokoro-onnx (https://github.com/thewh1teagle/kokoro-onnx).
+
+The table of the symbols the model reads is built into the app
+(src-tauri/assets/kokoro-vocab.json).
+
+===============================================================================
+misaki (lexicons and English rules)
+===============================================================================
+
+Built into the app (src-tauri/assets/us_gold.json.gz and us_silver.json.gz, and
+the rules in src-tauri/src/phonemes.rs). https://github.com/hexgrad/misaki
+
+misaki by hexgrad, the phonemizer Kokoro was trained with, licensed under the
+Apache License, Version 2.0 (full text at the end of this file). Modified for
+Parrot: its two US English lexicons are compressed, and its English rules are
+rewritten in Rust, without the part-of-speech tagger and the espeak-ng fallback.
+
+===============================================================================
+NRL letter-to-sound rules
+===============================================================================
+
+Built into the app (src-tauri/assets/nrl-rules.json), for a word no dictionary
+has. The rules of H. S. Elovitz, R. Johnson, A. McHugh and J. E. Shore,
+"Automatic Translation of English Text to Phonetics by Means of Letter-to-Sound
+Rules", Naval Research Laboratory Report 7948 (1976), a work of the United
+States government, as transcribed in greg-kennedy/p5-NRL-TextToPhoneme
+(https://github.com/greg-kennedy/p5-NRL-TextToPhoneme), which is released into
+the public domain (the Unlicense).
+
+===============================================================================
 Lucide icons
 ===============================================================================
 
@@ -249,7 +287,7 @@ or Apache-2.0).
 Apache License, Version 2.0
 ===============================================================================
 
-For the wav2vec2 model above.
+For the wav2vec2 model, the Kokoro model and misaki above.
 
                                  Apache License
                            Version 2.0, January 2004
