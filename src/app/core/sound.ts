@@ -86,6 +86,8 @@ export class Sound {
   readonly paused = signal(false);
   /** the engine is making the reading asked for: the interface says it is getting ready */
   readonly preparing = signal(false);
+  /** the voice is being tried in Settings (see sample): what plays, or is made, is Settings' to show, not the text's */
+  readonly sampling = signal(false);
   /** why the engine could not make the last reading asked of it, in plain words; gone with the next it could */
   readonly failure = signal<string | null>(null);
   /** whether there is a voice to read with (some systems list theirs a moment after start) */
@@ -172,6 +174,14 @@ export class Sound {
     // the text as the system voice should have it (abbreviations spelled out), with where each word starts in it
     const { spoken, starts } = forVoice(text);
     return this.synthesize(spoken, rate, track, onWord && ((charIndex) => onWord(starts.findLastIndex((start) => start <= charIndex))));
+  }
+
+  /** A line read by the voice chosen, to hear it in Settings: until it ends or anything else plays, it is a sample. */
+  sample(text: string): Promise<void> {
+    const done = this.speak(text, 1, null);
+    // with no voice at all nothing was begun, and nothing would end it
+    this.sampling.set(this.onEnd != null);
+    return done;
   }
 
   /** A word said on its own (its punctuation already gone), as it should sound. */
@@ -340,5 +350,6 @@ export class Sound {
     this.playing.set(null);
     this.paused.set(false);
     this.preparing.set(false);
+    this.sampling.set(false);
   }
 }

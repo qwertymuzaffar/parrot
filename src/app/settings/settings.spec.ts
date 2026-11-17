@@ -41,7 +41,15 @@ describe('Settings: check for updates', () => {
         },
         {
           provide: Sound,
-          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+          useValue: {
+            voices: signal([]),
+            voice: signal(null),
+            failure: signal(null),
+            canSpeak: signal(true),
+            sampling: signal(false),
+            preparing: signal(false),
+            setVoice() {},
+          },
         },
       ],
     });
@@ -161,7 +169,15 @@ describe('Settings when the engine fails', () => {
         { provide: Engine, useValue: { ...engine, names: async () => [] } },
         {
           provide: Sound,
-          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+          useValue: {
+            voices: signal([]),
+            voice: signal(null),
+            failure: signal(null),
+            canSpeak: signal(true),
+            sampling: signal(false),
+            preparing: signal(false),
+            setVoice() {},
+          },
         },
       ],
     });
@@ -256,7 +272,15 @@ describe('Settings: opening again', () => {
         },
         {
           provide: Sound,
-          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+          useValue: {
+            voices: signal([]),
+            voice: signal(null),
+            failure: signal(null),
+            canSpeak: signal(true),
+            sampling: signal(false),
+            preparing: signal(false),
+            setVoice() {},
+          },
         },
       ],
     });
@@ -309,7 +333,15 @@ describe('Settings: emptying the trash, on the keyboard', () => {
         },
         {
           provide: Sound,
-          useValue: { voices: signal([]), voice: signal(null), failure: signal(null), canSpeak: signal(true), setVoice() {}, speak() {} },
+          useValue: {
+            voices: signal([]),
+            voice: signal(null),
+            failure: signal(null),
+            canSpeak: signal(true),
+            sampling: signal(false),
+            preparing: signal(false),
+            setVoice() {},
+          },
         },
       ],
     });
@@ -395,8 +427,11 @@ describe('Settings: the voices', () => {
     voice: signal<typeof HEART | typeof AVA | null>(HEART),
     failure: signal<string | null>(null),
     canSpeak: signal(true),
+    sampling: signal(false),
+    preparing: signal(false),
     setVoice: vi.fn(),
-    speak: vi.fn(),
+    sample: vi.fn(),
+    stop: vi.fn(),
   };
 
   async function settings() {
@@ -424,6 +459,35 @@ describe('Settings: the voices', () => {
     sound.voice.set(HEART);
     sound.failure.set(null);
     sound.canSpeak.set(true);
+    sound.sampling.set(false);
+    sound.preparing.set(false);
+    sound.sample.mockClear();
+    sound.stop.mockClear();
+  });
+
+  it('Try says it is getting the voice ready, then offers to stop it, in Settings itself', async () => {
+    const { element, fixture } = await settings();
+    const button = element.querySelector<HTMLButtonElement>('button.try')!;
+    const shown = () => [button.textContent!.trim(), !!button.querySelector('.spinner'), button.getAttribute('aria-busy')];
+    expect(shown()).toEqual(['Try', false, null]);
+    button.click();
+    expect(sound.sample).toHaveBeenCalledWith('Parrot reads it, you repeat it.');
+    // the engine is making the line: a spinner on the button, which still says Try
+    sound.sampling.set(true);
+    sound.preparing.set(true);
+    await fixture.whenStable();
+    expect(shown()).toEqual(['Try', true, 'true']);
+    // it plays: the button stops it
+    sound.preparing.set(false);
+    await fixture.whenStable();
+    expect(shown()).toEqual(['Stop', false, null]);
+    button.click();
+    expect([sound.stop.mock.calls.length, sound.sample.mock.calls.length]).toEqual([1, 1]);
+    // a reading the text asked for is not the button's to show
+    sound.sampling.set(false);
+    sound.preparing.set(true);
+    await fixture.whenStable();
+    expect(shown()).toEqual(['Try', false, null]);
   });
 
   it("lists Parrot's own voices under their heading, then the system's, the one that reads chosen", async () => {
