@@ -45,8 +45,15 @@ const MB = 1_000_000;
                 </optgroup>
               }
             </select>
-            <button class="btn" (click)="sound.speak('Parrot reads it, you repeat it.', 1, null)">
-              <app-icon name="play" [size]="14" /> Try
+            <!-- one width whatever it says, so the menu beside it keeps its own -->
+            <button class="btn try" [attr.aria-busy]="sound.sampling() && sound.preparing() ? 'true' : null" (click)="tryVoice()">
+              @if (!sound.sampling()) {
+                <app-icon name="play" [size]="14" /> Try
+              } @else if (sound.preparing()) {
+                <span class="spinner"></span> Try
+              } @else {
+                <app-icon name="stop" [size]="14" /> Stop
+              }
             </button>
           </div>
           @if (!sound.canSpeak()) {
@@ -244,6 +251,22 @@ const MB = 1_000_000;
         min-width: 0;
       }
     }
+    .try {
+      min-width: 78px;
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--line);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
     .seg {
       margin-top: 8px;
     }
@@ -340,6 +363,11 @@ export class Settings {
     } catch (error) {
       this.unopened.set(typeof error === 'string' ? error : `Parrot couldn't open your browser; the page is at ${url}`);
     }
+  }
+  /** Try the voice chosen with a line; asked again while it is made or read, it stops. */
+  protected tryVoice() {
+    if (this.sound.sampling()) this.sound.stop();
+    else void this.sound.sample('Parrot reads it, you repeat it.');
   }
   /** the bytes in the trash: only the desktop app has one */
   protected trash = resource({ loader: () => this.engine.trashSize() });

@@ -1,4 +1,4 @@
-import { inject, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, signal } from '@angular/core';
 import { Clips } from './clips';
 import { Engine } from './engine';
 import { Attempt } from './models';
@@ -26,8 +26,9 @@ export class Playback {
   readonly paused = this.sound.paused.asReadonly();
   /** the reference was asked for, and the system has no voice to read it */
   readonly voiceMissing = this.sound.voiceMissing.asReadonly();
-  /** the engine is making the reading asked for, and why it could not make the last one */
-  readonly preparing = this.sound.preparing.asReadonly();
+  /** the engine is making the reading asked for here (not the line Settings tries a voice with: that is Settings' to
+   * show), and why it could not make the last one */
+  readonly preparing = computed(() => this.sound.preparing() && !this.sound.sampling());
   readonly failure = this.sound.failure.asReadonly();
   /** the word being spoken: in the reference line and in your own */
   readonly nowRef = signal<number | null>(null);

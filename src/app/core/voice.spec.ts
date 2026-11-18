@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { Engine, EngineError, EngineVoice, KOKORO_VOICES, Reading } from './engine';
+import { Playback } from './playback';
 import { Sound, speedFor, voiceLabel, wordAt } from './sound';
 
 /** A system voice, as speech synthesis lists it. */
@@ -258,6 +259,23 @@ describe('the reference voice', () => {
         [0.6, 1.0],
       ];
       expect([wordAt(words, 0), wordAt(words, 0.09), wordAt(words, 0.55), wordAt(words, 0.58), wordAt(words, 2)]).toEqual([-1, 0, 0, 1, 1]);
+    });
+
+    it('a line tried in Settings is a sample until it ends, is stopped or something else is read', async () => {
+      const sound = fresh();
+      const playback = TestBed.inject(Playback);
+      const tried = sound.sample('Parrot reads it, you repeat it.');
+      // being made: Settings shows it, the text's own caption does not
+      expect([sound.sampling(), sound.preparing(), playback.preparing(), sound.playing()]).toEqual([true, true, false, null]);
+      await settle();
+      expect([sound.sampling(), sound.preparing(), audios[0].paused]).toEqual([true, false, false]);
+      sound.stop();
+      await tried;
+      expect(sound.sampling()).toBe(false);
+      // a reading of the text begun while a sample is made takes over, and is the text's to show
+      sound.sample('Parrot reads it, you repeat it.');
+      sound.speak('Hello there.');
+      expect([sound.sampling(), sound.preparing(), playback.preparing()]).toEqual([false, true, true]);
     });
 
     it('reads a word alone and the speeds the readings are made at, no slower than the slowest Listen speed', async () => {
